@@ -314,17 +314,19 @@ Phase 2.5 (Watchdog / Stability) ✅ DONE
   ├── ✅ Periodic WebView reload (configurable interval)
   └── ✅ ACTION_RELOAD_WEBVIEW broadcast wired to MainActivity
 
-Phase 3 (Brightness + Schedule) ⬜ NOT STARTED
-  ├── ⬜ BrightnessController (light sensor) — stub only
-  ├── ⬜ ScreenController (wake/sleep) — stub only
-  ├── ⬜ ScheduleManager (AlarmManager) — stub only
-  └── ⬜ Settings screen (5x tap gesture detection done, SettingsActivity stub only)
+Phase 3 (Brightness + Schedule) ✅ DONE
+  ├── ✅ BrightnessController (light sensor + EMA smoothing + log lux-to-brightness curve)
+  ├── ✅ ScreenController (wake lock ON, DevicePolicyManager.lockNow OFF)
+  ├── ✅ ScheduleManager (AlarmManager, daily ON/OFF, overnight support, immediate state apply)
+  ├── ✅ SettingsActivity (PIN dialog, all config fields, debug info, exit kiosk)
+  └── ✅ Wired into MainActivity (brightness + schedule start/stop lifecycle)
 
-Phase 4 (HA Integration) ⬜ NOT STARTED
-  ├── ⬜ HAWebSocketClient (connect + auth) — stub only
-  ├── ⬜ HAStateManager (publish state, receive commands) — stub only
-  ├── ⬜ Virtual light entity config in HA
-  └── ⬜ End-to-end: HA automation toggles tablet screen
+Phase 4 (HA Integration) ✅ DONE
+  ├── ✅ HAWebSocketClient (OkHttp WebSocket, auth, subscribe_trigger, call_service, auto-reconnect with backoff)
+  ├── ✅ HAStateManager (publishes screen state + brightness, receives on/off/brightness commands)
+  ├── ✅ Wired into MainActivity lifecycle (start/stop with HA config from AppConfig)
+  ├── ⬜ Virtual light entity config in HA (user must configure HA side — see plan docs)
+  └── ⬜ End-to-end testing on real device + HA instance
 
 Phase 5 (Polish + Post-MVP) ⬜ NOT STARTED
   ├── ⬜ Night mode overlay
@@ -336,7 +338,7 @@ Phase 5 (Polish + Post-MVP) ⬜ NOT STARTED
 ### Current state (build verified)
 
 - **Build:** `./gradlew assembleDebug` passes (deprecation warnings only — expected for Android 8 immersive API)
-- **Next step:** Phase 3 — implement BrightnessController, ScreenController, ScheduleManager, SettingsActivity
+- **Next step:** Phase 5 — polish (night mode overlay, anti burn-in, motion detection, sensor publishing)
 
 ---
 

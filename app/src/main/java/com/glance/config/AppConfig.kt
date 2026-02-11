@@ -37,6 +37,14 @@ class AppConfig(context: Context) {
         get() = prefs.getBoolean(KEY_HA_ENABLED, false)
         set(value) = prefs.edit().putBoolean(KEY_HA_ENABLED, value).apply()
 
+    var haEntityScreen: String
+        get() = prefs.getString(KEY_HA_ENTITY_SCREEN, DEFAULT_ENTITY_SCREEN) ?: DEFAULT_ENTITY_SCREEN
+        set(value) = prefs.edit().putString(KEY_HA_ENTITY_SCREEN, value).apply()
+
+    var haEntityBrightness: String
+        get() = prefs.getString(KEY_HA_ENTITY_BRIGHTNESS, DEFAULT_ENTITY_BRIGHTNESS) ?: DEFAULT_ENTITY_BRIGHTNESS
+        set(value) = prefs.edit().putString(KEY_HA_ENTITY_BRIGHTNESS, value).apply()
+
     // --- Brightness ---
 
     var minBrightness: Int
@@ -99,6 +107,8 @@ class AppConfig(context: Context) {
         private const val KEY_HA_URL = "ha_url"
         private const val KEY_HA_TOKEN = "ha_token"
         private const val KEY_HA_ENABLED = "ha_enabled"
+        private const val KEY_HA_ENTITY_SCREEN = "ha_entity_screen"
+        private const val KEY_HA_ENTITY_BRIGHTNESS = "ha_entity_brightness"
         private const val KEY_MIN_BRIGHTNESS = "min_brightness"
         private const val KEY_MAX_BRIGHTNESS = "max_brightness"
         private const val KEY_AUTO_BRIGHTNESS = "auto_brightness"
@@ -112,5 +122,7 @@ class AppConfig(context: Context) {
         private const val KEY_AUTO_ROTATE_INTERVAL = "auto_rotate_interval"
 
         private const val DEFAULT_DASHBOARD_URL = "https://example.com"
+        private const val DEFAULT_ENTITY_SCREEN = "input_boolean.tablet_screen"
+        private const val DEFAULT_ENTITY_BRIGHTNESS = "input_number.tablet_brightness"
     }
 }

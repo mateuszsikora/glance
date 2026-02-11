@@ -11,11 +11,16 @@ import android.util.Log
 import android.view.View
 import android.view.WindowManager
 import androidx.appcompat.app.AppCompatActivity
+import com.glance.brightness.BrightnessController
 import com.glance.dashboard.DashboardPagerAdapter
 import com.glance.dashboard.WebViewFragment
 import com.glance.databinding.ActivityMainBinding
 import com.glance.kiosk.KioskService
 import com.glance.kiosk.LockTaskHelper
+import com.glance.screen.ScheduleManager
+import com.glance.screen.ScreenController
+import com.glance.ha.HAStateManager
+import com.glance.settings.SettingsActivity
 import com.glance.watchdog.WatchdogService
 
 class MainActivity : AppCompatActivity() {
@@ -23,6 +28,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private lateinit var pagerAdapter: DashboardPagerAdapter
     private val handler = Handler(Looper.getMainLooper())
+
+    private lateinit var brightnessController: BrightnessController
+    private lateinit var screenController: ScreenController
+    private lateinit var scheduleManager: ScheduleManager
+    private lateinit var haStateManager: HAStateManager
 
     private var settingsTapCount = 0
     private var lastSettingsTapTime = 0L
@@ -48,6 +58,9 @@ class MainActivity : AppCompatActivity() {
         setupSettingsGesture()
         startServices()
         registerReloadReceiver()
+        setupBrightness()
+        setupScreenSchedule()
+        setupHAIntegration()
     }
 
     override fun onResume() {
@@ -149,7 +162,32 @@ class MainActivity : AppCompatActivity() {
 
     private fun openSettings() {
         Log.i(TAG, "Settings gesture triggered")
-        // TODO: Launch SettingsActivity with PIN check
+        startActivity(Intent(this, SettingsActivity::class.java))
+    }
+
+    // --- Brightness ---
+
+    private fun setupBrightness() {
+        val config = GlanceApp.instance.appConfig
+        brightnessController = BrightnessController(this, config)
+        brightnessController.start(window)
+    }
+
+    // --- Screen schedule ---
+
+    private fun setupScreenSchedule() {
+        val config = GlanceApp.instance.appConfig
+        screenController = ScreenController(this)
+        scheduleManager = ScheduleManager(this, config, screenController)
+        scheduleManager.start()
+    }
+
+    // --- HA Integration ---
+
+    private fun setupHAIntegration() {
+        val config = GlanceApp.instance.appConfig
+        haStateManager = HAStateManager(this, config, screenController, brightnessController)
+        haStateManager.start()
     }
 
     // --- Reload WebViews ---
@@ -184,6 +222,10 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
         unregisterReceiver(reloadReceiver)
+        if (::haStateManager.isInitialized) haStateManager.stop()
+        if (::brightnessController.isInitialized) brightnessController.stop()
+        if (::scheduleManager.isInitialized) scheduleManager.stop()
+        if (::screenController.isInitialized) screenController.release()
         super.onDestroy()
     }
 
