@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">HA Kiosk</string>
+    <string name="kiosk_notification_channel">Kiosk Service</string>
+    <string name="watchdog_notification_channel">Watchdog Service</string>
+    <string name="notification_kiosk_running">Kiosk mode active</string>
+    <string name="notification_watchdog_running">Watchdog monitoring active</string>
+    <string name="webview_error_title">Connection Error</string>
+    <string name="webview_error_message">Unable to load dashboard. Retrying...</string>
+</resources>
