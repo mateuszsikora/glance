@@ -33,6 +33,22 @@ class AppConfig(context: Context) {
             prefs.edit().putString(KEY_DASHBOARD_URLS, value.joinToString(SEPARATOR)).apply()
         }
 
+    /**
+     * Additional exact origins that a dashboard may use for top-level authentication redirects.
+     * The configured dashboard origin is always allowed and does not need to be repeated here.
+     */
+    var dashboardAllowedOrigins: List<String>
+        get() = prefs.getString(KEY_DASHBOARD_ALLOWED_ORIGINS, "")
+            .orEmpty()
+            .split(SEPARATOR)
+            .map(String::trim)
+            .filter(String::isNotBlank)
+        set(value) {
+            prefs.edit()
+                .putString(KEY_DASHBOARD_ALLOWED_ORIGINS, value.joinToString(SEPARATOR))
+                .apply()
+        }
+
     // --- Home Assistant MQTT integration ---
 
     var mqttEnabled: Boolean
@@ -156,6 +172,16 @@ class AppConfig(context: Context) {
             }
         }
 
+    /** Last requested logical state, including the non-Device-Owner soft-off fallback. */
+    var requestedScreenOn: Boolean
+        get() = prefs.getBoolean(KEY_REQUESTED_SCREEN_ON, true)
+        set(value) {
+            if (prefs.getBoolean(KEY_REQUESTED_SCREEN_ON, true) == value) return
+            check(prefs.edit().putBoolean(KEY_REQUESTED_SCREEN_ON, value).commit()) {
+                "Unable to persist requested screen state"
+            }
+        }
+
     // --- Settings PIN ---
 
     val hasSettingsPin: Boolean
@@ -247,6 +273,7 @@ class AppConfig(context: Context) {
         private const val SEPARATOR = "|"
 
         private const val KEY_DASHBOARD_URLS = "dashboard_urls"
+        private const val KEY_DASHBOARD_ALLOWED_ORIGINS = "dashboard_allowed_origins"
         private const val KEY_MQTT_ENABLED = "mqtt_enabled"
         private const val KEY_MQTT_BROKER_HOST = "mqtt_broker_host"
         private const val KEY_MQTT_BROKER_PORT = "mqtt_broker_port"
@@ -272,6 +299,7 @@ class AppConfig(context: Context) {
         private const val KEY_PIN_FAILED_ATTEMPTS = "pin_failed_attempts"
         private const val KEY_PIN_LOCK_UNTIL = "pin_lock_until"
         private const val KEY_KIOSK_SUSPENDED = "kiosk_suspended"
+        private const val KEY_REQUESTED_SCREEN_ON = "requested_screen_on"
         private const val KEY_AUTO_ROTATE = "auto_rotate"
         private const val KEY_AUTO_ROTATE_INTERVAL = "auto_rotate_interval"
 

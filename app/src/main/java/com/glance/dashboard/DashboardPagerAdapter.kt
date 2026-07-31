@@ -6,12 +6,13 @@ import androidx.viewpager2.adapter.FragmentStateAdapter
 
 class DashboardPagerAdapter(
     activity: FragmentActivity,
-    private val urls: List<String>
+    private val urls: List<String>,
+    private val allowedNavigationOrigins: List<String>
 ) : FragmentStateAdapter(activity) {
 
     override fun getItemCount(): Int = urls.size
 
     override fun createFragment(position: Int): Fragment {
-        return WebViewFragment.newInstance(urls[position])
+        return WebViewFragment.newInstance(urls[position], allowedNavigationOrigins)
     }
 }

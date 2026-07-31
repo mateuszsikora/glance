@@ -58,6 +58,12 @@ permissive `res/xml/network_security_config.xml` that allows cleartext traffic. 
 it, `targetSdk 34` would block the dashboard WebView. The MQTT connection is configured
 separately and normally uses plain TCP port `1883` on the trusted local network.
 
+Top-level WebView navigation stays on the configured dashboard origin by default. If a
+dashboard uses OAuth or SSO on another host, add each trusted authentication origin under
+`Allowed login origins` in Glance settings. Paths are ignored for this check; scheme, host,
+and effective port must match exactly. Leave the list empty for dashboards with same-origin
+authentication.
+
 ## Home Assistant MQTT discovery
 
 Glance exposes the tablet screen as a native brightness-capable MQTT light. It publishes

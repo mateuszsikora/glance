@@ -64,6 +64,28 @@ class AppConfigTest {
         assertTrue(AppConfig(context).isKioskSuspended)
     }
 
+    @Test
+    fun requestedScreenStateSurvivesControllerRecreation() {
+        val config = AppConfig(context)
+        assertTrue(config.requestedScreenOn)
+
+        config.requestedScreenOn = false
+
+        assertFalse(AppConfig(context).requestedScreenOn)
+    }
+
+    @Test
+    fun storesAdditionalDashboardOrigins() {
+        val origins = listOf(
+            "https://login.example.test",
+            "https://identity.example.test:8443/oauth"
+        )
+
+        AppConfig(context).dashboardAllowedOrigins = origins
+
+        assertEquals(origins, AppConfig(context).dashboardAllowedOrigins)
+    }
+
     companion object {
         private const val PREFS_NAME = "glance_config"
     }

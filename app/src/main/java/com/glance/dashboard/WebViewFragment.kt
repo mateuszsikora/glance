@@ -23,6 +23,7 @@ class WebViewFragment : Fragment() {
     private val binding get() = _binding!!
 
     private var url: String = ""
+    private var allowedNavigationOrigins: List<String> = emptyList()
     private var isLoaded = false
     private var mainFrameError = false
     private var rendererGone = false
@@ -38,6 +39,9 @@ class WebViewFragment : Fragment() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         url = arguments?.getString(ARG_URL) ?: ""
+        allowedNavigationOrigins = arguments
+            ?.getStringArrayList(ARG_ALLOWED_NAVIGATION_ORIGINS)
+            .orEmpty()
     }
 
     override fun onCreateView(
@@ -88,9 +92,12 @@ class WebViewFragment : Fragment() {
                     request: WebResourceRequest?
                 ): Boolean {
                     if (request?.isForMainFrame != true) return false
-                    val destination = DashboardOrigin.from(request.url?.toString())
-                    val configured = DashboardOrigin.from(url)
-                    if (destination == null || destination != configured) {
+                    if (!DashboardNavigationPolicy.isAllowed(
+                            destinationUrl = request.url?.toString(),
+                            configuredUrl = this@WebViewFragment.url,
+                            additionalOriginUrls = allowedNavigationOrigins
+                        )
+                    ) {
                         Log.w(TAG, "Blocked navigation outside configured dashboard origin")
                         mainFrameError = true
                         isLoaded = false
@@ -187,7 +194,7 @@ class WebViewFragment : Fragment() {
         }
         url = newUrl
         isLoaded = false
-        binding.webview.loadUrl(url)
+        _binding?.webview?.loadUrl(url)
     }
 
     fun reload() {
@@ -195,8 +202,9 @@ class WebViewFragment : Fragment() {
             activity?.recreate()
             return
         }
+        val currentBinding = _binding ?: return
         isLoaded = false
-        binding.webview.reload()
+        currentBinding.webview.reload()
     }
 
     fun performHealthCheck() {
@@ -212,18 +220,24 @@ class WebViewFragment : Fragment() {
             val currentUrl = _binding?.webview?.url
             val healthy = ready &&
                 !mainFrameError &&
-                DashboardOrigin.from(url) == DashboardOrigin.from(currentUrl)
+                DashboardNavigationPolicy.isAllowed(
+                    destinationUrl = currentUrl,
+                    configuredUrl = url,
+                    additionalOriginUrls = allowedNavigationOrigins
+                )
             onHealthCheckCallback?.invoke(healthy)
         }
     }
 
     private fun showError() {
-        binding.errorContainer.visibility = View.VISIBLE
+        _binding?.errorContainer?.visibility = View.VISIBLE
     }
 
     private fun scheduleRetry() {
-        binding.webview.removeCallbacks(retryRunnable)
-        binding.webview.postDelayed(retryRunnable, RETRY_DELAY_MS)
+        _binding?.webview?.apply {
+            removeCallbacks(retryRunnable)
+            postDelayed(retryRunnable, RETRY_DELAY_MS)
+        }
     }
 
     override fun onDestroyView() {
@@ -244,12 +258,20 @@ class WebViewFragment : Fragment() {
     companion object {
         private const val TAG = "WebViewFragment"
         private const val ARG_URL = "url"
+        private const val ARG_ALLOWED_NAVIGATION_ORIGINS = "allowed_navigation_origins"
         private const val RETRY_DELAY_MS = 10_000L
 
-        fun newInstance(url: String): WebViewFragment {
+        fun newInstance(
+            url: String,
+            allowedNavigationOrigins: List<String> = emptyList()
+        ): WebViewFragment {
             return WebViewFragment().apply {
                 arguments = Bundle().apply {
                     putString(ARG_URL, url)
+                    putStringArrayList(
+                        ARG_ALLOWED_NAVIGATION_ORIGINS,
+                        ArrayList(allowedNavigationOrigins)
+                    )
                 }
             }
         }

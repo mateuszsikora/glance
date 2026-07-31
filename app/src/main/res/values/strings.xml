@@ -9,6 +9,8 @@
     <string name="webview_error_message">Unable to load dashboard. Retrying…</string>
     <string name="settings_title">Glance Settings</string>
     <string name="dashboard_urls_label">Dashboard URLs (one per line)</string>
+    <string name="dashboard_allowed_origins_label">Allowed login origins (optional, one URL per line)</string>
+    <string name="dashboard_allowed_origins_help">Add only trusted OAuth/SSO origins that the dashboard must open during login.</string>
     <string name="auto_rotate_dashboards">Auto-rotate dashboards</string>
     <string name="rotate_interval_hint">Rotate interval (seconds)</string>
     <string name="brightness_title">Brightness</string>

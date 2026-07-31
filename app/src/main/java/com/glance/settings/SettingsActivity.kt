@@ -37,6 +37,7 @@ class SettingsActivity : AppCompatActivity() {
 
     // Views
     private lateinit var editDashboardUrls: EditText
+    private lateinit var editDashboardAllowedOrigins: EditText
     private lateinit var switchAutoRotate: SwitchCompat
     private lateinit var editAutoRotateInterval: EditText
     private lateinit var switchAutoBrightness: SwitchCompat
@@ -175,6 +176,7 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun bindViews() {
         editDashboardUrls = findViewById(R.id.editDashboardUrls)
+        editDashboardAllowedOrigins = findViewById(R.id.editDashboardAllowedOrigins)
         switchAutoRotate = findViewById(R.id.switchAutoRotate)
         editAutoRotateInterval = findViewById(R.id.editAutoRotateInterval)
         switchAutoBrightness = findViewById(R.id.switchAutoBrightness)
@@ -196,6 +198,7 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun loadConfig() {
         editDashboardUrls.setText(config.dashboardUrls.joinToString("\n"))
+        editDashboardAllowedOrigins.setText(config.dashboardAllowedOrigins.joinToString("\n"))
         switchAutoRotate.isChecked = config.autoRotateEnabled
         editAutoRotateInterval.setText(config.autoRotateIntervalSeconds.toString())
         switchAutoBrightness.isChecked = config.autoBrightnessEnabled
@@ -245,6 +248,20 @@ class SettingsActivity : AppCompatActivity() {
         }
         if (urls.any { !ConfigValidator.isValidDashboardUrl(it) }) {
             Toast.makeText(this, "Dashboard URLs must use http:// or https://", Toast.LENGTH_LONG).show()
+            return
+        }
+
+        val allowedOrigins = editDashboardAllowedOrigins.text.toString()
+            .lines()
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .distinct()
+        if (allowedOrigins.any { !ConfigValidator.isValidDashboardUrl(it) }) {
+            Toast.makeText(
+                this,
+                "Allowed login origins must use http:// or https://",
+                Toast.LENGTH_LONG
+            ).show()
             return
         }
 
@@ -373,6 +390,7 @@ class SettingsActivity : AppCompatActivity() {
 
         // All validation and credential encryption have succeeded. Persist the validated values.
         config.dashboardUrls = urls
+        config.dashboardAllowedOrigins = allowedOrigins
         config.autoRotateEnabled = switchAutoRotate.isChecked
         config.autoRotateIntervalSeconds = requireNotNull(rotateInterval)
         config.autoBrightnessEnabled = switchAutoBrightness.isChecked
@@ -520,6 +538,7 @@ class SettingsActivity : AppCompatActivity() {
             appendLine("Memory: ${usedMem}MB / ${totalMem}MB")
             appendLine("Uptime: ${uptimeHours}h ${uptimeMinutes}m")
             appendLine("Dashboard URLs: ${config.dashboardUrls.size}")
+            appendLine("Allowed login origins: ${config.dashboardAllowedOrigins.size}")
             appendLine("Schedule: ${if (config.scheduleEnabled) "${config.screenOnTime}-${config.screenOffTime}" else "disabled"}")
             appendLine("Exact alarms: ${canScheduleExactAlarms()}")
             appendLine("Auto brightness: ${config.autoBrightnessEnabled}")

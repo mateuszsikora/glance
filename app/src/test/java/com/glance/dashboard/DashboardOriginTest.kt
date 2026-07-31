@@ -31,4 +31,35 @@ class DashboardOriginTest {
         assertNull(DashboardOrigin.from("example.test/dashboard"))
         assertNull(DashboardOrigin.from("file:///tmp/dashboard.html"))
     }
+
+    @Test
+    fun navigationAllowsConfiguredAndExplicitAuthenticationOrigins() {
+        val configured = "http://ha.example.test:8123/dashboard"
+        val authenticationOrigins = listOf("https://login.example.test/oauth/start")
+
+        assertEquals(
+            true,
+            DashboardNavigationPolicy.isAllowed(
+                "http://ha.example.test:8123/auth/authorize",
+                configured,
+                authenticationOrigins
+            )
+        )
+        assertEquals(
+            true,
+            DashboardNavigationPolicy.isAllowed(
+                "https://login.example.test/callback",
+                configured,
+                authenticationOrigins
+            )
+        )
+        assertEquals(
+            false,
+            DashboardNavigationPolicy.isAllowed(
+                "https://untrusted.example.test/",
+                configured,
+                authenticationOrigins
+            )
+        )
+    }
 }

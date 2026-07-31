@@ -43,6 +43,35 @@
             android:padding="12dp"
             android:layout_marginBottom="16dp" />
 
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/dashboard_allowed_origins_label"
+            android:labelFor="@id/editDashboardAllowedOrigins"
+            android:textColor="#FFB0B0B0"
+            android:textSize="14sp"
+            android:layout_marginBottom="4dp" />
+
+        <EditText
+            android:id="@+id/editDashboardAllowedOrigins"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minLines="2"
+            android:gravity="top"
+            android:inputType="textMultiLine|textUri"
+            android:background="#FF2A2A2A"
+            android:textColor="#FFFFFFFF"
+            android:padding="12dp"
+            android:layout_marginBottom="4dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/dashboard_allowed_origins_help"
+            android:textColor="#FFB0B0B0"
+            android:textSize="12sp"
+            android:layout_marginBottom="16dp" />
+
         <!-- Auto-rotate -->
         <LinearLayout
             android:layout_width="match_parent"
