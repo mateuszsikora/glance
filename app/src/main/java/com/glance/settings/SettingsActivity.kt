@@ -23,6 +23,8 @@ import com.glance.R
 import com.glance.config.AppConfig
 import com.glance.kiosk.KioskService
 import com.glance.kiosk.LockTaskHelper
+import com.glance.screen.ScheduleManager
+import com.glance.watchdog.WatchdogService
 import com.google.android.material.button.MaterialButton
 
 /**
@@ -53,11 +55,16 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var editPin: EditText
     private lateinit var textDebugInfo: TextView
     private var awaitingExactAlarmAccess = false
+    private var mqttPasswordUnreadable = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         config = GlanceApp.instance.appConfig
+        awaitingExactAlarmAccess = savedInstanceState?.getBoolean(
+            STATE_AWAITING_EXACT_ALARM_ACCESS,
+            false
+        ) ?: false
 
         if (config.hasSettingsPin) {
             showPinDialog()
@@ -89,8 +96,8 @@ class SettingsActivity : AppCompatActivity() {
             .setPositiveButton("OK") { _, _ ->
                 if (config.verifySettingsPin(pinInput.text.toString())) {
                     config.clearPinFailures()
-                    if (config.usesLegacyDefaultPin) {
-                        showCreatePinDialog("Replace the default PIN")
+                    if (config.needsLegacyPinUpgrade) {
+                        showCreatePinDialog("Replace the legacy PIN")
                     } else {
                         initSettingsUI()
                     }
@@ -207,7 +214,13 @@ class SettingsActivity : AppCompatActivity() {
         )
         editMqttBrokerPort.setText(config.mqttBrokerPort.toString())
         editMqttUsername.setText(config.mqttUsername)
-        editMqttPassword.setText(config.mqttPassword)
+        val storedPassword = config.readMqttPassword()
+        mqttPasswordUnreadable = storedPassword.decryptionFailed
+        editMqttPassword.setText(storedPassword.value)
+        if (mqttPasswordUnreadable) {
+            editMqttPassword.error =
+                "Stored password cannot be decrypted. Enter the MQTT password again."
+        }
         editMqttDeviceName.setText(config.mqttDeviceName)
         editMqttDiscoveryPrefix.setText(config.mqttDiscoveryPrefix)
         editPin.setText("")
@@ -217,7 +230,10 @@ class SettingsActivity : AppCompatActivity() {
         saveConfig(allowInexactSchedule = false)
     }
 
-    private fun saveConfig(allowInexactSchedule: Boolean) {
+    private fun saveConfig(
+        allowInexactSchedule: Boolean,
+        allowClearUnreadablePassword: Boolean = false
+    ) {
         val urls = editDashboardUrls.text.toString()
             .lines()
             .map { it.trim() }
@@ -318,12 +334,41 @@ class SettingsActivity : AppCompatActivity() {
             return
         }
 
-        // Encrypt the only fallible value before updating the remaining SharedPreferences fields.
-        try {
-            config.mqttPassword = editMqttPassword.text.toString()
-        } catch (e: Exception) {
-            Toast.makeText(this, "Unable to encrypt MQTT password", Toast.LENGTH_LONG).show()
+        val mqttPassword = editMqttPassword.text.toString()
+        if (switchMqttEnabled.isChecked &&
+            mqttPasswordUnreadable &&
+            mqttPassword.isBlank() &&
+            !allowClearUnreadablePassword
+        ) {
+            AlertDialog.Builder(this)
+                .setTitle("Stored MQTT password is unavailable")
+                .setMessage(
+                    "Enter the password again, or explicitly clear the unreadable credential " +
+                        "if this broker does not require a password."
+                )
+                .setPositiveButton("Clear and save") { _, _ ->
+                    saveConfig(
+                        allowInexactSchedule = allowInexactSchedule,
+                        allowClearUnreadablePassword = true
+                    )
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
             return
+        }
+
+        // Preserve unreadable ciphertext until the user explicitly supplies a replacement.
+        if (!mqttPasswordUnreadable ||
+            mqttPassword.isNotBlank() ||
+            allowClearUnreadablePassword
+        ) {
+            try {
+                config.mqttPassword = mqttPassword
+                mqttPasswordUnreadable = false
+            } catch (e: Exception) {
+                Toast.makeText(this, "Unable to encrypt MQTT password", Toast.LENGTH_LONG).show()
+                return
+            }
         }
 
         // All validation and credential encryption have succeeded. Persist the validated values.
@@ -416,6 +461,11 @@ class SettingsActivity : AppCompatActivity() {
         Toast.makeText(this, message, Toast.LENGTH_LONG).show()
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean(STATE_AWAITING_EXACT_ALARM_ACCESS, awaitingExactAlarmAccess)
+        super.onSaveInstanceState(outState)
+    }
+
     private fun setupButtons() {
         findViewById<MaterialButton>(R.id.btnSave).setOnClickListener { saveConfig() }
         findViewById<MaterialButton>(R.id.btnCancel).setOnClickListener { finish() }
@@ -428,10 +478,16 @@ class SettingsActivity : AppCompatActivity() {
             .setMessage("This will stop LockTask mode. Are you sure?")
             .setPositiveButton("Exit") { _, _ ->
                 try {
+                    // Persist this before removing the task. KioskService.onTaskRemoved() must
+                    // observe the flag and avoid immediately launching the dashboard again.
+                    config.isKioskSuspended = true
+                    ScheduleManager(this, config).stop()
                     if (LockTaskHelper.isDeviceOwner(this)) {
                         stopLockTask()
                         LockTaskHelper.clearKioskPolicies(this)
                     }
+                    stopService(Intent(this, WatchdogService::class.java))
+                    stopService(Intent(this, KioskService::class.java))
                     Toast.makeText(this, "Kiosk mode exited", Toast.LENGTH_SHORT).show()
                     startActivity(Intent(AndroidSettings.ACTION_SETTINGS))
                     finishAndRemoveTask()
@@ -472,6 +528,11 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         textDebugInfo.text = info
+    }
+
+    companion object {
+        private const val STATE_AWAITING_EXACT_ALARM_ACCESS =
+            "awaiting_exact_alarm_access"
     }
 
 }

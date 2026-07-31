@@ -58,6 +58,11 @@ class ScheduleManager(
     }
 
     fun handleAlarm(action: String) {
+        if (config.isKioskSuspended) {
+            stop()
+            Log.i(TAG, "Ignoring schedule alarm while kiosk is suspended")
+            return
+        }
         if (!config.scheduleEnabled) {
             stop()
             return

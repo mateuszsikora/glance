@@ -18,12 +18,15 @@ internal class SecretStore(
     private val prefs: SharedPreferences
 ) {
 
-    fun get(encryptedPreferenceKey: String, legacyPreferenceKey: String): String {
+    fun get(encryptedPreferenceKey: String, legacyPreferenceKey: String): SecretValue {
         val encrypted = prefs.getString(encryptedPreferenceKey, null)
         if (!encrypted.isNullOrBlank()) {
-            return runCatching { decrypt(encryptedPreferenceKey, encrypted) }
-                .onFailure { Log.e(TAG, "Unable to decrypt stored credential", it) }
-                .getOrDefault("")
+            return runCatching {
+                SecretValue(decrypt(encryptedPreferenceKey, encrypted), decryptionFailed = false)
+            }.getOrElse {
+                Log.e(TAG, "Unable to decrypt stored credential", it)
+                SecretValue("", decryptionFailed = true)
+            }
         }
 
         val legacy = prefs.getString(legacyPreferenceKey, null).orEmpty()
@@ -31,7 +34,7 @@ internal class SecretStore(
             runCatching { put(encryptedPreferenceKey, legacyPreferenceKey, legacy) }
                 .onFailure { Log.e(TAG, "Unable to migrate legacy credential", it) }
         }
-        return legacy
+        return SecretValue(legacy, decryptionFailed = false)
     }
 
     fun put(encryptedPreferenceKey: String, legacyPreferenceKey: String, value: String) {
@@ -101,3 +104,8 @@ internal class SecretStore(
         private const val SEPARATOR = ":"
     }
 }
+
+internal data class SecretValue(
+    val value: String,
+    val decryptionFailed: Boolean
+)

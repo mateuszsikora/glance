@@ -80,6 +80,12 @@ class KioskService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForeground(NOTIFICATION_ID, buildNotification())
+        if (config.isKioskSuspended) {
+            Log.i(TAG, "Kiosk is suspended; ignoring service start")
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
         val wasInitialized = initialized
         ensureInitialized()
 
@@ -103,6 +109,10 @@ class KioskService : Service() {
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
+        if (config.isKioskSuspended) {
+            Log.i(TAG, "Task removed while kiosk is suspended")
+            return
+        }
         Log.w(TAG, "Task removed, restarting dashboard")
         launchDashboard()
     }

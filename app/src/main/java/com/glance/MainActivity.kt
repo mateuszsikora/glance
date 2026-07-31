@@ -7,6 +7,7 @@ import android.content.IntentFilter
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.util.Log
 import android.view.WindowManager
 import androidx.activity.OnBackPressedCallback
@@ -31,6 +32,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private lateinit var pagerAdapter: DashboardPagerAdapter
     private val handler = Handler(Looper.getMainLooper())
+    private val powerManager by lazy {
+        getSystemService(Context.POWER_SERVICE) as PowerManager
+    }
 
     private lateinit var brightnessController: BrightnessController
     private lateinit var screenController: ScreenController
@@ -39,6 +43,7 @@ class MainActivity : AppCompatActivity() {
 
     private var settingsTapCount = 0
     private var lastSettingsTapTime = 0L
+    private var dashboardResumed = false
 
     private val reloadReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -77,6 +82,9 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // An explicit launch is the opt-in path back into kiosk mode after "Exit Kiosk Mode".
+        GlanceApp.instance.appConfig.isKioskSuspended = false
+
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
@@ -96,7 +104,27 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        dashboardResumed = true
         enterImmersiveMode()
+    }
+
+    override fun onPause() {
+        dashboardResumed = false
+        super.onPause()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        if (::brightnessController.isInitialized) {
+            brightnessController.start(window)
+        }
+    }
+
+    override fun onStop() {
+        if (::brightnessController.isInitialized) {
+            brightnessController.stop()
+        }
+        super.onStop()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -158,8 +186,11 @@ class MainActivity : AppCompatActivity() {
         val intervalMs = intervalSeconds * 1000L
         handler.postDelayed(object : Runnable {
             override fun run() {
-                val nextItem = (binding.dashboardPager.currentItem + 1) % pagerAdapter.itemCount
-                binding.dashboardPager.setCurrentItem(nextItem, true)
+                if (dashboardResumed && powerManager.isInteractive) {
+                    val nextItem =
+                        (binding.dashboardPager.currentItem + 1) % pagerAdapter.itemCount
+                    binding.dashboardPager.setCurrentItem(nextItem, true)
+                }
                 handler.postDelayed(this, intervalMs)
             }
         }, intervalMs)
@@ -198,7 +229,6 @@ class MainActivity : AppCompatActivity() {
                 reportBrightness(brightness)
             }
         })
-        brightnessController.start(window)
     }
 
     // --- Screen control ---
