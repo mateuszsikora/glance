@@ -10,6 +10,7 @@ import android.os.Looper
 import android.util.Log
 import android.view.View
 import android.view.WindowManager
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import com.glance.brightness.BrightnessController
 import com.glance.dashboard.DashboardPagerAdapter
@@ -53,6 +54,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         enterImmersiveMode()
+        blockBackButton()
         setupKioskMode()
         setupDashboard()
         setupSettingsGesture()
@@ -214,9 +216,12 @@ class MainActivity : AppCompatActivity() {
 
     // --- Block back button ---
 
-    @Deprecated("Deprecated in Java")
-    override fun onBackPressed() {
-        // Block back button in kiosk mode
+    private fun blockBackButton() {
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                // Swallowed: leaving the dashboard is not allowed in kiosk mode.
+            }
+        })
     }
 
     override fun onDestroy() {

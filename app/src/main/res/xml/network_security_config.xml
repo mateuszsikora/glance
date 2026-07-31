@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Home Assistant is typically self-hosted on a LAN, reached over plain http://
+    (e.g. http://homeassistant.local:8123) with a self-signed certificate at best.
+    Since targetSdk 28, cleartext traffic is denied by default, which would break
+    both the dashboard WebView and the ws:// connection to the HA WebSocket API.
+
+    This kiosk only ever talks to a user-configured HA instance on a trusted local
+    network, so cleartext is permitted globally.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

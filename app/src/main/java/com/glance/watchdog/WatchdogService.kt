@@ -74,7 +74,9 @@ class WatchdogService : Service() {
     }
 
     private fun triggerWebViewReload() {
-        val intent = Intent(ACTION_RELOAD_WEBVIEW)
+        // Explicitly scoped to our own package — the receiver is registered at
+        // runtime and not exported, so an implicit broadcast would be unsafe.
+        val intent = Intent(ACTION_RELOAD_WEBVIEW).setPackage(packageName)
         sendBroadcast(intent)
     }
 
