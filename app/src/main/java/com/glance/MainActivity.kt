@@ -169,7 +169,11 @@ class MainActivity : AppCompatActivity() {
         val config = GlanceApp.instance.appConfig
         val urls = config.dashboardUrls
 
-        pagerAdapter = DashboardPagerAdapter(this, urls)
+        pagerAdapter = DashboardPagerAdapter(
+            activity = this,
+            urls = urls,
+            allowedNavigationOrigins = config.dashboardAllowedOrigins
+        )
         binding.dashboardPager.apply {
             adapter = pagerAdapter
             offscreenPageLimit = 1 // Save memory on 3GB device
@@ -234,12 +238,18 @@ class MainActivity : AppCompatActivity() {
     // --- Screen control ---
 
     private fun setupScreenControl() {
+        val config = GlanceApp.instance.appConfig
         screenController = ScreenController(this, brightnessController, binding.rootContainer)
         screenController.setListener(object : ScreenController.Listener {
             override fun onScreenStateChanged(isOn: Boolean) {
                 reportScreenState(isOn)
             }
         })
+        if (!config.requestedScreenOn) {
+            // Reapply the logical OFF state after Activity/process recreation. This is essential
+            // for the non-Device-Owner black-overlay fallback, whose View cannot be persisted.
+            screenController.screenOff()
+        }
     }
 
     // --- Reload WebViews ---

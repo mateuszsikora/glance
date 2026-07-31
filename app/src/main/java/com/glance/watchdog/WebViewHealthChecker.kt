@@ -14,23 +14,28 @@ class WebViewHealthChecker(
     private var consecutiveFailures = 0
     private var checkGeneration = 0
     private var pendingTimeout: Runnable? = null
+    private var pendingFragment: WebViewFragment? = null
     var onReloadNeeded: (() -> Unit)? = null
     var onRestartNeeded: (() -> Unit)? = null
 
     fun check(fragment: WebViewFragment?) {
-        if (fragment == null) {
-            Log.w(TAG, "Fragment is null, skipping health check")
+        if (fragment == null || !fragment.isAdded || fragment.view == null) {
+            Log.d(TAG, "Fragment view is unavailable, skipping health check")
             return
         }
 
         val generation = ++checkGeneration
         pendingTimeout?.let(handler::removeCallbacks)
+        pendingFragment?.onHealthCheckCallback = null
+        pendingFragment = fragment
         val completion = CompletionGate()
 
         fragment.onHealthCheckCallback = { healthy ->
             if (generation == checkGeneration && completion.tryComplete()) {
                 pendingTimeout?.let(handler::removeCallbacks)
                 pendingTimeout = null
+                fragment.onHealthCheckCallback = null
+                pendingFragment = null
                 if (healthy) {
                     consecutiveFailures = 0
                     Log.d(TAG, "Health check passed")
@@ -40,16 +45,19 @@ class WebViewHealthChecker(
             }
         }
 
-        fragment.performHealthCheck()
-
         pendingTimeout = Runnable {
             if (generation == checkGeneration && completion.tryComplete()) {
                 fragment.onHealthCheckCallback = null
                 pendingTimeout = null
+                pendingFragment = null
                 Log.w(TAG, "Health check timed out")
                 handleFailure()
             }
         }.also { handler.postDelayed(it, timeoutMs) }
+
+        // Register the timeout before invoking the fragment: unavailable or not-yet-loaded
+        // WebViews can report a result synchronously.
+        fragment.performHealthCheck()
     }
 
     private fun handleFailure() {
@@ -67,6 +75,8 @@ class WebViewHealthChecker(
 
     fun reset() {
         checkGeneration++
+        pendingFragment?.onHealthCheckCallback = null
+        pendingFragment = null
         pendingTimeout = null
         handler.removeCallbacksAndMessages(null)
         consecutiveFailures = 0

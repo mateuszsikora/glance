@@ -15,6 +15,7 @@ import org.eclipse.paho.client.mqttv3.MqttConnectOptions
 import org.eclipse.paho.client.mqttv3.MqttException
 import org.eclipse.paho.client.mqttv3.MqttMessage
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence
+import java.util.concurrent.atomic.AtomicBoolean
 
 data class MqttReportedState(
     val screenOn: Boolean,
@@ -114,11 +115,62 @@ class MqttStateManager(
     /**
      * Removes the retained discovery entry before switching prefix/device configuration.
      */
-    fun removeDiscovery() {
-        val cleanupServerUri = runCatching { serverUri }.getOrNull() ?: return
-        if (!publish(topics.discovery, "", retained = true)) {
+    fun removeDiscovery(onComplete: () -> Unit = {}) {
+        val cleanupServerUri = runCatching { serverUri }.getOrNull()
+        if (cleanupServerUri == null) {
+            mainHandler.post(onComplete)
+            return
+        }
+
+        val mqttClient = client
+        if (mqttClient?.isConnected != true) {
             config.queueDiscoveryCleanup(cleanupServerUri, topics.discovery)
             Log.w(TAG, "Discovery cleanup queued until broker reconnects: ${topics.discovery}")
+            mainHandler.post(onComplete)
+            return
+        }
+
+        val completed = AtomicBoolean(false)
+        lateinit var timeout: Runnable
+
+        fun finish(delivered: Boolean) {
+            if (!completed.compareAndSet(false, true)) return
+            mainHandler.removeCallbacks(timeout)
+            if (delivered) {
+                config.markDiscoveryCleanupComplete(cleanupServerUri, topics.discovery)
+                Log.i(TAG, "MQTT discovery removal confirmed: ${topics.discovery}")
+            } else {
+                config.queueDiscoveryCleanup(cleanupServerUri, topics.discovery)
+                Log.w(TAG, "Discovery cleanup timed out; queued for retry: ${topics.discovery}")
+            }
+            mainHandler.post(onComplete)
+        }
+
+        timeout = Runnable { finish(delivered = false) }
+        mainHandler.postDelayed(timeout, DISCOVERY_CLEANUP_TIMEOUT_MS)
+
+        try {
+            mqttClient.publish(
+                topics.discovery,
+                message("", retained = true),
+                null,
+                object : IMqttActionListener {
+                    override fun onSuccess(asyncActionToken: IMqttToken?) {
+                        finish(delivered = true)
+                    }
+
+                    override fun onFailure(
+                        asyncActionToken: IMqttToken?,
+                        exception: Throwable?
+                    ) {
+                        Log.w(TAG, "MQTT discovery removal failed", exception)
+                        finish(delivered = false)
+                    }
+                }
+            )
+        } catch (e: MqttException) {
+            Log.w(TAG, "Unable to publish MQTT discovery removal", e)
+            finish(delivered = false)
         }
     }
 
@@ -310,5 +362,6 @@ class MqttStateManager(
         private const val TAG = "MqttStateManager"
         private const val QOS = 1
         private const val DISCONNECT_TIMEOUT_MS = 1_000L
+        private const val DISCOVERY_CLEANUP_TIMEOUT_MS = 2_000L
     }
 }

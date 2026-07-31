@@ -25,3 +25,24 @@ data class DashboardOrigin(
         }
     }
 }
+
+/** Navigation policy shared by WebView routing and health checks. */
+object DashboardNavigationPolicy {
+    fun allowedOrigins(
+        configuredUrl: String,
+        additionalOriginUrls: Collection<String>
+    ): Set<DashboardOrigin> {
+        return (additionalOriginUrls + configuredUrl)
+            .mapNotNull(DashboardOrigin::from)
+            .toSet()
+    }
+
+    fun isAllowed(
+        destinationUrl: String?,
+        configuredUrl: String,
+        additionalOriginUrls: Collection<String>
+    ): Boolean {
+        val destination = DashboardOrigin.from(destinationUrl) ?: return false
+        return destination in allowedOrigins(configuredUrl, additionalOriginUrls)
+    }
+}

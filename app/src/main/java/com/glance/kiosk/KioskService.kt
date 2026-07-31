@@ -41,6 +41,9 @@ class KioskService : Service() {
     private var scheduleManager: ScheduleManager? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var initialized = false
+    private var configReloadInProgress = false
+    private var configReloadRequested = false
+    private var destroyed = false
 
     @Volatile private var reportedScreenOn = true
     @Volatile private var reportedBrightness = 5
@@ -73,7 +76,7 @@ class KioskService : Service() {
         powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         devicePolicyManager =
             getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
-        reportedScreenOn = powerManager.isInteractive
+        reportedScreenOn = config.requestedScreenOn && powerManager.isInteractive
         reportedBrightness = clampBrightness(config.lastKnownBrightness)
         Log.i(TAG, "KioskService created")
     }
@@ -118,6 +121,7 @@ class KioskService : Service() {
     }
 
     override fun onDestroy() {
+        destroyed = true
         mainHandler.removeCallbacksAndMessages(null)
         mqttStateManager?.stop()
         mqttStateManager = null
@@ -171,15 +175,45 @@ class KioskService : Service() {
     }
 
     private fun reloadConfig() {
-        Log.i(TAG, "Reloading kiosk configuration")
-        mqttStateManager?.removeDiscovery()
-        mqttStateManager?.stop()
-        mqttStateManager = null
+        if (configReloadInProgress) {
+            configReloadRequested = true
+            Log.i(TAG, "Configuration reload already running; another reload was queued")
+            return
+        }
 
+        Log.i(TAG, "Reloading kiosk configuration")
+        configReloadInProgress = true
         scheduleManager?.stop()
+        scheduleManager = null
+
+        val previousManager = mqttStateManager
+        if (previousManager == null) {
+            finishConfigReload(null)
+            return
+        }
+
+        previousManager.removeDiscovery {
+            finishConfigReload(previousManager)
+        }
+    }
+
+    private fun finishConfigReload(previousManager: MqttStateManager?) {
+        if (destroyed) return
+
+        if (previousManager == null || mqttStateManager === previousManager) {
+            previousManager?.stop()
+            mqttStateManager = null
+        }
+
         reportedBrightness = clampBrightness(config.lastKnownBrightness)
         startMqtt()
         scheduleManager = ScheduleManager(this, config).also { it.start() }
+        configReloadInProgress = false
+
+        if (configReloadRequested) {
+            configReloadRequested = false
+            reloadConfig()
+        }
     }
 
     private fun handleLightCommand(command: MqttLightCommand) {
@@ -198,6 +232,7 @@ class KioskService : Service() {
             return
         }
 
+        config.requestedScreenOn = targetScreenOn
         val wasScreenOn = reportedScreenOn
         reportedScreenOn = targetScreenOn
         mqttStateManager?.publishCurrentState()
@@ -240,6 +275,7 @@ class KioskService : Service() {
     }
 
     private fun updateScreenState(isOn: Boolean) {
+        config.requestedScreenOn = isOn
         if (reportedScreenOn == isOn) return
         reportedScreenOn = isOn
         mqttStateManager?.publishCurrentState()
