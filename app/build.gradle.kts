@@ -7,9 +7,12 @@ plugins {
 
 // Release signing is driven by keystore.properties in the project root, which is
 // deliberately untracked. See keystore.properties.example for the expected keys.
-// Without it, release falls back to the machine's debug key. That fallback is intentional for
-// already-provisioned Device Owner tablets: Android only accepts updates signed by the same key.
+// Debug signing requires an explicit -PuseDebugSigning=true opt-in for an already-provisioned
+// Device Owner tablet. Public release builds must never silently inherit a developer's debug key.
 val keystorePropertiesFile = rootProject.file("keystore.properties")
+val useDebugSigning = providers.gradleProperty("useDebugSigning")
+    .map(String::toBoolean)
+    .getOrElse(false)
 val keystoreProperties = Properties().apply {
     if (keystorePropertiesFile.exists()) {
         keystorePropertiesFile.inputStream().use { load(it) }
@@ -24,8 +27,8 @@ android {
         applicationId = "com.glance"
         minSdk = 26
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.3"
+        versionCode = 5
+        versionName = "1.4"
     }
 
     signingConfigs {
@@ -42,7 +45,7 @@ android {
     buildTypes {
         release {
             signingConfig = signingConfigs.findByName("release")
-                ?: signingConfigs.getByName("debug")
+                ?: signingConfigs.getByName("debug").takeIf { useDebugSigning }
             isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -64,6 +67,10 @@ android {
         buildConfig = true
         viewBinding = true
     }
+
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
 }
 
 dependencies {
@@ -83,4 +90,6 @@ dependencies {
     implementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5")
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("androidx.test:core:1.5.0")
+    testImplementation("org.robolectric:robolectric:4.12.2")
 }

@@ -9,6 +9,7 @@ import android.content.Intent
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -24,6 +25,10 @@ class WatchdogService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private var lastMemoryReloadElapsedMs = 0L
     private var loopsStarted = false
+    private var reloadPendingUntilScreenOn = false
+    private val powerManager by lazy {
+        getSystemService(POWER_SERVICE) as PowerManager
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -32,6 +37,12 @@ class WatchdogService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForeground(NOTIFICATION_ID, buildNotification())
+        if (GlanceApp.instance.appConfig.isKioskSuspended) {
+            Log.i(TAG, "Kiosk is suspended; stopping watchdog")
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
         if (!loopsStarted) {
             loopsStarted = true
             startHealthCheckLoop()
@@ -45,7 +56,7 @@ class WatchdogService : Service() {
 
     private fun startHealthCheckLoop() {
         val config = GlanceApp.instance.appConfig
-        val intervalMs = config.healthCheckIntervalSeconds * 1000L
+        val intervalMs = config.healthCheckIntervalSeconds.toLong() * 1000L
 
         handler.postDelayed(object : Runnable {
             override fun run() {
@@ -57,18 +68,34 @@ class WatchdogService : Service() {
 
     private fun startPeriodicReloadLoop() {
         val config = GlanceApp.instance.appConfig
-        val intervalMs = config.webviewReloadIntervalHours * 3600 * 1000L
+        val intervalMs = config.webviewReloadIntervalHours.toLong() * 3600L * 1000L
 
         handler.postDelayed(object : Runnable {
             override fun run() {
-                Log.i(TAG, "Periodic WebView reload triggered")
-                triggerWebViewReload()
+                if (powerManager.isInteractive) {
+                    Log.i(TAG, "Periodic WebView reload triggered")
+                    triggerWebViewReload()
+                } else {
+                    reloadPendingUntilScreenOn = true
+                    Log.i(TAG, "Periodic reload deferred until the screen wakes")
+                }
                 handler.postDelayed(this, intervalMs)
             }
         }, intervalMs)
     }
 
     private fun performHealthCheck() {
+        if (!powerManager.isInteractive) {
+            Log.d(TAG, "Screen is off; skipping WebView health check")
+            return
+        }
+        if (reloadPendingUntilScreenOn) {
+            reloadPendingUntilScreenOn = false
+            Log.i(TAG, "Running deferred WebView reload")
+            triggerWebViewReload()
+            return
+        }
+
         val memoryInfo = getMemoryInfo()
         Log.d(
             TAG,
@@ -124,6 +151,11 @@ class WatchdogService : Service() {
     }
 
     private fun requestMemoryRecovery(reason: String) {
+        if (!powerManager.isInteractive) {
+            reloadPendingUntilScreenOn = true
+            Log.w(TAG, "Memory recovery deferred while screen is off ($reason)")
+            return
+        }
         val now = SystemClock.elapsedRealtime()
         if (now - lastMemoryReloadElapsedMs < MEMORY_RELOAD_COOLDOWN_MS) return
         lastMemoryReloadElapsedMs = now

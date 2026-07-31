@@ -165,6 +165,10 @@ class MqttStateManager(
     }
 
     private fun buildConnectOptions(): MqttConnectOptions {
+        val storedPassword = config.readMqttPassword()
+        if (storedPassword.decryptionFailed) {
+            Log.e(TAG, "Stored MQTT password cannot be decrypted; credentials must be replaced")
+        }
         return MqttConnectOptions().apply {
             // Paho handles reconnects after a previously successful connection. The explicit
             // retry loop above covers failures before the first successful connection.
@@ -176,8 +180,8 @@ class MqttStateManager(
             if (config.mqttUsername.isNotBlank()) {
                 userName = config.mqttUsername
             }
-            if (config.mqttPassword.isNotBlank()) {
-                password = config.mqttPassword.toCharArray()
+            if (storedPassword.value.isNotBlank()) {
+                password = storedPassword.value.toCharArray()
             }
             setWill(
                 topics.availability,

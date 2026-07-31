@@ -12,6 +12,8 @@ class WebViewHealthChecker(
 
     private val handler = Handler(Looper.getMainLooper())
     private var consecutiveFailures = 0
+    private var checkGeneration = 0
+    private var pendingTimeout: Runnable? = null
     var onReloadNeeded: (() -> Unit)? = null
     var onRestartNeeded: (() -> Unit)? = null
 
@@ -21,26 +23,33 @@ class WebViewHealthChecker(
             return
         }
 
-        var responded = false
+        val generation = ++checkGeneration
+        pendingTimeout?.let(handler::removeCallbacks)
+        val completion = CompletionGate()
 
         fragment.onHealthCheckCallback = { healthy ->
-            responded = true
-            if (healthy) {
-                consecutiveFailures = 0
-                Log.d(TAG, "Health check passed")
-            } else {
-                handleFailure()
+            if (generation == checkGeneration && completion.tryComplete()) {
+                pendingTimeout?.let(handler::removeCallbacks)
+                pendingTimeout = null
+                if (healthy) {
+                    consecutiveFailures = 0
+                    Log.d(TAG, "Health check passed")
+                } else {
+                    handleFailure()
+                }
             }
         }
 
         fragment.performHealthCheck()
 
-        handler.postDelayed({
-            if (!responded) {
+        pendingTimeout = Runnable {
+            if (generation == checkGeneration && completion.tryComplete()) {
+                fragment.onHealthCheckCallback = null
+                pendingTimeout = null
                 Log.w(TAG, "Health check timed out")
                 handleFailure()
             }
-        }, timeoutMs)
+        }.also { handler.postDelayed(it, timeoutMs) }
     }
 
     private fun handleFailure() {
@@ -57,11 +66,23 @@ class WebViewHealthChecker(
     }
 
     fun reset() {
+        checkGeneration++
+        pendingTimeout = null
         handler.removeCallbacksAndMessages(null)
         consecutiveFailures = 0
     }
 
     companion object {
         private const val TAG = "WebViewHealthChecker"
+    }
+}
+
+internal class CompletionGate {
+    private var completed = false
+
+    fun tryComplete(): Boolean {
+        if (completed) return false
+        completed = true
+        return true
     }
 }

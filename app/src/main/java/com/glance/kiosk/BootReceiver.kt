@@ -6,10 +6,15 @@ import android.content.Intent
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.glance.MainActivity
+import com.glance.config.AppConfig
 
 class BootReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
+        if (AppConfig(context.applicationContext).isKioskSuspended) {
+            Log.i(TAG, "Kiosk is suspended; ignoring ${intent.action}")
+            return
+        }
         when (intent.action) {
             Intent.ACTION_BOOT_COMPLETED,
             Intent.ACTION_MY_PACKAGE_REPLACED -> {

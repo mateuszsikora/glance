@@ -24,7 +24,10 @@ class AppConfig(context: Context) {
     var dashboardUrls: List<String>
         get() {
             val raw = prefs.getString(KEY_DASHBOARD_URLS, DEFAULT_DASHBOARD_URL) ?: DEFAULT_DASHBOARD_URL
-            return raw.split(SEPARATOR).filter { it.isNotBlank() }
+            return raw.split(SEPARATOR)
+                .map(String::trim)
+                .filter(String::isNotBlank)
+                .ifEmpty { listOf(DEFAULT_DASHBOARD_URL) }
         }
         set(value) {
             prefs.edit().putString(KEY_DASHBOARD_URLS, value.joinToString(SEPARATOR)).apply()
@@ -41,16 +44,22 @@ class AppConfig(context: Context) {
         set(value) = prefs.edit().putString(KEY_MQTT_BROKER_HOST, value).apply()
 
     var mqttBrokerPort: Int
-        get() = prefs.getInt(KEY_MQTT_BROKER_PORT, 1883)
-        set(value) = prefs.edit().putInt(KEY_MQTT_BROKER_PORT, value).apply()
+        get() = prefs.getInt(KEY_MQTT_BROKER_PORT, DEFAULT_MQTT_PORT)
+            .takeIf { it in 1..65535 }
+            ?: DEFAULT_MQTT_PORT
+        set(value) = prefs.edit().putInt(KEY_MQTT_BROKER_PORT, value.coerceIn(1, 65535)).apply()
 
     var mqttUsername: String
         get() = prefs.getString(KEY_MQTT_USERNAME, "") ?: ""
         set(value) = prefs.edit().putString(KEY_MQTT_USERNAME, value).apply()
 
     var mqttPassword: String
-        get() = secretStore.get(KEY_MQTT_PASSWORD_ENCRYPTED, KEY_MQTT_PASSWORD)
+        get() = readMqttPassword().value
         set(value) = secretStore.put(KEY_MQTT_PASSWORD_ENCRYPTED, KEY_MQTT_PASSWORD, value)
+
+    internal fun readMqttPassword(): SecretValue {
+        return secretStore.get(KEY_MQTT_PASSWORD_ENCRYPTED, KEY_MQTT_PASSWORD)
+    }
 
     var mqttDeviceName: String
         get() = prefs.getString(KEY_MQTT_DEVICE_NAME, "Glance Tablet") ?: "Glance Tablet"
@@ -98,12 +107,12 @@ class AppConfig(context: Context) {
     // --- Brightness ---
 
     var minBrightness: Int
-        get() = prefs.getInt(KEY_MIN_BRIGHTNESS, 5)
-        set(value) = prefs.edit().putInt(KEY_MIN_BRIGHTNESS, value).apply()
+        get() = prefs.getInt(KEY_MIN_BRIGHTNESS, 5).coerceIn(0, 255)
+        set(value) = prefs.edit().putInt(KEY_MIN_BRIGHTNESS, value.coerceIn(0, 255)).apply()
 
     var maxBrightness: Int
-        get() = prefs.getInt(KEY_MAX_BRIGHTNESS, 255)
-        set(value) = prefs.edit().putInt(KEY_MAX_BRIGHTNESS, value).apply()
+        get() = prefs.getInt(KEY_MAX_BRIGHTNESS, 255).coerceIn(0, 255)
+        set(value) = prefs.edit().putInt(KEY_MAX_BRIGHTNESS, value.coerceIn(0, 255)).apply()
 
     var autoBrightnessEnabled: Boolean
         get() = prefs.getBoolean(KEY_AUTO_BRIGHTNESS, true)
@@ -130,22 +139,30 @@ class AppConfig(context: Context) {
     // --- Watchdog ---
 
     var webviewReloadIntervalHours: Int
-        get() = prefs.getInt(KEY_RELOAD_INTERVAL, 6)
-        set(value) = prefs.edit().putInt(KEY_RELOAD_INTERVAL, value).apply()
+        get() = prefs.getInt(KEY_RELOAD_INTERVAL, 6).coerceIn(1, 168)
+        set(value) = prefs.edit().putInt(KEY_RELOAD_INTERVAL, value.coerceIn(1, 168)).apply()
 
     var healthCheckIntervalSeconds: Int
-        get() = prefs.getInt(KEY_HEALTH_CHECK_INTERVAL, 30)
-        set(value) = prefs.edit().putInt(KEY_HEALTH_CHECK_INTERVAL, value).apply()
+        get() = prefs.getInt(KEY_HEALTH_CHECK_INTERVAL, 30).coerceIn(10, 3600)
+        set(value) = prefs.edit().putInt(KEY_HEALTH_CHECK_INTERVAL, value.coerceIn(10, 3600)).apply()
+
+    // --- Kiosk lifecycle ---
+
+    var isKioskSuspended: Boolean
+        get() = prefs.getBoolean(KEY_KIOSK_SUSPENDED, false)
+        set(value) {
+            check(prefs.edit().putBoolean(KEY_KIOSK_SUSPENDED, value).commit()) {
+                "Unable to persist kiosk lifecycle state"
+            }
+        }
 
     // --- Settings PIN ---
 
     val hasSettingsPin: Boolean
         get() = prefs.contains(KEY_SETTINGS_PIN_HASH) || prefs.contains(KEY_SETTINGS_PIN)
 
-    val usesLegacyDefaultPin: Boolean
-        get() = !prefs.contains(KEY_SETTINGS_PIN_HASH) &&
-            (prefs.getString(KEY_SETTINGS_PIN, DEFAULT_SETTINGS_PIN) ?: DEFAULT_SETTINGS_PIN) ==
-            DEFAULT_SETTINGS_PIN
+    val needsLegacyPinUpgrade: Boolean
+        get() = !prefs.contains(KEY_SETTINGS_PIN_HASH) && prefs.contains(KEY_SETTINGS_PIN)
 
     fun verifySettingsPin(candidate: String): Boolean {
         val encodedHash = prefs.getString(KEY_SETTINGS_PIN_HASH, null)
@@ -160,14 +177,10 @@ class AppConfig(context: Context) {
 
         val legacy = prefs.getString(KEY_SETTINGS_PIN, DEFAULT_SETTINGS_PIN)
             ?: DEFAULT_SETTINGS_PIN
-        val matches = MessageDigest.isEqual(
+        return MessageDigest.isEqual(
             legacy.toByteArray(Charsets.UTF_8),
             candidate.toByteArray(Charsets.UTF_8)
         )
-        if (matches && legacy != DEFAULT_SETTINGS_PIN) {
-            setSettingsPin(legacy)
-        }
-        return matches
     }
 
     fun setSettingsPin(pin: String) {
@@ -224,8 +237,10 @@ class AppConfig(context: Context) {
         set(value) = prefs.edit().putBoolean(KEY_AUTO_ROTATE, value).apply()
 
     var autoRotateIntervalSeconds: Int
-        get() = prefs.getInt(KEY_AUTO_ROTATE_INTERVAL, 30)
-        set(value) = prefs.edit().putInt(KEY_AUTO_ROTATE_INTERVAL, value).apply()
+        get() = prefs.getInt(KEY_AUTO_ROTATE_INTERVAL, 30).coerceIn(5, 86_400)
+        set(value) = prefs.edit()
+            .putInt(KEY_AUTO_ROTATE_INTERVAL, value.coerceIn(5, 86_400))
+            .apply()
 
     companion object {
         private const val PREFS_NAME = "glance_config"
@@ -256,10 +271,12 @@ class AppConfig(context: Context) {
         private const val KEY_SETTINGS_PIN_SALT = "settings_pin_salt"
         private const val KEY_PIN_FAILED_ATTEMPTS = "pin_failed_attempts"
         private const val KEY_PIN_LOCK_UNTIL = "pin_lock_until"
+        private const val KEY_KIOSK_SUSPENDED = "kiosk_suspended"
         private const val KEY_AUTO_ROTATE = "auto_rotate"
         private const val KEY_AUTO_ROTATE_INTERVAL = "auto_rotate_interval"
 
         private const val DEFAULT_DASHBOARD_URL = "https://example.com"
+        private const val DEFAULT_MQTT_PORT = 1883
         private const val DISCOVERY_CLEANUP_SEPARATOR = "\t"
         private const val DEFAULT_SETTINGS_PIN = "1234"
         private const val PIN_SALT_BYTES = 16

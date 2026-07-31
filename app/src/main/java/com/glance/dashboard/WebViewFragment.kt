@@ -2,7 +2,6 @@ package com.glance.dashboard
 
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
-import android.net.Uri
 import android.net.http.SslError
 import android.os.Bundle
 import android.util.Log
@@ -46,6 +45,9 @@ class WebViewFragment : Fragment() {
         container: ViewGroup?,
         savedInstanceState: Bundle?
     ): View {
+        // Fragment instances can survive an Activity recreation. A new WebView has a fresh
+        // renderer and must not inherit the terminal state of the destroyed one.
+        rendererGone = false
         _binding = FragmentWebviewBinding.inflate(inflater, container, false)
         return binding.root
     }
@@ -63,8 +65,11 @@ class WebViewFragment : Fragment() {
         binding.webview.apply {
             settings.apply {
                 javaScriptEnabled = true
+                javaScriptCanOpenWindowsAutomatically = false
                 domStorageEnabled = true
                 databaseEnabled = true
+                allowFileAccess = false
+                allowContentAccess = false
                 mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
                 cacheMode = WebSettings.LOAD_DEFAULT
                 useWideViewPort = true
@@ -78,6 +83,23 @@ class WebViewFragment : Fragment() {
             }
 
             webViewClient = object : WebViewClient() {
+                override fun shouldOverrideUrlLoading(
+                    view: WebView?,
+                    request: WebResourceRequest?
+                ): Boolean {
+                    if (request?.isForMainFrame != true) return false
+                    val destination = DashboardOrigin.from(request.url?.toString())
+                    val configured = DashboardOrigin.from(url)
+                    if (destination == null || destination != configured) {
+                        Log.w(TAG, "Blocked navigation outside configured dashboard origin")
+                        mainFrameError = true
+                        isLoaded = false
+                        showError()
+                        return true
+                    }
+                    return false
+                }
+
                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                     super.onPageStarted(view, url, favicon)
                     view?.removeCallbacks(retryRunnable)
@@ -89,7 +111,7 @@ class WebViewFragment : Fragment() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
                     isLoaded = !mainFrameError
-                    Log.d(TAG, "Page loaded: $url")
+                    Log.d(TAG, "Dashboard origin loaded: ${DashboardOrigin.from(url)}")
                 }
 
                 override fun onReceivedError(
@@ -131,6 +153,7 @@ class WebViewFragment : Fragment() {
                     isLoaded = false
                     handler?.cancel()
                     showError()
+                    scheduleRetry()
                 }
 
                 override fun onRenderProcessGone(
@@ -186,10 +209,10 @@ class WebViewFragment : Fragment() {
             "(function() { return document.readyState; })()"
         ) { result ->
             val ready = result?.trim('"') in setOf("interactive", "complete")
-            val configuredHost = runCatching { Uri.parse(url).host }.getOrNull()
             val currentUrl = _binding?.webview?.url
-            val currentHost = runCatching { Uri.parse(currentUrl).host }.getOrNull()
-            val healthy = ready && !mainFrameError && configuredHost == currentHost
+            val healthy = ready &&
+                !mainFrameError &&
+                DashboardOrigin.from(url) == DashboardOrigin.from(currentUrl)
             onHealthCheckCallback?.invoke(healthy)
         }
     }

@@ -7,7 +7,7 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.Handler
 import android.os.Looper
-import android.provider.Settings
+import android.os.PowerManager
 import android.util.Log
 import com.glance.config.AppConfig
 import kotlin.math.ln
@@ -34,6 +34,7 @@ class BrightnessController(
     }
 
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+    private val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
     private val lightSensor: Sensor? = sensorManager.getDefaultSensor(Sensor.TYPE_LIGHT)
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -55,7 +56,7 @@ class BrightnessController(
 
     /**
      * Start listening to light sensor. Pass the Activity window to control
-     * per-window brightness (preferred), or null to use system settings (requires WRITE_SETTINGS).
+     * per-window brightness. A window is required so the app does not need WRITE_SETTINGS.
      */
     fun start(window: android.view.Window? = null) {
         activityWindow = window
@@ -97,7 +98,7 @@ class BrightnessController(
 
     override fun onSensorChanged(event: SensorEvent) {
         if (event.sensor.type != Sensor.TYPE_LIGHT) return
-        if (screenOffMode) return
+        if (screenOffMode || !powerManager.isInteractive) return
 
         // Skip if HA override is active
         if (System.currentTimeMillis() < overrideUntilMs) return
@@ -160,21 +161,7 @@ class BrightnessController(
             return
         }
 
-        // Fallback: system brightness (requires WRITE_SETTINGS permission)
-        try {
-            Settings.System.putInt(
-                context.contentResolver,
-                Settings.System.SCREEN_BRIGHTNESS_MODE,
-                Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL
-            )
-            Settings.System.putInt(
-                context.contentResolver,
-                Settings.System.SCREEN_BRIGHTNESS,
-                brightness
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to set system brightness", e)
-        }
+        Log.w(TAG, "Cannot apply brightness without an Activity window")
     }
 
     /**

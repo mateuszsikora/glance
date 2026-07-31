@@ -34,9 +34,13 @@ cp keystore.properties.example keystore.properties   # then fill in your passwor
 adb install -r app/build/outputs/apk/release/app-release.apk
 ```
 
-Without `keystore.properties`, the release build falls back to that machine's Android
-debug keystore. This is intended only for updating a tablet that was originally provisioned
-with the same debug key; public releases should always use a dedicated release keystore.
+Without `keystore.properties`, Gradle produces an unsigned release so a public artifact cannot
+silently inherit a developer's debug identity. To update a tablet that was originally provisioned
+with a debug APK, opt in explicitly and use the exact same backed-up debug keystore:
+
+```
+./gradlew -PuseDebugSigning=true assembleRelease
+```
 
 ### Provisioning as device owner
 
@@ -100,6 +104,10 @@ If the user chooses the approximate fallback, Android may deliver an event later
 configured minute. Clock, time-zone, package-update, and reboot broadcasts reschedule both
 daily alarms.
 
+`Exit Kiosk Mode` in the protected settings screen suspends automatic relaunch, cancels screen
+alarms, clears the temporary kiosk policies, and stops both foreground services. Launch Glance
+again (or select it as the Home app) to deliberately resume kiosk mode.
+
 MQTT credentials are encrypted at rest with an Android Keystore AES-GCM key. Port `1883`
 still sends MQTT traffic unencrypted on the network; use an `ssl://` broker endpoint when
 the broker is configured for TLS.
@@ -108,6 +116,5 @@ the broker is configured for TLS.
 
 Android only accepts an update to an installed Device Owner when the new APK uses the same
 signing certificate. Configure a release keystore before first provisioning. If the tablet
-was provisioned with a debug APK, securely back up that exact `~/.android/debug.keystore`;
-the build falls back to that key when no `keystore.properties` is present so local release
-artifacts remain update-compatible with the provisioned tablet.
+was provisioned with a debug APK, securely back up that exact `~/.android/debug.keystore` and
+pass `-PuseDebugSigning=true` when deliberately building an update for that installation.
