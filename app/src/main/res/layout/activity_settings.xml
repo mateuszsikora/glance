@@ -138,7 +138,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Screen Schedule"
+            android:text="Screen ON/OFF schedule"
             android:textColor="#FFFFFFFF"
             android:textSize="18sp"
             android:textStyle="bold"
@@ -148,7 +148,7 @@
             android:id="@+id/switchSchedule"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Enable schedule"
+            android:text="Automatically wake and turn off the screen"
             android:textColor="#FFFFFFFF"
             android:layout_marginBottom="8dp" />
 
@@ -156,14 +156,14 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:layout_marginBottom="16dp">
+            android:layout_marginBottom="8dp">
 
             <EditText
                 android:id="@+id/editScreenOnTime"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:hint="ON time (HH:mm)"
+                android:hint="Wake at (HH:mm)"
                 android:inputType="time"
                 android:background="#FF2A2A2A"
                 android:textColor="#FFFFFFFF"
@@ -176,13 +176,21 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:hint="OFF time (HH:mm)"
+                android:hint="Turn off at (HH:mm)"
                 android:inputType="time"
                 android:background="#FF2A2A2A"
                 android:textColor="#FFFFFFFF"
                 android:textColorHint="#FF808080"
                 android:padding="12dp" />
         </LinearLayout>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="The display is physically off outside the ON–OFF window. Example: wake at 06:00 and turn off at 23:00 keeps it off overnight."
+            android:textColor="#FFB0B0B0"
+            android:textSize="12sp"
+            android:layout_marginBottom="16dp" />
 
         <!-- Divider -->
         <View

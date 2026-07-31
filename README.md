@@ -87,6 +87,10 @@ When Glance is not Device Owner, OFF uses a reversible soft-off (black overlay a
 brightness zero); tapping the black screen or sending ON wakes it. With Device Owner,
 Glance uses `DevicePolicyManager.lockNow()` for a real hardware screen-off.
 
+The optional screen ON/OFF schedule uses a daytime window: for example, wake at `06:00`
+and turn off at `23:00` keeps the physical display off overnight. An overnight window is
+also supported by choosing an ON time later than the OFF time.
+
 MQTT credentials are encrypted at rest with an Android Keystore AES-GCM key. Port `1883`
 still sends MQTT traffic unencrypted on the network; use an `ssl://` broker endpoint when
 the broker is configured for TLS.
