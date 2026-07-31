@@ -2,6 +2,7 @@ package com.glance.dashboard
 
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
+import android.net.Uri
 import android.net.http.SslError
 import android.os.Bundle
 import android.util.Log
@@ -24,6 +25,14 @@ class WebViewFragment : Fragment() {
 
     private var url: String = ""
     private var isLoaded = false
+    private var mainFrameError = false
+    private var rendererGone = false
+
+    private val retryRunnable = Runnable {
+        if (_binding == null || rendererGone || !isAdded || url.isBlank()) return@Runnable
+        Log.i(TAG, "Retrying load: $url")
+        loadUrl(url)
+    }
 
     var onHealthCheckCallback: ((Boolean) -> Unit)? = null
 
@@ -71,13 +80,15 @@ class WebViewFragment : Fragment() {
             webViewClient = object : WebViewClient() {
                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                     super.onPageStarted(view, url, favicon)
+                    view?.removeCallbacks(retryRunnable)
                     isLoaded = false
+                    mainFrameError = false
                     binding.errorContainer.visibility = View.GONE
                 }
 
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
-                    isLoaded = true
+                    isLoaded = !mainFrameError
                     Log.d(TAG, "Page loaded: $url")
                 }
 
@@ -88,7 +99,23 @@ class WebViewFragment : Fragment() {
                 ) {
                     super.onReceivedError(view, request, error)
                     if (request?.isForMainFrame == true) {
+                        mainFrameError = true
                         Log.e(TAG, "WebView error: ${error?.description}")
+                        showError()
+                        scheduleRetry()
+                    }
+                }
+
+                override fun onReceivedHttpError(
+                    view: WebView?,
+                    request: WebResourceRequest?,
+                    errorResponse: WebResourceResponse?
+                ) {
+                    super.onReceivedHttpError(view, request, errorResponse)
+                    if (request?.isForMainFrame == true) {
+                        mainFrameError = true
+                        isLoaded = false
+                        Log.e(TAG, "Dashboard HTTP error: ${errorResponse?.statusCode}")
                         showError()
                         scheduleRetry()
                     }
@@ -100,6 +127,7 @@ class WebViewFragment : Fragment() {
                     error: SslError?
                 ) {
                     Log.e(TAG, "SSL validation failed: ${error?.primaryError}")
+                    mainFrameError = true
                     isLoaded = false
                     handler?.cancel()
                     showError()
@@ -112,7 +140,15 @@ class WebViewFragment : Fragment() {
                     val message = "WebView renderer gone (crashed=${detail?.didCrash() == true})"
                     Log.e(TAG, message)
                     context?.let { CrashLogger.log(it, "ERROR", message) }
-                    view?.post { activity?.recreate() }
+                    rendererGone = true
+                    isLoaded = false
+                    view?.removeCallbacks(retryRunnable)
+                    view?.let { deadWebView ->
+                        (deadWebView.parent as? ViewGroup)?.removeView(deadWebView)
+                        deadWebView.stopLoading()
+                        deadWebView.destroy()
+                    }
+                    activity?.recreate()
                     return true
                 }
             }
@@ -122,18 +158,26 @@ class WebViewFragment : Fragment() {
     }
 
     fun loadUrl(newUrl: String) {
+        if (rendererGone) {
+            activity?.recreate()
+            return
+        }
         url = newUrl
         isLoaded = false
         binding.webview.loadUrl(url)
     }
 
     fun reload() {
+        if (rendererGone) {
+            activity?.recreate()
+            return
+        }
         isLoaded = false
         binding.webview.reload()
     }
 
     fun performHealthCheck() {
-        if (!isLoaded) {
+        if (rendererGone || !isLoaded || _binding == null) {
             onHealthCheckCallback?.invoke(false)
             return
         }
@@ -141,7 +185,11 @@ class WebViewFragment : Fragment() {
         binding.webview.evaluateJavascript(
             "(function() { return document.readyState; })()"
         ) { result ->
-            val healthy = result?.trim('"') in setOf("interactive", "complete")
+            val ready = result?.trim('"') in setOf("interactive", "complete")
+            val configuredHost = runCatching { Uri.parse(url).host }.getOrNull()
+            val currentUrl = _binding?.webview?.url
+            val currentHost = runCatching { Uri.parse(currentUrl).host }.getOrNull()
+            val healthy = ready && !mainFrameError && configuredHost == currentHost
             onHealthCheckCallback?.invoke(healthy)
         }
     }
@@ -151,21 +199,21 @@ class WebViewFragment : Fragment() {
     }
 
     private fun scheduleRetry() {
-        binding.webview.postDelayed({
-            if (isAdded && url.isNotBlank()) {
-                Log.i(TAG, "Retrying load: $url")
-                loadUrl(url)
-            }
-        }, RETRY_DELAY_MS)
+        binding.webview.removeCallbacks(retryRunnable)
+        binding.webview.postDelayed(retryRunnable, RETRY_DELAY_MS)
     }
 
     override fun onDestroyView() {
-        binding.webview.apply {
-            stopLoading()
-            clearHistory()
-            removeAllViews()
-            destroy()
+        _binding?.webview?.apply {
+            removeCallbacks(retryRunnable)
+            if (!rendererGone) {
+                stopLoading()
+                clearHistory()
+                removeAllViews()
+                destroy()
+            }
         }
+        onHealthCheckCallback = null
         _binding = null
         super.onDestroyView()
     }

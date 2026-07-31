@@ -34,8 +34,9 @@ cp keystore.properties.example keystore.properties   # then fill in your passwor
 adb install -r app/build/outputs/apk/release/app-release.apk
 ```
 
-Without `keystore.properties` the release build still runs, but produces an unsigned
-APK that cannot be installed.
+Without `keystore.properties`, the release build falls back to that machine's Android
+debug keystore. This is intended only for updating a tablet that was originally provisioned
+with the same debug key; public releases should always use a dedicated release keystore.
 
 ### Provisioning as device owner
 
@@ -68,7 +69,9 @@ Requirements:
 
 1. Configure the MQTT integration and broker in Home Assistant.
 2. Create a dedicated login for the tablet in the Mosquitto broker configuration.
-3. Open Glance settings (tap the top-right corner five times; default PIN `1234`).
+3. Open Glance settings by tapping the top-right corner five times. A fresh installation
+   asks you to create a PIN before showing credentials. Existing installations that still
+   use the legacy `1234` PIN must replace it on their next settings login.
 4. Enable MQTT and enter the broker host, port (normally `1883`), username, and password.
 5. Save and restart Glance.
 
@@ -89,7 +92,13 @@ Glance uses `DevicePolicyManager.lockNow()` for a real hardware screen-off.
 
 The optional screen ON/OFF schedule uses a daytime window: for example, wake at `06:00`
 and turn off at `23:00` keeps the physical display off overnight. An overnight window is
-also supported by choosing an ON time later than the OFF time.
+also supported by choosing an ON time later than the OFF time. A manual MQTT command
+overrides the current state until the next scheduled ON or OFF event.
+
+On Android 12 and newer, Glance asks for exact-alarm access when a schedule is enabled.
+If the user chooses the approximate fallback, Android may deliver an event later than the
+configured minute. Clock, time-zone, package-update, and reboot broadcasts reschedule both
+daily alarms.
 
 MQTT credentials are encrypted at rest with an Android Keystore AES-GCM key. Port `1883`
 still sends MQTT traffic unencrypted on the network; use an `ssl://` broker endpoint when

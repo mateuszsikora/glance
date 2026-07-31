@@ -62,6 +62,7 @@ object MqttContract {
             put("payload_not_available", "offline")
             put("brightness", true)
             put("brightness_scale", 255)
+            put("transition", false)
             put("supported_color_modes", JSONArray().put("brightness"))
             put("qos", 1)
             put("device", JSONObject().apply {

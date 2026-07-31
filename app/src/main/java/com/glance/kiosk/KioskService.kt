@@ -80,23 +80,16 @@ class KioskService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForeground(NOTIFICATION_ID, buildNotification())
+        val wasInitialized = initialized
         ensureInitialized()
 
         when (intent?.action) {
-            ACTION_RELOAD_CONFIG -> reloadConfig()
+            ACTION_RELOAD_CONFIG -> if (wasInitialized) reloadConfig()
             ACTION_COMMAND_SCREEN -> {
                 handleLightCommand(
                     MqttLightCommand(
                         screenOn = intent.getBooleanExtra(EXTRA_SCREEN_ON, true),
                         brightness = null
-                    )
-                )
-            }
-            ACTION_COMMAND_BRIGHTNESS -> {
-                handleLightCommand(
-                    MqttLightCommand(
-                        screenOn = null,
-                        brightness = intent.getIntExtra(EXTRA_BRIGHTNESS, reportedBrightness)
                     )
                 )
             }
@@ -115,6 +108,7 @@ class KioskService : Service() {
     }
 
     override fun onDestroy() {
+        mainHandler.removeCallbacksAndMessages(null)
         mqttStateManager?.stop()
         mqttStateManager = null
         releaseWakeLock()
@@ -207,9 +201,6 @@ class KioskService : Service() {
                 Intent(ACTION_CONTROL_SCREEN).putExtra(EXTRA_SCREEN_ON, true)
             )
         } else {
-            sendActivityControl(
-                Intent(ACTION_CONTROL_SCREEN).putExtra(EXTRA_SCREEN_ON, false)
-            )
             if (devicePolicyManager.isDeviceOwnerApp(packageName)) {
                 try {
                     releaseWakeLock()
@@ -217,10 +208,15 @@ class KioskService : Service() {
                     Log.i(TAG, "Screen turned OFF directly from kiosk service")
                 } catch (e: Exception) {
                     Log.e(TAG, "Device Owner screen-off failed", e)
+                    reportedScreenOn = powerManager.isInteractive
+                    mqttStateManager?.publishCurrentState()
                 }
             } else {
                 // Ensure the activity exists so its reversible black-overlay fallback can run.
                 launchDashboard()
+                sendActivityControl(
+                    Intent(ACTION_CONTROL_SCREEN).putExtra(EXTRA_SCREEN_ON, false)
+                )
                 mainHandler.postDelayed(
                     {
                         sendActivityControl(
@@ -322,7 +318,6 @@ class KioskService : Service() {
 
         const val ACTION_RELOAD_CONFIG = "com.glance.action.RELOAD_CONFIG"
         const val ACTION_COMMAND_SCREEN = "com.glance.action.COMMAND_SCREEN"
-        const val ACTION_COMMAND_BRIGHTNESS = "com.glance.action.COMMAND_BRIGHTNESS"
         const val ACTION_CONTROL_SCREEN = "com.glance.action.CONTROL_SCREEN"
         const val ACTION_CONTROL_BRIGHTNESS = "com.glance.action.CONTROL_BRIGHTNESS"
         const val ACTION_REPORT_SCREEN_STATE = "com.glance.action.REPORT_SCREEN_STATE"

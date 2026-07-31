@@ -13,7 +13,9 @@ class ConfigValidatorTest {
 
         assertTrue(ConfigValidator.isValidMqttHost("192.168.21.254"))
         assertTrue(ConfigValidator.isValidMqttHost("ssl://broker.example.test:8883"))
+        assertTrue(ConfigValidator.isValidMqttHost("2001:db8::1"))
         assertFalse(ConfigValidator.isValidMqttHost("https://broker.example.test"))
+        assertFalse(ConfigValidator.isValidMqttHost("tcp://broker.example.test/path"))
     }
 
     @Test
@@ -25,5 +27,7 @@ class ConfigValidatorTest {
         assertFalse(ConfigValidator.isValidBrightnessRange(200, 100))
         assertTrue(ConfigValidator.isValidRotateInterval(30))
         assertFalse(ConfigValidator.isValidRotateInterval(0))
+        assertTrue(ConfigValidator.isValidSettingsPin("583902"))
+        assertFalse(ConfigValidator.isValidSettingsPin("1234"))
     }
 }

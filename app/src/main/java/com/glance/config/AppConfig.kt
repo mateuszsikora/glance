@@ -2,7 +2,12 @@ package com.glance.config
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Base64
+import java.security.MessageDigest
+import java.security.SecureRandom
 import java.util.UUID
+import javax.crypto.SecretKeyFactory
+import javax.crypto.spec.PBEKeySpec
 
 /**
  * Centralized configuration backed by SharedPreferences.
@@ -64,6 +69,32 @@ class AppConfig(context: Context) {
             return generated
         }
 
+    fun queueDiscoveryCleanup(serverUri: String, topic: String) {
+        val entries = prefs.getStringSet(KEY_MQTT_DISCOVERY_CLEANUP, emptySet())
+            .orEmpty()
+            .toMutableSet()
+        entries += "$serverUri$DISCOVERY_CLEANUP_SEPARATOR$topic"
+        prefs.edit().putStringSet(KEY_MQTT_DISCOVERY_CLEANUP, entries).apply()
+    }
+
+    fun pendingDiscoveryCleanupTopics(serverUri: String): Set<String> {
+        val prefix = "$serverUri$DISCOVERY_CLEANUP_SEPARATOR"
+        return prefs.getStringSet(KEY_MQTT_DISCOVERY_CLEANUP, emptySet())
+            .orEmpty()
+            .filterTo(mutableSetOf()) { it.startsWith(prefix) }
+            .mapTo(mutableSetOf()) { it.removePrefix(prefix) }
+    }
+
+    fun markDiscoveryCleanupComplete(serverUri: String, topic: String) {
+        val target = "$serverUri$DISCOVERY_CLEANUP_SEPARATOR$topic"
+        val entries = prefs.getStringSet(KEY_MQTT_DISCOVERY_CLEANUP, emptySet())
+            .orEmpty()
+            .toMutableSet()
+        if (entries.remove(target)) {
+            prefs.edit().putStringSet(KEY_MQTT_DISCOVERY_CLEANUP, entries).apply()
+        }
+    }
+
     // --- Brightness ---
 
     var minBrightness: Int
@@ -108,9 +139,83 @@ class AppConfig(context: Context) {
 
     // --- Settings PIN ---
 
-    var settingsPin: String
-        get() = prefs.getString(KEY_SETTINGS_PIN, "1234") ?: "1234"
-        set(value) = prefs.edit().putString(KEY_SETTINGS_PIN, value).apply()
+    val hasSettingsPin: Boolean
+        get() = prefs.contains(KEY_SETTINGS_PIN_HASH) || prefs.contains(KEY_SETTINGS_PIN)
+
+    val usesLegacyDefaultPin: Boolean
+        get() = !prefs.contains(KEY_SETTINGS_PIN_HASH) &&
+            (prefs.getString(KEY_SETTINGS_PIN, DEFAULT_SETTINGS_PIN) ?: DEFAULT_SETTINGS_PIN) ==
+            DEFAULT_SETTINGS_PIN
+
+    fun verifySettingsPin(candidate: String): Boolean {
+        val encodedHash = prefs.getString(KEY_SETTINGS_PIN_HASH, null)
+        val encodedSalt = prefs.getString(KEY_SETTINGS_PIN_SALT, null)
+        if (!encodedHash.isNullOrBlank() && !encodedSalt.isNullOrBlank()) {
+            return runCatching {
+                val salt = Base64.decode(encodedSalt, Base64.NO_WRAP)
+                val expected = Base64.decode(encodedHash, Base64.NO_WRAP)
+                MessageDigest.isEqual(expected, derivePinHash(candidate, salt))
+            }.getOrDefault(false)
+        }
+
+        val legacy = prefs.getString(KEY_SETTINGS_PIN, DEFAULT_SETTINGS_PIN)
+            ?: DEFAULT_SETTINGS_PIN
+        val matches = MessageDigest.isEqual(
+            legacy.toByteArray(Charsets.UTF_8),
+            candidate.toByteArray(Charsets.UTF_8)
+        )
+        if (matches && legacy != DEFAULT_SETTINGS_PIN) {
+            setSettingsPin(legacy)
+        }
+        return matches
+    }
+
+    fun setSettingsPin(pin: String) {
+        require(pin.length in 4..12 && pin.all(Char::isDigit)) { "PIN must contain 4-12 digits" }
+        require(pin != DEFAULT_SETTINGS_PIN) { "Choose a PIN other than the legacy default" }
+        val salt = ByteArray(PIN_SALT_BYTES).also(SecureRandom()::nextBytes)
+        val hash = derivePinHash(pin, salt)
+        prefs.edit()
+            .putString(KEY_SETTINGS_PIN_SALT, Base64.encodeToString(salt, Base64.NO_WRAP))
+            .putString(KEY_SETTINGS_PIN_HASH, Base64.encodeToString(hash, Base64.NO_WRAP))
+            .remove(KEY_SETTINGS_PIN)
+            .apply()
+    }
+
+    fun pinLockRemainingMs(nowEpochMs: Long = System.currentTimeMillis()): Long {
+        return (prefs.getLong(KEY_PIN_LOCK_UNTIL, 0L) - nowEpochMs).coerceAtLeast(0L)
+    }
+
+    fun recordFailedPinAttempt(nowEpochMs: Long = System.currentTimeMillis()): Long {
+        val failures = prefs.getInt(KEY_PIN_FAILED_ATTEMPTS, 0) + 1
+        if (failures < MAX_PIN_ATTEMPTS) {
+            prefs.edit().putInt(KEY_PIN_FAILED_ATTEMPTS, failures).apply()
+            return 0L
+        }
+
+        val lockUntil = nowEpochMs + PIN_LOCK_DURATION_MS
+        prefs.edit()
+            .putInt(KEY_PIN_FAILED_ATTEMPTS, 0)
+            .putLong(KEY_PIN_LOCK_UNTIL, lockUntil)
+            .apply()
+        return PIN_LOCK_DURATION_MS
+    }
+
+    fun clearPinFailures() {
+        prefs.edit()
+            .remove(KEY_PIN_FAILED_ATTEMPTS)
+            .remove(KEY_PIN_LOCK_UNTIL)
+            .apply()
+    }
+
+    private fun derivePinHash(pin: String, salt: ByteArray): ByteArray {
+        val spec = PBEKeySpec(pin.toCharArray(), salt, PIN_HASH_ITERATIONS, PIN_HASH_BITS)
+        return try {
+            SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
+        } finally {
+            spec.clearPassword()
+        }
+    }
 
     // --- Auto-rotate views ---
 
@@ -136,6 +241,7 @@ class AppConfig(context: Context) {
         private const val KEY_MQTT_DEVICE_NAME = "mqtt_device_name"
         private const val KEY_MQTT_DISCOVERY_PREFIX = "mqtt_discovery_prefix"
         private const val KEY_MQTT_DEVICE_ID = "mqtt_device_id"
+        private const val KEY_MQTT_DISCOVERY_CLEANUP = "mqtt_discovery_cleanup"
         private const val KEY_MIN_BRIGHTNESS = "min_brightness"
         private const val KEY_MAX_BRIGHTNESS = "max_brightness"
         private const val KEY_AUTO_BRIGHTNESS = "auto_brightness"
@@ -146,9 +252,20 @@ class AppConfig(context: Context) {
         private const val KEY_RELOAD_INTERVAL = "reload_interval_hours"
         private const val KEY_HEALTH_CHECK_INTERVAL = "health_check_interval_seconds"
         private const val KEY_SETTINGS_PIN = "settings_pin"
+        private const val KEY_SETTINGS_PIN_HASH = "settings_pin_hash"
+        private const val KEY_SETTINGS_PIN_SALT = "settings_pin_salt"
+        private const val KEY_PIN_FAILED_ATTEMPTS = "pin_failed_attempts"
+        private const val KEY_PIN_LOCK_UNTIL = "pin_lock_until"
         private const val KEY_AUTO_ROTATE = "auto_rotate"
         private const val KEY_AUTO_ROTATE_INTERVAL = "auto_rotate_interval"
 
         private const val DEFAULT_DASHBOARD_URL = "https://example.com"
+        private const val DISCOVERY_CLEANUP_SEPARATOR = "\t"
+        private const val DEFAULT_SETTINGS_PIN = "1234"
+        private const val PIN_SALT_BYTES = 16
+        private const val PIN_HASH_ITERATIONS = 120_000
+        private const val PIN_HASH_BITS = 256
+        private const val MAX_PIN_ATTEMPTS = 5
+        private const val PIN_LOCK_DURATION_MS = 30_000L
     }
 }

@@ -32,8 +32,19 @@ class ScheduleManager(
             return
         }
 
-        scheduleNextAlarm(ACTION_SCREEN_ON, config.screenOnTime)
-        scheduleNextAlarm(ACTION_SCREEN_OFF, config.screenOffTime)
+        val onTime = parseTime(config.screenOnTime, DEFAULT_ON_TIME)
+        val offTime = parseTime(config.screenOffTime, DEFAULT_OFF_TIME)
+        if (onTime == offTime) {
+            stop()
+            if (applyCurrentState) {
+                dispatchScreenCommand(true)
+            }
+            Log.w(TAG, "Identical ON/OFF times mean always ON; no alarms scheduled")
+            return
+        }
+
+        scheduleNextAlarm(ACTION_SCREEN_ON, onTime)
+        scheduleNextAlarm(ACTION_SCREEN_OFF, offTime)
         if (applyCurrentState) {
             dispatchScreenCommand(shouldScreenBeOnNow())
         }
@@ -52,16 +63,23 @@ class ScheduleManager(
             return
         }
 
+        val onTime = parseTime(config.screenOnTime, DEFAULT_ON_TIME)
+        val offTime = parseTime(config.screenOffTime, DEFAULT_OFF_TIME)
+        if (onTime == offTime) {
+            start()
+            return
+        }
+
         when (action) {
             ACTION_SCREEN_ON -> {
                 Log.i(TAG, "Schedule: screen ON alarm fired")
                 dispatchScreenCommand(true)
-                scheduleNextAlarm(ACTION_SCREEN_ON, config.screenOnTime)
+                scheduleNextAlarm(ACTION_SCREEN_ON, onTime)
             }
             ACTION_SCREEN_OFF -> {
                 Log.i(TAG, "Schedule: screen OFF alarm fired")
                 dispatchScreenCommand(false)
-                scheduleNextAlarm(ACTION_SCREEN_OFF, config.screenOffTime)
+                scheduleNextAlarm(ACTION_SCREEN_OFF, offTime)
             }
         }
     }
@@ -73,9 +91,7 @@ class ScheduleManager(
         return SchedulePolicy.shouldBeOn(now, onTime, offTime)
     }
 
-    private fun scheduleNextAlarm(action: String, timeString: String) {
-        val fallback = if (action == ACTION_SCREEN_ON) DEFAULT_ON_TIME else DEFAULT_OFF_TIME
-        val time = parseTime(timeString, fallback)
+    private fun scheduleNextAlarm(action: String, time: LocalTime) {
         val calendar = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, time.hour)
             set(Calendar.MINUTE, time.minute)
@@ -149,6 +165,7 @@ class ScheduleManager(
 
 object SchedulePolicy {
     fun shouldBeOn(now: LocalTime, onTime: LocalTime, offTime: LocalTime): Boolean {
+        if (onTime == offTime) return true
         return if (onTime < offTime) {
             !now.isBefore(onTime) && now.isBefore(offTime)
         } else {

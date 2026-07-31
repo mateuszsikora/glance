@@ -39,6 +39,7 @@ class MqttContractTest {
         assertEquals(topics.state, json.getString("state_topic"))
         assertEquals(topics.availability, json.getString("availability_topic"))
         assertTrue(json.getBoolean("brightness"))
+        assertFalse(json.getBoolean("transition"))
         assertEquals(255, json.getInt("brightness_scale"))
         assertEquals("Kitchen Tablet", json.getJSONObject("device").getString("name"))
         assertEquals("Glance", json.getJSONObject("origin").getString("name"))
