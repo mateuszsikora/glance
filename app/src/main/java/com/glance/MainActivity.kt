@@ -12,17 +12,17 @@ import android.view.View
 import android.view.WindowManager
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import com.glance.brightness.BrightnessController
 import com.glance.dashboard.DashboardPagerAdapter
 import com.glance.dashboard.WebViewFragment
 import com.glance.databinding.ActivityMainBinding
 import com.glance.kiosk.KioskService
 import com.glance.kiosk.LockTaskHelper
-import com.glance.screen.ScheduleManager
 import com.glance.screen.ScreenController
-import com.glance.ha.HAStateManager
 import com.glance.settings.SettingsActivity
 import com.glance.watchdog.WatchdogService
+import com.glance.watchdog.WebViewHealthChecker
 
 class MainActivity : AppCompatActivity() {
 
@@ -32,8 +32,8 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var brightnessController: BrightnessController
     private lateinit var screenController: ScreenController
-    private lateinit var scheduleManager: ScheduleManager
-    private lateinit var haStateManager: HAStateManager
+    private var controlReceiverRegistered = false
+    private val webViewHealthChecker = WebViewHealthChecker()
 
     private var settingsTapCount = 0
     private var lastSettingsTapTime = 0L
@@ -43,6 +43,31 @@ class MainActivity : AppCompatActivity() {
             if (intent?.action == WatchdogService.ACTION_RELOAD_WEBVIEW) {
                 Log.i(TAG, "Reload broadcast received — reloading all WebViews")
                 reloadAllWebViews()
+            } else if (intent?.action == WatchdogService.ACTION_HEALTH_CHECK) {
+                webViewHealthChecker.check(currentWebViewFragment())
+            }
+        }
+    }
+
+    private val controlReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                KioskService.ACTION_CONTROL_SCREEN -> {
+                    if (intent.getBooleanExtra(KioskService.EXTRA_SCREEN_ON, true)) {
+                        screenController.screenOn()
+                    } else {
+                        screenController.screenOff()
+                    }
+                }
+                KioskService.ACTION_CONTROL_BRIGHTNESS -> {
+                    brightnessController.setBrightnessFromRemote(
+                        intent.getIntExtra(
+                            KioskService.EXTRA_BRIGHTNESS,
+                            GlanceApp.instance.appConfig.minBrightness
+                        )
+                    )
+                }
+                ACTION_RELOAD_UI -> recreate()
             }
         }
     }
@@ -57,12 +82,14 @@ class MainActivity : AppCompatActivity() {
         blockBackButton()
         setupKioskMode()
         setupDashboard()
+        setupWebViewHealthChecker()
         setupSettingsGesture()
-        startServices()
-        registerReloadReceiver()
         setupBrightness()
-        setupScreenSchedule()
-        setupHAIntegration()
+        setupScreenControl()
+        registerControlReceiver()
+        registerReloadReceiver()
+        startServices()
+        reportCurrentState()
     }
 
     override fun onResume() {
@@ -172,31 +199,76 @@ class MainActivity : AppCompatActivity() {
     private fun setupBrightness() {
         val config = GlanceApp.instance.appConfig
         brightnessController = BrightnessController(this, config)
+        brightnessController.setListener(object : BrightnessController.Listener {
+            override fun onBrightnessChanged(brightness: Int) {
+                reportBrightness(brightness)
+            }
+        })
         brightnessController.start(window)
     }
 
-    // --- Screen schedule ---
+    // --- Screen control ---
 
-    private fun setupScreenSchedule() {
-        val config = GlanceApp.instance.appConfig
-        screenController = ScreenController(this)
-        scheduleManager = ScheduleManager(this, config, screenController)
-        scheduleManager.start()
-    }
-
-    // --- HA Integration ---
-
-    private fun setupHAIntegration() {
-        val config = GlanceApp.instance.appConfig
-        haStateManager = HAStateManager(this, config, screenController, brightnessController)
-        haStateManager.start()
+    private fun setupScreenControl() {
+        screenController = ScreenController(this, brightnessController, binding.rootContainer)
+        screenController.setListener(object : ScreenController.Listener {
+            override fun onScreenStateChanged(isOn: Boolean) {
+                reportScreenState(isOn)
+            }
+        })
     }
 
     // --- Reload WebViews ---
 
     private fun registerReloadReceiver() {
-        val filter = IntentFilter(WatchdogService.ACTION_RELOAD_WEBVIEW)
-        registerReceiver(reloadReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        val filter = IntentFilter().apply {
+            addAction(WatchdogService.ACTION_RELOAD_WEBVIEW)
+            addAction(WatchdogService.ACTION_HEALTH_CHECK)
+        }
+        ContextCompat.registerReceiver(
+            this,
+            reloadReceiver,
+            filter,
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+    }
+
+    private fun registerControlReceiver() {
+        val filter = IntentFilter().apply {
+            addAction(KioskService.ACTION_CONTROL_SCREEN)
+            addAction(KioskService.ACTION_CONTROL_BRIGHTNESS)
+            addAction(ACTION_RELOAD_UI)
+        }
+        ContextCompat.registerReceiver(
+            this,
+            controlReceiver,
+            filter,
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        controlReceiverRegistered = true
+    }
+
+    private fun reportCurrentState() {
+        reportScreenState(screenController.isScreenOn)
+        brightnessController.currentBrightness
+            .takeIf { it >= 0 }
+            ?.let(::reportBrightness)
+    }
+
+    private fun reportScreenState(isOn: Boolean) {
+        sendBroadcast(
+            Intent(KioskService.ACTION_REPORT_SCREEN_STATE)
+                .setPackage(packageName)
+                .putExtra(KioskService.EXTRA_SCREEN_ON, isOn)
+        )
+    }
+
+    private fun reportBrightness(brightness: Int) {
+        sendBroadcast(
+            Intent(KioskService.ACTION_REPORT_BRIGHTNESS)
+                .setPackage(packageName)
+                .putExtra(KioskService.EXTRA_BRIGHTNESS, brightness)
+        )
     }
 
     private fun reloadAllWebViews() {
@@ -205,6 +277,23 @@ class MainActivity : AppCompatActivity() {
                 fragment.reload()
             }
         }
+    }
+
+    private fun setupWebViewHealthChecker() {
+        webViewHealthChecker.onReloadNeeded = {
+            currentWebViewFragment()?.reload()
+        }
+        webViewHealthChecker.onRestartNeeded = {
+            Log.e(TAG, "WebView health checks failed repeatedly — recreating dashboard")
+            recreate()
+        }
+    }
+
+    private fun currentWebViewFragment(): WebViewFragment? {
+        return supportFragmentManager.fragments
+            .filterIsInstance<WebViewFragment>()
+            .firstOrNull { it.isVisible }
+            ?: supportFragmentManager.fragments.filterIsInstance<WebViewFragment>().firstOrNull()
     }
 
     // --- Services ---
@@ -226,10 +315,15 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        webViewHealthChecker.reset()
         unregisterReceiver(reloadReceiver)
-        if (::haStateManager.isInitialized) haStateManager.stop()
+        if (controlReceiverRegistered) {
+            unregisterReceiver(controlReceiver)
+            controlReceiverRegistered = false
+        }
+        if (::brightnessController.isInitialized) brightnessController.setListener(null)
+        if (::screenController.isInitialized) screenController.setListener(null)
         if (::brightnessController.isInitialized) brightnessController.stop()
-        if (::scheduleManager.isInitialized) scheduleManager.stop()
         if (::screenController.isInitialized) screenController.release()
         super.onDestroy()
     }
@@ -238,5 +332,6 @@ class MainActivity : AppCompatActivity() {
         private const val TAG = "MainActivity"
         private const val TAPS_TO_SETTINGS = 5
         private const val TAP_TIMEOUT_MS = 2000L
+        const val ACTION_RELOAD_UI = "com.glance.action.RELOAD_UI"
     }
 }

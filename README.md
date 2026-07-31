@@ -50,5 +50,55 @@ adb shell dpm set-device-owner com.glance/.AdminReceiver
 
 Home Assistant is usually self-hosted over plain `http://` on a LAN, so the app ships a
 permissive `res/xml/network_security_config.xml` that allows cleartext traffic. Without
-it, `targetSdk 34` would block both the dashboard WebView and the `ws://` connection to
-the HA WebSocket API.
+it, `targetSdk 34` would block the dashboard WebView. The MQTT connection is configured
+separately and normally uses plain TCP port `1883` on the trusted local network.
+
+## Home Assistant MQTT discovery
+
+Glance exposes the tablet screen as a native brightness-capable MQTT light. It publishes
+a retained Home Assistant MQTT Discovery payload, state, and availability/LWT. No helper
+entities, template YAML, or Home Assistant access token are required.
+
+MQTT and the daily screen schedule run inside the foreground kiosk service rather than
+the dashboard Activity. This lets Home Assistant wake the tablet even if Android has
+recreated the WebView while the display was off. Initial broker failures use exponential
+backoff, while established sessions use Paho automatic reconnect.
+
+Requirements:
+
+1. Configure the MQTT integration and broker in Home Assistant.
+2. Create a dedicated login for the tablet in the Mosquitto broker configuration.
+3. Open Glance settings (tap the top-right corner five times; default PIN `1234`).
+4. Enable MQTT and enter the broker host, port (normally `1883`), username, and password.
+5. Save and restart Glance.
+
+Home Assistant will discover a `Glance Tablet` device with a `Screen` light entity. The
+entity supports ON/OFF, brightness `0..255`, and availability. Topics are derived from a
+stable Android device ID:
+
+```
+homeassistant/light/glance_<device-id>/config
+glance/<device-id>/light/set
+glance/<device-id>/light/state
+glance/<device-id>/availability
+```
+
+When Glance is not Device Owner, OFF uses a reversible soft-off (black overlay and window
+brightness zero); tapping the black screen or sending ON wakes it. With Device Owner,
+Glance uses `DevicePolicyManager.lockNow()` for a real hardware screen-off.
+
+The optional screen ON/OFF schedule uses a daytime window: for example, wake at `06:00`
+and turn off at `23:00` keeps the physical display off overnight. An overnight window is
+also supported by choosing an ON time later than the OFF time.
+
+MQTT credentials are encrypted at rest with an Android Keystore AES-GCM key. Port `1883`
+still sends MQTT traffic unencrypted on the network; use an `ssl://` broker endpoint when
+the broker is configured for TLS.
+
+## Device Owner signing
+
+Android only accepts an update to an installed Device Owner when the new APK uses the same
+signing certificate. Configure a release keystore before first provisioning. If the tablet
+was provisioned with a debug APK, securely back up that exact `~/.android/debug.keystore`;
+the build falls back to that key when no `keystore.properties` is present so local release
+artifacts remain update-compatible with the provisioned tablet.

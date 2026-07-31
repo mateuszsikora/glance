@@ -1,10 +1,6 @@
-# OkHttp
--dontwarn okhttp3.**
--dontwarn okio.**
--keep class okhttp3.** { *; }
-
-# WebSocket
--keep class com.glance.ha.** { *; }
+# MQTT
+-dontwarn org.eclipse.paho.client.mqttv3.**
+-keep class org.eclipse.paho.client.mqttv3.** { *; }
 
 # Keep DeviceAdminReceiver
 -keep class com.glance.AdminReceiver { *; }

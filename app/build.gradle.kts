@@ -7,7 +7,8 @@ plugins {
 
 // Release signing is driven by keystore.properties in the project root, which is
 // deliberately untracked. See keystore.properties.example for the expected keys.
-// Without it, assembleRelease still runs but produces an unsigned APK.
+// Without it, release falls back to the machine's debug key. That fallback is intentional for
+// already-provisioned Device Owner tablets: Android only accepts updates signed by the same key.
 val keystorePropertiesFile = rootProject.file("keystore.properties")
 val keystoreProperties = Properties().apply {
     if (keystorePropertiesFile.exists()) {
@@ -23,8 +24,8 @@ android {
         applicationId = "com.glance"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 3
+        versionName = "1.2"
     }
 
     signingConfigs {
@@ -41,6 +42,7 @@ android {
     buildTypes {
         release {
             signingConfig = signingConfigs.findByName("release")
+                ?: signingConfigs.getByName("debug")
             isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -59,6 +61,7 @@ android {
     }
 
     buildFeatures {
+        buildConfig = true
         viewBinding = true
     }
 }
@@ -73,12 +76,11 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-process:2.7.0")
     implementation("androidx.webkit:webkit:1.10.0")
 
-    // WebSocket (OkHttp)
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
-
-    // Coroutines
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
-
     // JSON
     implementation("org.json:json:20231013")
+
+    // MQTT (pure Java client; no Android background service dependency)
+    implementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5")
+
+    testImplementation("junit:junit:4.13.2")
 }

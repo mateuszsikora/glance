@@ -20,6 +20,7 @@ class WatchdogService : Service() {
 
     private val handler = Handler(Looper.getMainLooper())
     private var lastReloadTime = System.currentTimeMillis()
+    private var loopsStarted = false
 
     override fun onCreate() {
         super.onCreate()
@@ -28,8 +29,11 @@ class WatchdogService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForeground(NOTIFICATION_ID, buildNotification())
-        startHealthCheckLoop()
-        startPeriodicReloadLoop()
+        if (!loopsStarted) {
+            loopsStarted = true
+            startHealthCheckLoop()
+            startPeriodicReloadLoop()
+        }
         Log.i(TAG, "WatchdogService started")
         return START_STICKY
     }
@@ -71,6 +75,7 @@ class WatchdogService : Service() {
             Log.w(TAG, "Memory critically low (${memoryInfo.usedPercent}%), forcing reload")
             triggerWebViewReload()
         }
+        sendBroadcast(Intent(ACTION_HEALTH_CHECK).setPackage(packageName))
     }
 
     private fun triggerWebViewReload() {
@@ -113,6 +118,7 @@ class WatchdogService : Service() {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        loopsStarted = false
         super.onDestroy()
     }
 
@@ -128,5 +134,6 @@ class WatchdogService : Service() {
         private const val MEMORY_THRESHOLD_PERCENT = 85
 
         const val ACTION_RELOAD_WEBVIEW = "com.glance.ACTION_RELOAD_WEBVIEW"
+        const val ACTION_HEALTH_CHECK = "com.glance.ACTION_HEALTH_CHECK"
     }
 }

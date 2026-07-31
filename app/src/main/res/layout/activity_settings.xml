@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:padding="24dp"
@@ -137,7 +138,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Screen Schedule"
+            android:text="Screen ON/OFF schedule"
             android:textColor="#FFFFFFFF"
             android:textSize="18sp"
             android:textStyle="bold"
@@ -147,7 +148,7 @@
             android:id="@+id/switchSchedule"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Enable schedule"
+            android:text="Automatically wake and turn off the screen"
             android:textColor="#FFFFFFFF"
             android:layout_marginBottom="8dp" />
 
@@ -155,14 +156,14 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:layout_marginBottom="16dp">
+            android:layout_marginBottom="8dp">
 
             <EditText
                 android:id="@+id/editScreenOnTime"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:hint="ON time (HH:mm)"
+                android:hint="Wake at (HH:mm)"
                 android:inputType="time"
                 android:background="#FF2A2A2A"
                 android:textColor="#FFFFFFFF"
@@ -175,13 +176,21 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:hint="OFF time (HH:mm)"
+                android:hint="Turn off at (HH:mm)"
                 android:inputType="time"
                 android:background="#FF2A2A2A"
                 android:textColor="#FFFFFFFF"
                 android:textColorHint="#FF808080"
                 android:padding="12dp" />
         </LinearLayout>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="The display is physically off outside the ON–OFF window. Example: wake at 06:00 and turn off at 23:00 keeps it off overnight."
+            android:textColor="#FFB0B0B0"
+            android:textSize="12sp"
+            android:layout_marginBottom="16dp" />
 
         <!-- Divider -->
         <View
@@ -190,29 +199,29 @@
             android:background="#FF404040"
             android:layout_marginBottom="16dp" />
 
-        <!-- HA Integration -->
+        <!-- Home Assistant MQTT Integration -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Home Assistant"
+            android:text="Home Assistant MQTT"
             android:textColor="#FFFFFFFF"
             android:textSize="18sp"
             android:textStyle="bold"
             android:layout_marginBottom="8dp" />
 
         <androidx.appcompat.widget.SwitchCompat
-            android:id="@+id/switchHaEnabled"
+            android:id="@+id/switchMqttEnabled"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Enable HA integration"
+            android:text="Enable MQTT + automatic HA discovery"
             android:textColor="#FFFFFFFF"
             android:layout_marginBottom="8dp" />
 
         <EditText
-            android:id="@+id/editHaUrl"
+            android:id="@+id/editMqttBrokerHost"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="HA URL (e.g. http://192.168.1.10:8123)"
+            android:hint="MQTT broker host (e.g. 192.168.1.10)"
             android:inputType="textUri"
             android:background="#FF2A2A2A"
             android:textColor="#FFFFFFFF"
@@ -221,11 +230,11 @@
             android:layout_marginBottom="8dp" />
 
         <EditText
-            android:id="@+id/editHaToken"
+            android:id="@+id/editMqttBrokerPort"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="Long-Lived Access Token"
-            android:inputType="textPassword"
+            android:hint="MQTT port (default 1883)"
+            android:inputType="number"
             android:background="#FF2A2A2A"
             android:textColor="#FFFFFFFF"
             android:textColorHint="#FF808080"
@@ -233,11 +242,45 @@
             android:layout_marginBottom="8dp" />
 
         <EditText
-            android:id="@+id/editHaEntityScreen"
+            android:id="@+id/editMqttUsername"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="Screen entity (e.g. input_boolean.tablet_screen)"
-            android:inputType="text"
+            android:hint="MQTT username"
+            android:inputType="textNoSuggestions"
+            android:background="#FF2A2A2A"
+            android:textColor="#FFFFFFFF"
+            android:textColorHint="#FF808080"
+            android:padding="12dp"
+            android:layout_marginBottom="8dp" />
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            app:boxBackgroundColor="#FF2A2A2A"
+            app:boxBackgroundMode="filled"
+            app:endIconMode="password_toggle"
+            app:endIconTint="#FFB0B0B0"
+            app:hintTextColor="#FF808080">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/editMqttPassword"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="MQTT password"
+                android:inputType="textPassword"
+                android:importantForAutofill="no"
+                android:textColor="#FFFFFFFF"
+                android:textColorHint="#FF808080" />
+
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <EditText
+            android:id="@+id/editMqttDeviceName"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Device name in Home Assistant"
+            android:inputType="textCapWords"
             android:background="#FF2A2A2A"
             android:textColor="#FFFFFFFF"
             android:textColorHint="#FF808080"
@@ -245,15 +288,23 @@
             android:layout_marginBottom="8dp" />
 
         <EditText
-            android:id="@+id/editHaEntityBrightness"
+            android:id="@+id/editMqttDiscoveryPrefix"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="Brightness entity (e.g. input_number.tablet_brightness)"
-            android:inputType="text"
+            android:hint="Discovery prefix (default homeassistant)"
+            android:inputType="textNoSuggestions"
             android:background="#FF2A2A2A"
             android:textColor="#FFFFFFFF"
             android:textColorHint="#FF808080"
             android:padding="12dp"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Publishes a retained MQTT Discovery light with ON/OFF, brightness and availability. No HA token or YAML helpers required."
+            android:textColor="#FFB0B0B0"
+            android:textSize="12sp"
             android:layout_marginBottom="16dp" />
 
         <!-- Divider -->
