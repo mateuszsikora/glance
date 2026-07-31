@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
     Home Assistant is typically self-hosted on a LAN, reached over plain http://
-    (e.g. http://homeassistant.local:8123) with a self-signed certificate at best.
+    (e.g. http://homeassistant.local:8123). HTTPS still requires a certificate trusted by
+    Android's system trust store; WebView rejects invalid and self-signed certificates.
     Since targetSdk 28, cleartext traffic is denied by default, which would break
     a dashboard WebView configured with a local http:// URL.
 

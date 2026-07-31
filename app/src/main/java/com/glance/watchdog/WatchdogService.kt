@@ -3,10 +3,13 @@ package com.glance.watchdog
 import android.app.Notification
 import android.app.PendingIntent
 import android.app.Service
+import android.app.ActivityManager
+import android.content.ComponentCallbacks2
 import android.content.Intent
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.glance.GlanceApp
@@ -19,7 +22,7 @@ import com.glance.R
 class WatchdogService : Service() {
 
     private val handler = Handler(Looper.getMainLooper())
-    private var lastReloadTime = System.currentTimeMillis()
+    private var lastMemoryReloadElapsedMs = 0L
     private var loopsStarted = false
 
     override fun onCreate() {
@@ -60,7 +63,6 @@ class WatchdogService : Service() {
             override fun run() {
                 Log.i(TAG, "Periodic WebView reload triggered")
                 triggerWebViewReload()
-                lastReloadTime = System.currentTimeMillis()
                 handler.postDelayed(this, intervalMs)
             }
         }, intervalMs)
@@ -68,12 +70,20 @@ class WatchdogService : Service() {
 
     private fun performHealthCheck() {
         val memoryInfo = getMemoryInfo()
-        Log.d(TAG, "Health check — free: ${memoryInfo.freeMemMB}MB, " +
-            "total: ${memoryInfo.totalMemMB}MB, used: ${memoryInfo.usedPercent}%")
+        Log.d(
+            TAG,
+            "Health check — heap: ${memoryInfo.heapUsedMB}/${memoryInfo.heapMaxMB}MB " +
+                "(${memoryInfo.heapUsedPercent}%), system available: " +
+                "${memoryInfo.systemAvailableMB}/${memoryInfo.systemTotalMB}MB"
+        )
 
-        if (memoryInfo.usedPercent > MEMORY_THRESHOLD_PERCENT) {
-            Log.w(TAG, "Memory critically low (${memoryInfo.usedPercent}%), forcing reload")
-            triggerWebViewReload()
+        if (memoryInfo.systemLowMemory ||
+            memoryInfo.heapUsedPercent > MEMORY_THRESHOLD_PERCENT
+        ) {
+            requestMemoryRecovery(
+                "lowMemory=${memoryInfo.systemLowMemory}, " +
+                    "heap=${memoryInfo.heapUsedPercent}%"
+            )
         }
         sendBroadcast(Intent(ACTION_HEALTH_CHECK).setPackage(packageName))
     }
@@ -87,16 +97,38 @@ class WatchdogService : Service() {
 
     private fun getMemoryInfo(): MemoryInfo {
         val runtime = Runtime.getRuntime()
-        val totalMem = runtime.maxMemory()
-        val freeMem = runtime.freeMemory()
-        val usedMem = runtime.totalMemory() - freeMem
-        val usedPercent = (usedMem * 100 / totalMem).toInt()
+        val heapMax = runtime.maxMemory()
+        val heapUsed = runtime.totalMemory() - runtime.freeMemory()
+        val system = ActivityManager.MemoryInfo().also {
+            (getSystemService(ACTIVITY_SERVICE) as ActivityManager).getMemoryInfo(it)
+        }
 
         return MemoryInfo(
-            freeMemMB = (freeMem / 1024 / 1024).toInt(),
-            totalMemMB = (totalMem / 1024 / 1024).toInt(),
-            usedPercent = usedPercent
+            heapUsedMB = (heapUsed / BYTES_PER_MB).toInt(),
+            heapMaxMB = (heapMax / BYTES_PER_MB).toInt(),
+            heapUsedPercent = (heapUsed * 100 / heapMax).toInt(),
+            systemAvailableMB = (system.availMem / BYTES_PER_MB).toInt(),
+            systemTotalMB = (system.totalMem / BYTES_PER_MB).toInt(),
+            systemLowMemory = system.lowMemory
         )
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW ||
+            level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL ||
+            level >= ComponentCallbacks2.TRIM_MEMORY_MODERATE
+        ) {
+            requestMemoryRecovery("trim level=$level")
+        }
+    }
+
+    private fun requestMemoryRecovery(reason: String) {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastMemoryReloadElapsedMs < MEMORY_RELOAD_COOLDOWN_MS) return
+        lastMemoryReloadElapsedMs = now
+        Log.w(TAG, "Memory pressure ($reason), forcing WebView reload")
+        triggerWebViewReload()
     }
 
     private fun buildNotification(): Notification {
@@ -123,15 +155,20 @@ class WatchdogService : Service() {
     }
 
     private data class MemoryInfo(
-        val freeMemMB: Int,
-        val totalMemMB: Int,
-        val usedPercent: Int
+        val heapUsedMB: Int,
+        val heapMaxMB: Int,
+        val heapUsedPercent: Int,
+        val systemAvailableMB: Int,
+        val systemTotalMB: Int,
+        val systemLowMemory: Boolean
     )
 
     companion object {
         private const val TAG = "WatchdogService"
         private const val NOTIFICATION_ID = 1002
         private const val MEMORY_THRESHOLD_PERCENT = 85
+        private const val MEMORY_RELOAD_COOLDOWN_MS = 60_000L
+        private const val BYTES_PER_MB = 1024L * 1024L
 
         const val ACTION_RELOAD_WEBVIEW = "com.glance.ACTION_RELOAD_WEBVIEW"
         const val ACTION_HEALTH_CHECK = "com.glance.ACTION_HEALTH_CHECK"

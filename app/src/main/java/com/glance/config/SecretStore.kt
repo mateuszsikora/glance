@@ -28,7 +28,8 @@ internal class SecretStore(
 
         val legacy = prefs.getString(legacyPreferenceKey, null).orEmpty()
         if (legacy.isNotEmpty()) {
-            put(encryptedPreferenceKey, legacyPreferenceKey, legacy)
+            runCatching { put(encryptedPreferenceKey, legacyPreferenceKey, legacy) }
+                .onFailure { Log.e(TAG, "Unable to migrate legacy credential", it) }
         }
         return legacy
     }

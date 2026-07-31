@@ -40,7 +40,7 @@ class BrightnessController(
     private var emaLux: Float = -1f
     private var running = false
     private var listener: Listener? = null
-    private var lastAppliedBrightness = -1
+    private var lastAppliedBrightness = clampToConfiguredRange(config.lastKnownBrightness)
     private var screenOffMode = false
 
     // HA override: when set, auto-brightness is paused until this time
@@ -59,14 +59,17 @@ class BrightnessController(
      */
     fun start(window: android.view.Window? = null) {
         activityWindow = window
+        if (!screenOffMode) {
+            applyBrightness(lastAppliedBrightness)
+        }
 
         if (!config.autoBrightnessEnabled) {
-            Log.i(TAG, "Auto brightness disabled in config")
+            Log.i(TAG, "Auto brightness disabled; restored brightness=$lastAppliedBrightness")
             return
         }
 
         if (lightSensor == null) {
-            Log.w(TAG, "No light sensor available on this device")
+            Log.w(TAG, "No light sensor available; restored brightness=$lastAppliedBrightness")
             return
         }
 

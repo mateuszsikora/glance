@@ -23,4 +23,11 @@ class SchedulePolicyTest {
         assertTrue(SchedulePolicy.shouldBeOn(LocalTime.of(5, 30), on, off))
         assertFalse(SchedulePolicy.shouldBeOn(LocalTime.of(12, 0), on, off))
     }
+
+    @Test
+    fun identicalTimesMeanAlwaysOnForLegacyConfigurations() {
+        val same = LocalTime.of(6, 0)
+        assertTrue(SchedulePolicy.shouldBeOn(LocalTime.of(2, 0), same, same))
+        assertTrue(SchedulePolicy.shouldBeOn(LocalTime.of(12, 0), same, same))
+    }
 }

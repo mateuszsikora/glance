@@ -4,7 +4,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:padding="24dp"
-    android:background="#FF1A1A1A">
+    android:importantForAutofill="noExcludeDescendants">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -15,7 +15,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Glance Settings"
+            android:text="@string/settings_title"
             android:textSize="24sp"
             android:textColor="#FFFFFFFF"
             android:textStyle="bold"
@@ -25,7 +25,8 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Dashboard URLs (one per line)"
+            android:text="@string/dashboard_urls_label"
+            android:labelFor="@id/editDashboardUrls"
             android:textColor="#FFB0B0B0"
             android:textSize="14sp"
             android:layout_marginBottom="4dp" />
@@ -54,7 +55,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Auto-rotate dashboards"
+                android:text="@string/auto_rotate_dashboards"
                 android:textColor="#FFFFFFFF" />
         </LinearLayout>
 
@@ -62,7 +63,7 @@
             android:id="@+id/editAutoRotateInterval"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="Rotate interval (seconds)"
+            android:hint="@string/rotate_interval_hint"
             android:inputType="number"
             android:background="#FF2A2A2A"
             android:textColor="#FFFFFFFF"
@@ -81,7 +82,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Brightness"
+            android:text="@string/brightness_title"
             android:textColor="#FFFFFFFF"
             android:textSize="18sp"
             android:textStyle="bold"
@@ -91,7 +92,7 @@
             android:id="@+id/switchAutoBrightness"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Auto brightness (light sensor)"
+            android:text="@string/auto_brightness_label"
             android:textColor="#FFFFFFFF"
             android:layout_marginBottom="8dp" />
 
@@ -106,7 +107,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:hint="Min (0-255)"
+                android:hint="@string/min_brightness_hint"
                 android:inputType="number"
                 android:background="#FF2A2A2A"
                 android:textColor="#FFFFFFFF"
@@ -119,7 +120,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:hint="Max (0-255)"
+                android:hint="@string/max_brightness_hint"
                 android:inputType="number"
                 android:background="#FF2A2A2A"
                 android:textColor="#FFFFFFFF"
@@ -138,7 +139,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Screen ON/OFF schedule"
+            android:text="@string/screen_schedule_title"
             android:textColor="#FFFFFFFF"
             android:textSize="18sp"
             android:textStyle="bold"
@@ -148,7 +149,7 @@
             android:id="@+id/switchSchedule"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Automatically wake and turn off the screen"
+            android:text="@string/screen_schedule_enabled"
             android:textColor="#FFFFFFFF"
             android:layout_marginBottom="8dp" />
 
@@ -163,7 +164,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:hint="Wake at (HH:mm)"
+                android:hint="@string/wake_at_hint"
                 android:inputType="time"
                 android:background="#FF2A2A2A"
                 android:textColor="#FFFFFFFF"
@@ -176,7 +177,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:hint="Turn off at (HH:mm)"
+                android:hint="@string/turn_off_at_hint"
                 android:inputType="time"
                 android:background="#FF2A2A2A"
                 android:textColor="#FFFFFFFF"
@@ -187,7 +188,7 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="The display is physically off outside the ON–OFF window. Example: wake at 06:00 and turn off at 23:00 keeps it off overnight."
+            android:text="@string/screen_schedule_help"
             android:textColor="#FFB0B0B0"
             android:textSize="12sp"
             android:layout_marginBottom="16dp" />
@@ -203,7 +204,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Home Assistant MQTT"
+            android:text="@string/mqtt_title"
             android:textColor="#FFFFFFFF"
             android:textSize="18sp"
             android:textStyle="bold"
@@ -213,7 +214,7 @@
             android:id="@+id/switchMqttEnabled"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Enable MQTT + automatic HA discovery"
+            android:text="@string/mqtt_enabled_label"
             android:textColor="#FFFFFFFF"
             android:layout_marginBottom="8dp" />
 
@@ -221,7 +222,7 @@
             android:id="@+id/editMqttBrokerHost"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="MQTT broker host (e.g. 192.168.1.10)"
+            android:hint="@string/mqtt_host_hint"
             android:inputType="textUri"
             android:background="#FF2A2A2A"
             android:textColor="#FFFFFFFF"
@@ -233,7 +234,7 @@
             android:id="@+id/editMqttBrokerPort"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="MQTT port (default 1883)"
+            android:hint="@string/mqtt_port_hint"
             android:inputType="number"
             android:background="#FF2A2A2A"
             android:textColor="#FFFFFFFF"
@@ -245,7 +246,7 @@
             android:id="@+id/editMqttUsername"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="MQTT username"
+            android:hint="@string/mqtt_username_hint"
             android:inputType="textNoSuggestions"
             android:background="#FF2A2A2A"
             android:textColor="#FFFFFFFF"
@@ -267,7 +268,7 @@
                 android:id="@+id/editMqttPassword"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:hint="MQTT password"
+                android:hint="@string/mqtt_password_hint"
                 android:inputType="textPassword"
                 android:importantForAutofill="no"
                 android:textColor="#FFFFFFFF"
@@ -279,7 +280,7 @@
             android:id="@+id/editMqttDeviceName"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="Device name in Home Assistant"
+            android:hint="@string/mqtt_device_name_hint"
             android:inputType="textCapWords"
             android:background="#FF2A2A2A"
             android:textColor="#FFFFFFFF"
@@ -291,7 +292,7 @@
             android:id="@+id/editMqttDiscoveryPrefix"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="Discovery prefix (default homeassistant)"
+            android:hint="@string/mqtt_discovery_prefix_hint"
             android:inputType="textNoSuggestions"
             android:background="#FF2A2A2A"
             android:textColor="#FFFFFFFF"
@@ -302,7 +303,7 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Publishes a retained MQTT Discovery light with ON/OFF, brightness and availability. No HA token or YAML helpers required."
+            android:text="@string/mqtt_help"
             android:textColor="#FFB0B0B0"
             android:textSize="12sp"
             android:layout_marginBottom="16dp" />
@@ -319,7 +320,7 @@
             android:id="@+id/editPin"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="Settings PIN"
+            android:hint="@string/settings_pin_hint"
             android:inputType="numberPassword"
             android:background="#FF2A2A2A"
             android:textColor="#FFFFFFFF"
@@ -338,7 +339,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Debug Info"
+            android:text="@string/debug_info_title"
             android:textColor="#FFFFFFFF"
             android:textSize="18sp"
             android:textStyle="bold"
@@ -364,7 +365,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Save"
+                android:text="@string/save"
                 android:layout_marginEnd="8dp" />
 
             <com.google.android.material.button.MaterialButton
@@ -373,7 +374,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Cancel"
+                android:text="@string/cancel"
                 android:textColor="#FFFFFFFF" />
         </LinearLayout>
 
@@ -383,7 +384,7 @@
             style="@style/Widget.MaterialComponents.Button.TextButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Exit Kiosk Mode"
+            android:text="@string/exit_kiosk_mode"
             android:textColor="#FFFF5252"
             android:layout_marginTop="16dp" />
 

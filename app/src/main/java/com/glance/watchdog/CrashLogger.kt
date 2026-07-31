@@ -3,8 +3,9 @@ package com.glance.watchdog
 import android.content.Context
 import android.util.Log
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.*
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 object CrashLogger {
 
@@ -12,8 +13,9 @@ object CrashLogger {
     private const val LOG_FILE = "glance_crash.log"
     private const val MAX_FILE_SIZE = 1024 * 1024 // 1MB
 
-    private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
+    private val dateFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss", Locale.US)
 
+    @Synchronized
     fun log(context: Context, level: String, message: String, throwable: Throwable? = null) {
         try {
             val file = File(context.filesDir, LOG_FILE)
@@ -24,7 +26,7 @@ object CrashLogger {
                 file.renameTo(backup)
             }
 
-            val timestamp = dateFormat.format(Date())
+            val timestamp = dateFormat.format(ZonedDateTime.now())
             val entry = buildString {
                 append("[$timestamp] $level: $message")
                 if (throwable != null) {
@@ -42,6 +44,7 @@ object CrashLogger {
         }
     }
 
+    @Synchronized
     fun readLog(context: Context): String {
         return try {
             val file = File(context.filesDir, LOG_FILE)
@@ -51,6 +54,7 @@ object CrashLogger {
         }
     }
 
+    @Synchronized
     fun clearLog(context: Context) {
         try {
             File(context.filesDir, LOG_FILE).delete()

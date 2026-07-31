@@ -36,34 +36,37 @@ class MqttStateManager(
     private val mainHandler = Handler(Looper.getMainLooper())
     private val deviceId = config.mqttDeviceId
     private val topics = MqttContract.topics(config.mqttDiscoveryPrefix, deviceId)
+    private val serverUri by lazy {
+        MqttEndpoint.serverUri(config.mqttBrokerHost, config.mqttBrokerPort)
+    }
 
     private var client: MqttAsyncClient? = null
     private var connectOptions: MqttConnectOptions? = null
     @Volatile private var running = false
     @Volatile private var connecting = false
     private var initialReconnectAttempt = 0
-
-    val isConnected: Boolean
-        get() = client?.isConnected == true
+    private var cleanupOnly = false
 
     fun start() {
         if (running) return
-        if (!config.mqttEnabled) {
-            Log.i(TAG, "MQTT integration disabled")
-            return
-        }
         if (config.mqttBrokerHost.isBlank()) {
             Log.w(TAG, "MQTT broker host is empty")
             return
         }
 
         try {
+            val pendingCleanup = config.pendingDiscoveryCleanupTopics(serverUri).isNotEmpty()
+            if (!config.mqttEnabled && !pendingCleanup) {
+                Log.i(TAG, "MQTT integration disabled")
+                return
+            }
+            cleanupOnly = !config.mqttEnabled
             val mqttClient = MqttAsyncClient(
-                buildServerUri(),
+                serverUri,
                 "glance_${MqttContract.sanitizeId(deviceId)}",
                 MemoryPersistence()
             )
-            mqttClient.setCallback(createCallback())
+            mqttClient.setCallback(createCallback(mqttClient))
             client = mqttClient
             connectOptions = buildConnectOptions()
             running = true
@@ -90,10 +93,19 @@ class MqttStateManager(
                         message("offline", retained = true)
                     ).waitForCompletion(DISCONNECT_TIMEOUT_MS)
                     mqttClient.disconnect(DISCONNECT_TIMEOUT_MS)
+                        .waitForCompletion(DISCONNECT_TIMEOUT_MS)
                 }
-                mqttClient.close()
             } catch (e: Exception) {
                 Log.w(TAG, "MQTT shutdown did not complete cleanly", e)
+            } finally {
+                try {
+                    // A configuration reload can race an asynchronous connect. Forced close is
+                    // required here; otherwise the abandoned client keeps reconnecting with the
+                    // same client ID and the broker continuously evicts the replacement client.
+                    mqttClient.close(true)
+                } catch (e: Exception) {
+                    Log.w(TAG, "MQTT client could not be closed", e)
+                }
             }
         }
         Log.i(TAG, "MQTT manager stopped")
@@ -103,7 +115,11 @@ class MqttStateManager(
      * Removes the retained discovery entry before switching prefix/device configuration.
      */
     fun removeDiscovery() {
-        publish(topics.discovery, "", retained = true)
+        val cleanupServerUri = runCatching { serverUri }.getOrNull() ?: return
+        if (!publish(topics.discovery, "", retained = true)) {
+            config.queueDiscoveryCleanup(cleanupServerUri, topics.discovery)
+            Log.w(TAG, "Discovery cleanup queued until broker reconnects: ${topics.discovery}")
+        }
     }
 
     fun publishCurrentState() {
@@ -129,7 +145,7 @@ class MqttStateManager(
                     scheduleInitialReconnect()
                 }
             })
-            Log.i(TAG, "Connecting to MQTT ${buildServerUri()}")
+            Log.i(TAG, "Connecting to MQTT $serverUri")
         } catch (e: Exception) {
             connecting = false
             Log.w(TAG, "MQTT connect attempt failed synchronously", e)
@@ -146,16 +162,6 @@ class MqttStateManager(
             delayMs
         )
         Log.i(TAG, "Retrying initial MQTT connection in ${delayMs}ms")
-    }
-
-    private fun buildServerUri(): String {
-        val rawHost = config.mqttBrokerHost.trim().trimEnd('/')
-        if (rawHost.startsWith("tcp://", ignoreCase = true) ||
-            rawHost.startsWith("ssl://", ignoreCase = true)
-        ) {
-            return rawHost
-        }
-        return "tcp://$rawHost:${config.mqttBrokerPort}"
     }
 
     private fun buildConnectOptions(): MqttConnectOptions {
@@ -182,16 +188,26 @@ class MqttStateManager(
         }
     }
 
-    private fun createCallback() = object : MqttCallbackExtended {
+    private fun createCallback(callbackClient: MqttAsyncClient) = object : MqttCallbackExtended {
         override fun connectComplete(reconnect: Boolean, serverURI: String?) {
+            if (!running || client !== callbackClient) {
+                Log.i(TAG, "Ignoring connection from a stopped MQTT client")
+                runCatching { callbackClient.close(true) }
+                return
+            }
             connecting = false
             initialReconnectAttempt = 0
             Log.i(TAG, "MQTT connected (reconnect=$reconnect)")
             try {
-                client?.subscribe(
+                callbackClient.subscribe(
                     arrayOf(topics.command, topics.homeAssistantStatus),
                     intArrayOf(QOS, QOS)
                 )
+                cleanupQueuedDiscovery()
+                if (cleanupOnly) {
+                    mainHandler.post { stop() }
+                    return
+                }
                 publishDiscovery()
                 publish(topics.availability, "online", retained = true)
                 publishState()
@@ -202,10 +218,13 @@ class MqttStateManager(
 
         override fun connectionLost(cause: Throwable?) {
             connecting = false
-            Log.w(TAG, "MQTT connection lost: ${cause?.message}")
+            if (running && client === callbackClient) {
+                Log.w(TAG, "MQTT connection lost: ${cause?.message}")
+            }
         }
 
         override fun messageArrived(topic: String, message: MqttMessage) {
+            if (!running || client !== callbackClient) return
             val payload = message.toString()
             when (topic) {
                 topics.command -> handleCommand(payload)
@@ -246,6 +265,15 @@ class MqttStateManager(
         Log.i(TAG, "MQTT discovery published: ${topics.discovery}")
     }
 
+    private fun cleanupQueuedDiscovery() {
+        config.pendingDiscoveryCleanupTopics(serverUri).forEach { topic ->
+            if (publish(topic, "", retained = true)) {
+                config.markDiscoveryCleanupComplete(serverUri, topic)
+                Log.i(TAG, "Removed queued MQTT discovery entry: $topic")
+            }
+        }
+    }
+
     private fun publishState() {
         val state = stateProvider()
         publish(
@@ -255,13 +283,15 @@ class MqttStateManager(
         )
     }
 
-    private fun publish(topic: String, payload: String, retained: Boolean) {
+    private fun publish(topic: String, payload: String, retained: Boolean): Boolean {
         val mqttClient = client
-        if (mqttClient?.isConnected != true) return
-        try {
+        if (mqttClient?.isConnected != true) return false
+        return try {
             mqttClient.publish(topic, message(payload, retained))
+            true
         } catch (e: MqttException) {
             Log.w(TAG, "MQTT publish failed for $topic", e)
+            false
         }
     }
 
