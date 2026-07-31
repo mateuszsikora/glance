@@ -57,6 +57,7 @@ class WebViewHealthChecker(
     }
 
     fun reset() {
+        handler.removeCallbacksAndMessages(null)
         consecutiveFailures = 0
     }
 

@@ -11,6 +11,7 @@ import android.view.ViewGroup
 import android.webkit.*
 import androidx.fragment.app.Fragment
 import com.glance.databinding.FragmentWebviewBinding
+import com.glance.watchdog.CrashLogger
 
 /**
  * Fragment wrapping a WebView that loads a single dashboard URL.
@@ -55,7 +56,7 @@ class WebViewFragment : Fragment() {
                 javaScriptEnabled = true
                 domStorageEnabled = true
                 databaseEnabled = true
-                mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
                 cacheMode = WebSettings.LOAD_DEFAULT
                 useWideViewPort = true
                 loadWithOverviewMode = true
@@ -70,6 +71,7 @@ class WebViewFragment : Fragment() {
             webViewClient = object : WebViewClient() {
                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                     super.onPageStarted(view, url, favicon)
+                    isLoaded = false
                     binding.errorContainer.visibility = View.GONE
                 }
 
@@ -97,15 +99,25 @@ class WebViewFragment : Fragment() {
                     handler: SslErrorHandler?,
                     error: SslError?
                 ) {
-                    // Accept self-signed certs for local dashboards
-                    Log.w(TAG, "SSL error (accepting): ${error?.primaryError}")
-                    handler?.proceed()
+                    Log.e(TAG, "SSL validation failed: ${error?.primaryError}")
+                    isLoaded = false
+                    handler?.cancel()
+                    showError()
+                }
+
+                override fun onRenderProcessGone(
+                    view: WebView?,
+                    detail: RenderProcessGoneDetail?
+                ): Boolean {
+                    val message = "WebView renderer gone (crashed=${detail?.didCrash() == true})"
+                    Log.e(TAG, message)
+                    context?.let { CrashLogger.log(it, "ERROR", message) }
+                    view?.post { activity?.recreate() }
+                    return true
                 }
             }
 
             webChromeClient = WebChromeClient()
-
-            addJavascriptInterface(HealthCheckBridge(), "GlanceBridge")
         }
     }
 
@@ -127,9 +139,10 @@ class WebViewFragment : Fragment() {
         }
 
         binding.webview.evaluateJavascript(
-            "(function() { GlanceBridge.healthPong(); return 'ok'; })()"
+            "(function() { return document.readyState; })()"
         ) { result ->
-            onHealthCheckCallback?.invoke(result != null)
+            val healthy = result?.trim('"') in setOf("interactive", "complete")
+            onHealthCheckCallback?.invoke(healthy)
         }
     }
 
@@ -155,13 +168,6 @@ class WebViewFragment : Fragment() {
         }
         _binding = null
         super.onDestroyView()
-    }
-
-    inner class HealthCheckBridge {
-        @JavascriptInterface
-        fun healthPong() {
-            onHealthCheckCallback?.invoke(true)
-        }
     }
 
     companion object {

@@ -20,9 +20,9 @@ import kotlin.math.roundToInt
  * exponential moving average (EMA) smoothing and logarithmic lux-to-brightness mapping.
  *
  * Supports:
- * - [Listener] for brightness change notifications (used by HAStateManager)
- * - HA override mode: [setBrightnessFromHA] pauses auto-brightness for [OVERRIDE_DURATION_MS],
- *   allowing HA-commanded brightness to persist without being immediately overridden by sensor.
+ * - [Listener] for brightness change notifications (used by MQTT state publishing)
+ * - Remote override mode pauses auto-brightness for [OVERRIDE_DURATION_MS].
+ * - Soft screen-off mode forces window brightness to zero and pauses the sensor until wake-up.
  */
 class BrightnessController(
     private val context: Context,
@@ -41,6 +41,7 @@ class BrightnessController(
     private var running = false
     private var listener: Listener? = null
     private var lastAppliedBrightness = -1
+    private var screenOffMode = false
 
     // HA override: when set, auto-brightness is paused until this time
     private var overrideUntilMs = 0L
@@ -78,9 +79,10 @@ class BrightnessController(
     }
 
     fun stop() {
-        if (!running) return
-        sensorManager.unregisterListener(this)
-        running = false
+        if (running) {
+            sensorManager.unregisterListener(this)
+            running = false
+        }
         activityWindow = null
         Log.i(TAG, "BrightnessController stopped")
     }
@@ -92,6 +94,7 @@ class BrightnessController(
 
     override fun onSensorChanged(event: SensorEvent) {
         if (event.sensor.type != Sensor.TYPE_LIGHT) return
+        if (screenOffMode) return
 
         // Skip if HA override is active
         if (System.currentTimeMillis() < overrideUntilMs) return
@@ -111,6 +114,7 @@ class BrightnessController(
         if (brightness != lastAppliedBrightness) {
             applyBrightness(brightness)
             lastAppliedBrightness = brightness
+            config.lastKnownBrightness = brightness
             listener?.onBrightnessChanged(brightness)
         }
     }
@@ -125,8 +129,8 @@ class BrightnessController(
      * Maps lux value to brightness (0-255) using logarithmic curve.
      */
     private fun luxToBrightness(lux: Float): Int {
-        val minB = config.minBrightness
-        val maxB = config.maxBrightness
+        val minB = min(config.minBrightness, config.maxBrightness)
+        val maxB = max(config.minBrightness, config.maxBrightness)
 
         if (lux <= 0f) return minB
 
@@ -174,21 +178,67 @@ class BrightnessController(
      * Manually set brightness (e.g. from settings or internal use).
      */
     fun setBrightness(brightness: Int) {
-        val clamped = max(config.minBrightness, min(config.maxBrightness, brightness))
-        applyBrightness(clamped)
+        val clamped = clampToConfiguredRange(brightness)
         lastAppliedBrightness = clamped
+        config.lastKnownBrightness = clamped
+        if (!screenOffMode) {
+            applyBrightness(clamped)
+        }
+        listener?.onBrightnessChanged(clamped)
     }
 
     /**
      * Set brightness from HA command. Pauses auto-brightness for [OVERRIDE_DURATION_MS]
      * so the HA-commanded value isn't immediately overridden by the sensor.
      */
-    fun setBrightnessFromHA(brightness: Int) {
-        val clamped = max(config.minBrightness, min(config.maxBrightness, brightness))
+    fun setBrightnessFromRemote(brightness: Int) {
+        val clamped = clampToConfiguredRange(brightness)
         overrideUntilMs = System.currentTimeMillis() + OVERRIDE_DURATION_MS
-        applyBrightness(clamped)
         lastAppliedBrightness = clamped
-        Log.i(TAG, "HA brightness override: $clamped (pausing auto for ${OVERRIDE_DURATION_MS / 1000}s)")
+        config.lastKnownBrightness = clamped
+        if (!screenOffMode) {
+            applyBrightness(clamped)
+        }
+        listener?.onBrightnessChanged(clamped)
+        Log.i(TAG, "Remote brightness override: $clamped (pausing auto for ${OVERRIDE_DURATION_MS / 1000}s)")
+    }
+
+    fun enterScreenOffMode() {
+        if (screenOffMode) return
+        screenOffMode = true
+        applyBrightnessRaw(0)
+        Log.i(TAG, "Soft screen-off brightness applied")
+    }
+
+    fun exitScreenOffMode() {
+        if (!screenOffMode) return
+        screenOffMode = false
+        val restore = if (lastAppliedBrightness >= 0) {
+            lastAppliedBrightness
+        } else {
+            config.minBrightness.coerceIn(1, 255)
+        }
+        applyBrightness(restore)
+        Log.i(TAG, "Brightness restored after soft screen-off: $restore")
+    }
+
+    private fun applyBrightnessRaw(brightness: Int) {
+        val normalized = brightness.coerceIn(0, 255) / 255f
+        activityWindow?.let { window ->
+            mainHandler.post {
+                val params = window.attributes
+                params.screenBrightness = normalized
+                window.attributes = params
+            }
+            return
+        }
+        applyBrightness(brightness.coerceIn(0, 255))
+    }
+
+    private fun clampToConfiguredRange(brightness: Int): Int {
+        val lower = min(config.minBrightness, config.maxBrightness)
+        val upper = max(config.minBrightness, config.maxBrightness)
+        return brightness.coerceIn(lower, upper)
     }
 
     companion object {

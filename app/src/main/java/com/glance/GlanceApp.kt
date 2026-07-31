@@ -4,6 +4,8 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import com.glance.config.AppConfig
+import com.glance.watchdog.CrashLogger
+import kotlin.system.exitProcess
 
 class GlanceApp : Application() {
 
@@ -14,7 +16,20 @@ class GlanceApp : Application() {
         super.onCreate()
         instance = this
         appConfig = AppConfig(this)
+        installCrashLogger()
         createNotificationChannels()
+    }
+
+    private fun installCrashLogger() {
+        val previousHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            CrashLogger.log(this, "FATAL", "Uncaught exception on ${thread.name}", throwable)
+            if (previousHandler != null) {
+                previousHandler.uncaughtException(thread, throwable)
+            } else {
+                exitProcess(10)
+            }
+        }
     }
 
     private fun createNotificationChannels() {

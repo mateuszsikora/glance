@@ -2,9 +2,14 @@ package com.glance.screen
 
 import android.app.admin.DevicePolicyManager
 import android.content.Context
+import android.graphics.Color
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
-import android.provider.Settings
 import android.util.Log
+import android.view.View
+import android.view.ViewGroup
+import com.glance.brightness.BrightnessController
 
 /**
  * Controls screen ON/OFF state.
@@ -16,7 +21,11 @@ import android.util.Log
  *
  * Supports a [Listener] interface for state change notifications.
  */
-class ScreenController(private val context: Context) {
+class ScreenController(
+    private val context: Context,
+    private val brightnessController: BrightnessController? = null,
+    private val overlayHost: ViewGroup? = null
+) {
 
     interface Listener {
         fun onScreenStateChanged(isOn: Boolean)
@@ -24,15 +33,18 @@ class ScreenController(private val context: Context) {
 
     private val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
     private val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     private var wakeLock: PowerManager.WakeLock? = null
     private var listener: Listener? = null
+    private var softScreenOff = false
+    private var softOffOverlay: View? = null
 
     /**
      * Returns current screen state, queried from the actual hardware.
      */
     val isScreenOn: Boolean
-        get() = powerManager.isInteractive
+        get() = !softScreenOff && powerManager.isInteractive
 
     fun setListener(listener: Listener?) {
         this.listener = listener
@@ -40,11 +52,23 @@ class ScreenController(private val context: Context) {
 
     /**
      * Turn the screen on by acquiring a wake lock.
-     * The wake lock is held until [screenOff] or [release] is called
-     * (no timeout — the kiosk should stay on until explicitly told to turn off).
+     * The wake lock only bridges the physical wake-up. MainActivity's keep-screen-on flag keeps
+     * the display awake afterwards, while the timeout guarantees cleanup after an exception.
      */
     fun screenOn() {
-        if (isScreenOn) return
+        if (softScreenOff) {
+            softScreenOff = false
+            mainHandler.post {
+                softOffOverlay?.let { overlayHost?.removeView(it) }
+                softOffOverlay = null
+                brightnessController?.exitScreenOffMode()
+            }
+            Log.i(TAG, "Screen turned ON from soft-off")
+            listener?.onScreenStateChanged(true)
+            return
+        }
+
+        if (powerManager.isInteractive) return
 
         try {
             releaseWakeLock()
@@ -55,8 +79,9 @@ class ScreenController(private val context: Context) {
                     or PowerManager.ON_AFTER_RELEASE,
                 WAKE_LOCK_TAG
             ).apply {
-                acquire() // No timeout — held until explicitly released
+                acquire(WAKE_LOCK_TIMEOUT_MS)
             }
+            mainHandler.postDelayed(::releaseWakeLock, WAKE_LOCK_RELEASE_DELAY_MS)
             Log.i(TAG, "Screen turned ON")
             listener?.onScreenStateChanged(true)
         } catch (e: Exception) {
@@ -66,7 +91,7 @@ class ScreenController(private val context: Context) {
 
     /**
      * Turn the screen off. Prefers DevicePolicyManager.lockNow() (requires device owner).
-     * Falls back to setting brightness to 0.
+     * Falls back to a reversible soft-off: black touch-to-wake overlay plus window brightness 0.
      */
     fun screenOff() {
         if (!isScreenOn) return
@@ -78,17 +103,7 @@ class ScreenController(private val context: Context) {
                 dpm.lockNow()
                 Log.i(TAG, "Screen turned OFF via DevicePolicyManager")
             } else {
-                // Fallback: set brightness to minimum (won't actually lock the screen)
-                try {
-                    Settings.System.putInt(
-                        context.contentResolver,
-                        Settings.System.SCREEN_BRIGHTNESS,
-                        0
-                    )
-                    Log.i(TAG, "Screen dimmed to 0 (fallback, not device owner)")
-                } catch (e: Exception) {
-                    Log.w(TAG, "Fallback brightness-off failed", e)
-                }
+                enterSoftScreenOff()
             }
             listener?.onScreenStateChanged(false)
         } catch (e: Exception) {
@@ -102,6 +117,34 @@ class ScreenController(private val context: Context) {
 
     fun release() {
         releaseWakeLock()
+        softScreenOff = false
+        softOffOverlay?.let { overlayHost?.removeView(it) }
+        softOffOverlay = null
+        brightnessController?.exitScreenOffMode()
+    }
+
+    private fun enterSoftScreenOff() {
+        if (softScreenOff) return
+        softScreenOff = true
+        brightnessController?.enterScreenOffMode()
+
+        mainHandler.post {
+            if (softOffOverlay != null) return@post
+            softOffOverlay = View(context).apply {
+                setBackgroundColor(Color.BLACK)
+                isClickable = true
+                contentDescription = "Screen off. Tap to wake."
+                setOnClickListener { screenOn() }
+            }
+            overlayHost?.addView(
+                softOffOverlay,
+                ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+            )
+        }
+        Log.i(TAG, "Screen soft-OFF applied (tap or remote command to wake)")
     }
 
     private fun releaseWakeLock() {
@@ -114,5 +157,7 @@ class ScreenController(private val context: Context) {
     companion object {
         private const val TAG = "ScreenController"
         private const val WAKE_LOCK_TAG = "glance:screen_wake"
+        private const val WAKE_LOCK_TIMEOUT_MS = 10_000L
+        private const val WAKE_LOCK_RELEASE_DELAY_MS = 3_000L
     }
 }

@@ -33,7 +33,7 @@ Turn an Android 8 tablet into a dedicated, stable Home Assistant kiosk that:
 **Platform:** Native Android (Kotlin)
 **Min SDK:** 26 (Android 8.0)
 **Target Device:** Huawei BAH2-L09 (Android 8 / EMUI 8)
-**HA Communication:** WebSocket API (bidirectional)
+**HA Communication:** MQTT Discovery + JSON light (bidirectional)
 **Provisioning:** Device Owner via ADB (`dpm set-device-owner`)
 
 ---
@@ -140,45 +140,20 @@ Turn an Android 8 tablet into a dedicated, stable Home Assistant kiosk that:
 - Screen OFF: `DevicePolicyManager.lockNow()` or `PowerManager` with Device Owner
 - Screen ON: acquire partial + screen wake lock, then release
 - Schedule: `AlarmManager` with `setExactAndAllowWhileIdle()` for reliability
-- HA integration via WebSocket API:
-  - Connect to `ws://<ha-ip>:8123/api/websocket`
-  - Authenticate with Long-Lived Access Token
-  - Subscribe to input_boolean or light entity state changes
-  - Publish state changes via `call_service` or REST API
-- Virtual light entity: create `input_boolean.tablet_screen` + `template light` in HA config
-
-**HA configuration example:**
-```yaml
-input_boolean:
-  tablet_screen:
-    name: Tablet Screen
-    icon: mdi:tablet
-
-light:
-  - platform: template
-    lights:
-      tablet_kiosk:
-        friendly_name: "Tablet Kiosk"
-        value_template: "{{ states('input_boolean.tablet_screen') }}"
-        turn_on:
-          service: input_boolean.turn_on
-          entity_id: input_boolean.tablet_screen
-        turn_off:
-          service: input_boolean.turn_off
-          entity_id: input_boolean.tablet_screen
-        level_template: "{{ state_attr('input_number.tablet_brightness', 'value') | int }}"
-        set_level:
-          service: input_number.set_value
-          data:
-            entity_id: input_number.tablet_brightness
-            value: "{{ brightness }}"
-```
+- HA integration via MQTT:
+  - Connect to the configured broker using a dedicated username/password
+  - Publish a retained Home Assistant MQTT Discovery payload
+  - Expose one JSON-schema MQTT light with ON/OFF and brightness
+  - Publish retained state and availability; configure LWT for unexpected disconnects
+  - Re-publish discovery/state when Home Assistant emits its MQTT birth message
+- No HA helpers, template YAML, or Long-Lived Access Token required
+- Without Device Owner, OFF uses a reversible soft-off overlay plus window brightness 0
 
 **Key classes:**
 - `ScreenController` – manages wake locks, screen on/off
 - `ScheduleManager` – alarm-based scheduling
-- `HAWebSocketClient` – WebSocket connection to HA
-- `HAStateManager` – publishes tablet state, receives commands
+- `MqttContract` – stable topics, discovery/state JSON, command parsing
+- `MqttStateManager` – connection, discovery, LWT, state publishing and commands
 
 ---
 
@@ -274,9 +249,9 @@ app/
 │   ├── screen/
 │   │   ├── ScreenController.kt
 │   │   └── ScheduleManager.kt
-│   ├── ha/
-│   │   ├── HAWebSocketClient.kt
-│   │   └── HAStateManager.kt
+│   ├── mqtt/
+│   │   ├── MqttContract.kt
+│   │   └── MqttStateManager.kt
 │   ├── watchdog/
 │   │   ├── WatchdogService.kt
 │   │   ├── WebViewHealthChecker.kt
@@ -322,11 +297,11 @@ Phase 3 (Brightness + Schedule) ✅ DONE
   └── ✅ Wired into MainActivity (brightness + schedule start/stop lifecycle)
 
 Phase 4 (HA Integration) ✅ DONE
-  ├── ✅ HAWebSocketClient (OkHttp WebSocket, auth, subscribe_trigger, call_service, auto-reconnect with backoff)
-  ├── ✅ HAStateManager (publishes screen state + brightness, receives on/off/brightness commands)
-  ├── ✅ Wired into MainActivity lifecycle (start/stop with HA config from AppConfig)
-  ├── ⬜ Virtual light entity config in HA (user must configure HA side — see plan docs)
-  └── ⬜ End-to-end testing on real device + HA instance
+  ├── ✅ MQTT client with auto-reconnect, credentials, QoS 1 and LWT
+  ├── ✅ Retained Home Assistant MQTT Discovery light
+  ├── ✅ Bidirectional ON/OFF, brightness, state and availability
+  ├── ✅ Device Owner hardware-off plus non-owner soft-off fallback
+  └── ✅ End-to-end authenticated broker test on real device
 
 Phase 5 (Polish + Post-MVP) ⬜ NOT STARTED
   ├── ⬜ Night mode overlay
@@ -354,4 +329,3 @@ Phase 5 (Polish + Post-MVP) ⬜ NOT STARTED
 | EMUI kills background services | Kiosk/watchdog dies | Whitelist in Protected Apps, disable battery optimization, use Device Owner to pin app |
 | `dpm set-device-owner` fails on Huawei | Can't enable kiosk mode | Remove all accounts (Google + Huawei ID) before running dpm command |
 | Kirin 659 (3 GB RAM) limited performance | WebView sluggish with multiple views | Limit offscreen pages to 1, aggressive WebView cleanup |
-

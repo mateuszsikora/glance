@@ -65,6 +65,10 @@
             </intent-filter>
         </receiver>
 
+        <receiver
+            android:name=".screen.ScheduleReceiver"
+            android:exported="false" />
+
         <service
             android:name=".kiosk.KioskService"
             android:exported="false"
