@@ -13,6 +13,7 @@
 # Signing
 *.jks
 *.keystore
+/keystore.properties
 
 # Misc
 *.log

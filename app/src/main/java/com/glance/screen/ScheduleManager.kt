@@ -6,6 +6,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.os.Build
 import android.util.Log
 import com.glance.config.AppConfig
 import java.util.Calendar
@@ -136,11 +137,31 @@ class ScheduleManager(
 
         val pendingIntent = getPendingIntent(action)
 
-        alarmManager.setExactAndAllowWhileIdle(
-            AlarmManager.RTC_WAKEUP,
-            calendar.timeInMillis,
-            pendingIntent
-        )
+        // Exact alarms need SCHEDULE_EXACT_ALARM from API 31 on, and the user can
+        // revoke it. A schedule that fires a few minutes late still beats one that
+        // throws, so fall back to an inexact alarm instead of crashing.
+        val canScheduleExact = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+            alarmManager.canScheduleExactAlarms()
+
+        try {
+            if (canScheduleExact) {
+                alarmManager.setExactAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP,
+                    calendar.timeInMillis,
+                    pendingIntent
+                )
+            } else {
+                Log.w(TAG, "Exact alarms not permitted — falling back to inexact alarm")
+                alarmManager.setAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP,
+                    calendar.timeInMillis,
+                    pendingIntent
+                )
+            }
+        } catch (e: SecurityException) {
+            Log.e(TAG, "Failed to schedule alarm for $action", e)
+            return
+        }
 
         Log.d(TAG, "Alarm scheduled: $action at $timeStr (${calendar.time})")
     }
