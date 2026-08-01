@@ -20,7 +20,7 @@ val keystoreProperties = Properties().apply {
 
 android {
     namespace = "com.glance"
-    compileSdk = 34
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.glance"
