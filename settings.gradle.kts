@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "HAKiosk"
+rootProject.name = "Glance"
 include(":app")

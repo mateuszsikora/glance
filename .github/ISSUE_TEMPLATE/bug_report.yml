@@ -1,0 +1,65 @@
+name: Bug report
+description: Report reproducible incorrect behavior in Glance.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Redact dashboard and broker addresses, device IDs, credentials, cookies, tokens, PINs, and signing information. Report security issues privately using SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: Glance version or commit
+      placeholder: "1.4 or commit SHA"
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device and Android version
+      placeholder: "Tablet model, Android version, WebView version"
+    validations:
+      required: true
+  - type: dropdown
+    id: owner
+    attributes:
+      label: Provisioning mode
+      options:
+        - Device Owner
+        - Regular application
+        - Unknown
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the actual and expected behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      placeholder: "1. Configure ...\n2. Open ...\n3. Observe ..."
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs or screenshots
+      description: Remove all private or authentication data before attaching anything.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues for duplicates.
+          required: true
+        - label: I removed private URLs, identifiers, credentials, tokens, cookies, PINs, and signing material.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true
