@@ -1,0 +1,36 @@
+name: Feature request
+description: Suggest an improvement to Glance.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the use case without including private dashboard, broker, device, or authentication data.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What problem would this solve for a kiosk installation?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: impact
+    attributes:
+      label: Impact checklist
+      options:
+        - label: I considered Android 8 compatibility.
+        - label: I described any Device Owner or provisioning impact.
+        - label: I removed private and authentication data.
+          required: true
