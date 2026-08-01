@@ -2,7 +2,6 @@ import java.util.Properties
 
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
 }
 
 // Release signing is driven by keystore.properties in the project root, which is
@@ -21,7 +20,7 @@ val keystoreProperties = Properties().apply {
 
 android {
     namespace = "com.glance"
-    compileSdk = 34
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.glance"
@@ -57,10 +56,6 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
-    }
-
-    kotlinOptions {
-        jvmTarget = "1.8"
     }
 
     buildFeatures {
