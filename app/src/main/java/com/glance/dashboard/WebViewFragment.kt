@@ -206,6 +206,12 @@ class WebViewFragment : Fragment() {
         currentBinding.webview.reload()
     }
 
+    fun setWebContentPaused(paused: Boolean) {
+        _binding?.webview?.let { webView ->
+            if (paused) webView.onPause() else webView.onResume()
+        }
+    }
+
     fun performHealthCheck() {
         if (rendererGone || !isLoaded || _binding == null) {
             onHealthCheckCallback?.invoke(false)

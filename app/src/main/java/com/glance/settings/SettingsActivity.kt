@@ -27,6 +27,7 @@ import com.glance.remote.RemoteConfigAddress
 import com.glance.screen.ScheduleManager
 import com.glance.watchdog.WatchdogService
 import com.google.android.material.button.MaterialButton
+import java.util.Locale
 
 /**
  * Hidden settings screen accessible via 5x tap gesture.
@@ -41,6 +42,11 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var editDashboardAllowedOrigins: EditText
     private lateinit var switchAutoRotate: SwitchCompat
     private lateinit var editAutoRotateInterval: EditText
+    private lateinit var switchContentSchedule: SwitchCompat
+    private lateinit var editContentProfiles: EditText
+    private lateinit var switchIdleScreen: SwitchCompat
+    private lateinit var editIdleScreenUrl: EditText
+    private lateinit var editIdleTimeoutMinutes: EditText
     private lateinit var switchAutoBrightness: SwitchCompat
     private lateinit var editMinBrightness: EditText
     private lateinit var editMaxBrightness: EditText
@@ -182,6 +188,11 @@ class SettingsActivity : AppCompatActivity() {
         editDashboardAllowedOrigins = findViewById(R.id.editDashboardAllowedOrigins)
         switchAutoRotate = findViewById(R.id.switchAutoRotate)
         editAutoRotateInterval = findViewById(R.id.editAutoRotateInterval)
+        switchContentSchedule = findViewById(R.id.switchContentSchedule)
+        editContentProfiles = findViewById(R.id.editContentProfiles)
+        switchIdleScreen = findViewById(R.id.switchIdleScreen)
+        editIdleScreenUrl = findViewById(R.id.editIdleScreenUrl)
+        editIdleTimeoutMinutes = findViewById(R.id.editIdleTimeoutMinutes)
         switchAutoBrightness = findViewById(R.id.switchAutoBrightness)
         editMinBrightness = findViewById(R.id.editMinBrightness)
         editMaxBrightness = findViewById(R.id.editMaxBrightness)
@@ -206,6 +217,13 @@ class SettingsActivity : AppCompatActivity() {
         editDashboardAllowedOrigins.setText(config.dashboardAllowedOrigins.joinToString("\n"))
         switchAutoRotate.isChecked = config.autoRotateEnabled
         editAutoRotateInterval.setText(config.autoRotateIntervalSeconds.toString())
+        switchContentSchedule.isChecked = config.contentScheduleEnabled
+        editContentProfiles.setText(ConfigValidator.formatContentProfiles(config.contentProfiles))
+        switchIdleScreen.isChecked = config.idleScreenEnabled
+        editIdleScreenUrl.setText(config.idleScreenUrl)
+        editIdleTimeoutMinutes.setText(
+            String.format(Locale.ROOT, "%d", config.idleTimeoutMinutes)
+        )
         switchAutoBrightness.isChecked = config.autoBrightnessEnabled
         editMinBrightness.setText(config.minBrightness.toString())
         editMaxBrightness.setText(config.maxBrightness.toString())
@@ -281,6 +299,42 @@ class SettingsActivity : AppCompatActivity() {
                 this,
                 "Rotate interval must be ${ConfigValidator.MIN_ROTATE_SECONDS}-" +
                     "${ConfigValidator.MAX_ROTATE_SECONDS} seconds",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+
+        val contentProfilesResult = ConfigValidator.parseContentProfiles(
+            editContentProfiles.text.toString()
+        )
+        if (contentProfilesResult.error != null) {
+            Toast.makeText(this, contentProfilesResult.error, Toast.LENGTH_LONG).show()
+            return
+        }
+        if (switchContentSchedule.isChecked && contentProfilesResult.profiles.isEmpty()) {
+            Toast.makeText(
+                this,
+                "Add at least one scheduled content profile",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+
+        val idleScreenUrl = editIdleScreenUrl.text.toString().trim()
+        if (switchIdleScreen.isChecked && !ConfigValidator.isValidDashboardUrl(idleScreenUrl)) {
+            Toast.makeText(
+                this,
+                "Idle screen URL must use http:// or https://",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+        val idleTimeoutMinutes = editIdleTimeoutMinutes.text.toString().toIntOrNull()
+        if (!ConfigValidator.isValidIdleTimeout(idleTimeoutMinutes)) {
+            Toast.makeText(
+                this,
+                "Idle timeout must be ${AppConfig.MIN_IDLE_TIMEOUT_MINUTES}-" +
+                    "${AppConfig.MAX_IDLE_TIMEOUT_MINUTES} minutes",
                 Toast.LENGTH_LONG
             ).show()
             return
@@ -403,6 +457,11 @@ class SettingsActivity : AppCompatActivity() {
         config.dashboardAllowedOrigins = allowedOrigins
         config.autoRotateEnabled = switchAutoRotate.isChecked
         config.autoRotateIntervalSeconds = requireNotNull(rotateInterval)
+        config.contentScheduleEnabled = switchContentSchedule.isChecked
+        config.contentProfiles = contentProfilesResult.profiles
+        config.idleScreenEnabled = switchIdleScreen.isChecked
+        config.idleScreenUrl = idleScreenUrl
+        config.idleTimeoutMinutes = requireNotNull(idleTimeoutMinutes)
         config.autoBrightnessEnabled = switchAutoBrightness.isChecked
         config.minBrightness = requireNotNull(minBrightness)
         config.maxBrightness = requireNotNull(maxBrightness)
@@ -549,6 +608,8 @@ class SettingsActivity : AppCompatActivity() {
             appendLine("Memory: ${usedMem}MB / ${totalMem}MB")
             appendLine("Uptime: ${uptimeHours}h ${uptimeMinutes}m")
             appendLine("Dashboard URLs: ${config.dashboardUrls.size}")
+            appendLine("Content profiles: ${if (config.contentScheduleEnabled) config.contentProfiles.size else "disabled"}")
+            appendLine("Idle screen: ${if (config.idleScreenEnabled) "${config.idleTimeoutMinutes} min" else "disabled"}")
             appendLine("Allowed login origins: ${config.dashboardAllowedOrigins.size}")
             appendLine("Schedule: ${if (config.scheduleEnabled) "${config.screenOnTime}-${config.screenOffTime}" else "disabled"}")
             appendLine("Exact alarms: ${canScheduleExactAlarms()}")

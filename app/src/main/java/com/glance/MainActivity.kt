@@ -8,7 +8,10 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
+import android.os.SystemClock
 import android.util.Log
+import android.view.MotionEvent
+import android.view.View
 import android.view.WindowManager
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
@@ -17,6 +20,8 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.glance.brightness.BrightnessController
+import com.glance.content.ContentSchedulePolicy
+import com.glance.content.IdleTimeoutTracker
 import com.glance.dashboard.DashboardPagerAdapter
 import com.glance.dashboard.WebViewFragment
 import com.glance.databinding.ActivityMainBinding
@@ -26,6 +31,7 @@ import com.glance.screen.ScreenController
 import com.glance.settings.SettingsActivity
 import com.glance.watchdog.WatchdogService
 import com.glance.watchdog.WebViewHealthChecker
+import java.time.LocalTime
 
 class MainActivity : AppCompatActivity() {
 
@@ -44,6 +50,48 @@ class MainActivity : AppCompatActivity() {
     private var settingsTapCount = 0
     private var lastSettingsTapTime = 0L
     private var dashboardResumed = false
+    private var activeDashboardUrls: List<String> = emptyList()
+    private var idleScreenActive = false
+    private var consumeIdleDismissGesture = false
+    private var idleTimeoutTracker: IdleTimeoutTracker? = null
+
+    private val contentScheduleRunnable = object : Runnable {
+        override fun run() {
+            applyActiveContentProfile()
+            scheduleNextContentCheck()
+        }
+    }
+
+    private val autoRotateRunnable = object : Runnable {
+        override fun run() {
+            val config = GlanceApp.instance.appConfig
+            if (dashboardResumed &&
+                powerManager.isInteractive &&
+                !idleScreenActive &&
+                ::pagerAdapter.isInitialized &&
+                pagerAdapter.itemCount > 1
+            ) {
+                val nextItem =
+                    (binding.dashboardPager.currentItem + 1) % pagerAdapter.itemCount
+                binding.dashboardPager.setCurrentItem(nextItem, true)
+            }
+            if (dashboardResumed && config.autoRotateEnabled) {
+                handler.postDelayed(this, config.autoRotateIntervalSeconds * 1000L)
+            }
+        }
+    }
+
+    private val idleTimeoutRunnable = object : Runnable {
+        override fun run() {
+            val tracker = idleTimeoutTracker ?: return
+            val now = SystemClock.elapsedRealtime()
+            if (tracker.isExpired(now)) {
+                showIdleScreen()
+            } else {
+                handler.postDelayed(this, tracker.remainingMs(now))
+            }
+        }
+    }
 
     private val reloadReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -96,6 +144,7 @@ class MainActivity : AppCompatActivity() {
         setupSettingsGesture()
         setupBrightness()
         setupScreenControl()
+        setupIdleScreen()
         registerControlReceiver()
         registerReloadReceiver()
         startServices()
@@ -106,10 +155,18 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         dashboardResumed = true
         enterImmersiveMode()
+        applyActiveContentProfile()
+        scheduleNextContentCheck()
+        scheduleAutoRotate()
+        recordUserActivity()
     }
 
     override fun onPause() {
         dashboardResumed = false
+        handler.removeCallbacks(contentScheduleRunnable)
+        handler.removeCallbacks(autoRotateRunnable)
+        handler.removeCallbacks(idleTimeoutRunnable)
+        hideIdleScreen(resetTimer = false)
         super.onPause()
     }
 
@@ -167,37 +224,63 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupDashboard() {
         val config = GlanceApp.instance.appConfig
-        val urls = config.dashboardUrls
-
-        pagerAdapter = DashboardPagerAdapter(
-            activity = this,
-            urls = urls,
-            allowedNavigationOrigins = config.dashboardAllowedOrigins
+        val urls = ContentSchedulePolicy.activeUrls(
+            now = LocalTime.now(),
+            defaultUrls = config.dashboardUrls,
+            scheduleEnabled = config.contentScheduleEnabled,
+            profiles = config.contentProfiles
         )
-        binding.dashboardPager.apply {
-            adapter = pagerAdapter
-            offscreenPageLimit = 1 // Save memory on 3GB device
-            isUserInputEnabled = urls.size > 1
-        }
-
-        // Auto-rotate if enabled
-        if (config.autoRotateEnabled && urls.size > 1) {
-            startAutoRotate(config.autoRotateIntervalSeconds)
-        }
+        installDashboardUrls(urls)
     }
 
-    private fun startAutoRotate(intervalSeconds: Int) {
-        val intervalMs = intervalSeconds * 1000L
-        handler.postDelayed(object : Runnable {
-            override fun run() {
-                if (dashboardResumed && powerManager.isInteractive) {
-                    val nextItem =
-                        (binding.dashboardPager.currentItem + 1) % pagerAdapter.itemCount
-                    binding.dashboardPager.setCurrentItem(nextItem, true)
-                }
-                handler.postDelayed(this, intervalMs)
+    private fun installDashboardUrls(urls: List<String>) {
+        if (::pagerAdapter.isInitialized && urls == activeDashboardUrls) return
+        activeDashboardUrls = urls
+        if (::pagerAdapter.isInitialized) {
+            pagerAdapter.replaceUrls(urls)
+            binding.dashboardPager.setCurrentItem(0, false)
+            binding.dashboardPager.isUserInputEnabled = urls.size > 1
+        } else {
+            pagerAdapter = DashboardPagerAdapter(
+                activity = this,
+                urls = urls,
+                allowedNavigationOrigins = GlanceApp.instance.appConfig.dashboardAllowedOrigins
+            )
+            binding.dashboardPager.apply {
+                adapter = pagerAdapter
+                offscreenPageLimit = 1 // Save memory on 3GB device
+                isUserInputEnabled = urls.size > 1
             }
-        }, intervalMs)
+        }
+        Log.i(TAG, "Active dashboard profile changed (${urls.size} URL(s))")
+    }
+
+    private fun applyActiveContentProfile() {
+        if (!::binding.isInitialized) return
+        val config = GlanceApp.instance.appConfig
+        installDashboardUrls(
+            ContentSchedulePolicy.activeUrls(
+                now = LocalTime.now(),
+                defaultUrls = config.dashboardUrls,
+                scheduleEnabled = config.contentScheduleEnabled,
+                profiles = config.contentProfiles
+            )
+        )
+    }
+
+    private fun scheduleNextContentCheck() {
+        handler.removeCallbacks(contentScheduleRunnable)
+        if (!dashboardResumed || !GlanceApp.instance.appConfig.contentScheduleEnabled) return
+        val nowEpochMs = System.currentTimeMillis()
+        val delayMs = MINUTE_MS - (nowEpochMs % MINUTE_MS) + CLOCK_BOUNDARY_SLOP_MS
+        handler.postDelayed(contentScheduleRunnable, delayMs)
+    }
+
+    private fun scheduleAutoRotate() {
+        handler.removeCallbacks(autoRotateRunnable)
+        val config = GlanceApp.instance.appConfig
+        if (!dashboardResumed || !config.autoRotateEnabled) return
+        handler.postDelayed(autoRotateRunnable, config.autoRotateIntervalSeconds * 1000L)
     }
 
     // --- 5x tap to open settings ---
@@ -243,6 +326,12 @@ class MainActivity : AppCompatActivity() {
         screenController.setListener(object : ScreenController.Listener {
             override fun onScreenStateChanged(isOn: Boolean) {
                 reportScreenState(isOn)
+                if (isOn) {
+                    recordUserActivity()
+                } else {
+                    handler.removeCallbacks(idleTimeoutRunnable)
+                    hideIdleScreen(resetTimer = false)
+                }
             }
         })
         if (!config.requestedScreenOn) {
@@ -250,6 +339,115 @@ class MainActivity : AppCompatActivity() {
             // for the non-Device-Owner black-overlay fallback, whose View cannot be persisted.
             screenController.screenOff()
         }
+    }
+
+    // --- Idle screen ---
+
+    private fun setupIdleScreen() {
+        val config = GlanceApp.instance.appConfig
+        // A manually tagged fragment can be restored across Activity recreation with the old URL.
+        // Recreate it lazily so saved settings always take effect.
+        idleScreenFragment()?.let { restoredFragment ->
+            supportFragmentManager.beginTransaction()
+                .remove(restoredFragment)
+                .commitNow()
+        }
+        binding.idleScreenTouchOverlay.setOnClickListener {
+            hideIdleScreen(resetTimer = true)
+        }
+        if (!config.idleScreenEnabled || config.idleScreenUrl.isBlank()) return
+
+        idleTimeoutTracker = IdleTimeoutTracker(config.idleTimeoutMinutes * MINUTE_MS)
+        recordUserActivity()
+    }
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN && idleScreenActive) {
+            consumeIdleDismissGesture = true
+            hideIdleScreen(resetTimer = true)
+        }
+
+        if (consumeIdleDismissGesture) {
+            if (event.actionMasked == MotionEvent.ACTION_UP ||
+                event.actionMasked == MotionEvent.ACTION_CANCEL
+            ) {
+                consumeIdleDismissGesture = false
+            }
+            return true
+        }
+
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            recordUserActivity()
+        }
+        return super.dispatchTouchEvent(event)
+    }
+
+    private fun recordUserActivity() {
+        val tracker = idleTimeoutTracker ?: return
+        tracker.recordActivity(SystemClock.elapsedRealtime())
+        scheduleIdleTimeout()
+    }
+
+    private fun scheduleIdleTimeout() {
+        handler.removeCallbacks(idleTimeoutRunnable)
+        val config = GlanceApp.instance.appConfig
+        val tracker = idleTimeoutTracker ?: return
+        if (!dashboardResumed ||
+            idleScreenActive ||
+            !config.idleScreenEnabled ||
+            !::screenController.isInitialized ||
+            !screenController.isScreenOn ||
+            !powerManager.isInteractive
+        ) {
+            return
+        }
+        handler.postDelayed(
+            idleTimeoutRunnable,
+            tracker.remainingMs(SystemClock.elapsedRealtime())
+        )
+    }
+
+    private fun showIdleScreen() {
+        val config = GlanceApp.instance.appConfig
+        if (idleScreenActive ||
+            !dashboardResumed ||
+            !config.idleScreenEnabled ||
+            config.idleScreenUrl.isBlank() ||
+            !::screenController.isInitialized ||
+            !screenController.isScreenOn ||
+            !powerManager.isInteractive ||
+            supportFragmentManager.isStateSaved
+        ) {
+            return
+        }
+
+        if (supportFragmentManager.findFragmentByTag(IDLE_SCREEN_FRAGMENT_TAG) == null) {
+            supportFragmentManager.beginTransaction()
+                .add(
+                    R.id.idle_screen_container,
+                    WebViewFragment.newInstance(
+                        config.idleScreenUrl,
+                        config.dashboardAllowedOrigins
+                    ),
+                    IDLE_SCREEN_FRAGMENT_TAG
+                )
+                .commitNow()
+        }
+        idleScreenActive = true
+        binding.idleScreenLayer.visibility = View.VISIBLE
+        idleScreenFragment()?.setWebContentPaused(false)
+        Log.i(TAG, "Idle screen shown")
+    }
+
+    private fun hideIdleScreen(resetTimer: Boolean) {
+        if (idleScreenActive) {
+            idleScreenFragment()?.setWebContentPaused(true)
+            binding.idleScreenLayer.visibility = View.GONE
+            idleScreenActive = false
+            applyActiveContentProfile()
+            Log.i(TAG, "Idle screen hidden")
+        }
+        if (resetTimer) recordUserActivity()
     }
 
     // --- Reload WebViews ---
@@ -307,7 +505,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun reloadAllWebViews() {
         for (fragment in supportFragmentManager.fragments) {
-            if (fragment is WebViewFragment) {
+            if (fragment is WebViewFragment &&
+                (fragment !== idleScreenFragment() || idleScreenActive)
+            ) {
                 fragment.reload()
             }
         }
@@ -324,10 +524,22 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun currentWebViewFragment(): WebViewFragment? {
+        if (idleScreenActive) {
+            return idleScreenFragment()
+        }
+        val idleFragment = idleScreenFragment()
         return supportFragmentManager.fragments
             .filterIsInstance<WebViewFragment>()
+            .filterNot { it === idleFragment }
             .firstOrNull { it.isVisible }
-            ?: supportFragmentManager.fragments.filterIsInstance<WebViewFragment>().firstOrNull()
+            ?: supportFragmentManager.fragments
+                .filterIsInstance<WebViewFragment>()
+                .firstOrNull { it !== idleFragment }
+    }
+
+    private fun idleScreenFragment(): WebViewFragment? {
+        return supportFragmentManager.findFragmentByTag(IDLE_SCREEN_FRAGMENT_TAG)
+            as? WebViewFragment
     }
 
     // --- Services ---
@@ -366,6 +578,9 @@ class MainActivity : AppCompatActivity() {
         private const val TAG = "MainActivity"
         private const val TAPS_TO_SETTINGS = 5
         private const val TAP_TIMEOUT_MS = 2000L
+        private const val MINUTE_MS = 60_000L
+        private const val CLOCK_BOUNDARY_SLOP_MS = 100L
+        private const val IDLE_SCREEN_FRAGMENT_TAG = "idle_screen"
         const val ACTION_RELOAD_UI = "com.glance.action.RELOAD_UI"
     }
 }

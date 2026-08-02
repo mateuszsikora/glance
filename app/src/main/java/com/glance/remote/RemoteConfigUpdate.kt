@@ -8,6 +8,11 @@ internal data class RemoteConfigSnapshot(
     val dashboardAllowedOrigins: String,
     val autoRotateEnabled: Boolean,
     val autoRotateIntervalSeconds: Int,
+    val contentScheduleEnabled: Boolean,
+    val contentProfiles: String,
+    val idleScreenEnabled: Boolean,
+    val idleScreenUrl: String,
+    val idleTimeoutMinutes: Int,
     val autoBrightnessEnabled: Boolean,
     val minBrightness: Int,
     val maxBrightness: Int,
@@ -40,6 +45,11 @@ internal class RemoteConfigUpdater(private val config: AppConfig) {
             dashboardAllowedOrigins = config.dashboardAllowedOrigins.joinToString("\n"),
             autoRotateEnabled = config.autoRotateEnabled,
             autoRotateIntervalSeconds = config.autoRotateIntervalSeconds,
+            contentScheduleEnabled = config.contentScheduleEnabled,
+            contentProfiles = ConfigValidator.formatContentProfiles(config.contentProfiles),
+            idleScreenEnabled = config.idleScreenEnabled,
+            idleScreenUrl = config.idleScreenUrl,
+            idleTimeoutMinutes = config.idleTimeoutMinutes,
             autoBrightnessEnabled = config.autoBrightnessEnabled,
             minBrightness = config.minBrightness,
             maxBrightness = config.maxBrightness,
@@ -75,6 +85,30 @@ internal class RemoteConfigUpdater(private val config: AppConfig) {
             return error(
                 "Rotate interval must be ${ConfigValidator.MIN_ROTATE_SECONDS}-" +
                     "${ConfigValidator.MAX_ROTATE_SECONDS} seconds."
+            )
+        }
+
+        val contentProfilesResult = ConfigValidator.parseContentProfiles(
+            parameters["contentProfiles"].orEmpty()
+        )
+        if (contentProfilesResult.error != null) {
+            return error(contentProfilesResult.error)
+        }
+        val contentScheduleEnabled = parameters.hasCheckbox("contentScheduleEnabled")
+        if (contentScheduleEnabled && contentProfilesResult.profiles.isEmpty()) {
+            return error("Add at least one scheduled content profile.")
+        }
+
+        val idleScreenEnabled = parameters.hasCheckbox("idleScreenEnabled")
+        val idleScreenUrl = parameters["idleScreenUrl"].orEmpty().trim()
+        if (idleScreenEnabled && !ConfigValidator.isValidDashboardUrl(idleScreenUrl)) {
+            return error("Idle screen URL must use http:// or https://.")
+        }
+        val idleTimeoutMinutes = parameters["idleTimeoutMinutes"]?.toIntOrNull()
+        if (!ConfigValidator.isValidIdleTimeout(idleTimeoutMinutes)) {
+            return error(
+                "Idle timeout must be ${AppConfig.MIN_IDLE_TIMEOUT_MINUTES}-" +
+                    "${AppConfig.MAX_IDLE_TIMEOUT_MINUTES} minutes."
             )
         }
 
@@ -153,6 +187,11 @@ internal class RemoteConfigUpdater(private val config: AppConfig) {
         config.dashboardAllowedOrigins = allowedOrigins
         config.autoRotateEnabled = parameters.hasCheckbox("autoRotateEnabled")
         config.autoRotateIntervalSeconds = requireNotNull(rotateInterval)
+        config.contentScheduleEnabled = contentScheduleEnabled
+        config.contentProfiles = contentProfilesResult.profiles
+        config.idleScreenEnabled = idleScreenEnabled
+        config.idleScreenUrl = idleScreenUrl
+        config.idleTimeoutMinutes = requireNotNull(idleTimeoutMinutes)
         config.autoBrightnessEnabled = parameters.hasCheckbox("autoBrightnessEnabled")
         config.minBrightness = requireNotNull(minBrightness)
         config.maxBrightness = requireNotNull(maxBrightness)

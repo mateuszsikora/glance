@@ -439,6 +439,23 @@ internal class RemoteConfigHttpHandler(
                   </section>
 
                   <section class="card">
+                    <h2>Scheduled content</h2>
+                    ${checkbox("contentScheduleEnabled", "Show different dashboards by time", values.contentScheduleEnabled)}
+                    <label for="contentProfiles">Content profiles <small>one HH:mm | URL entry per line</small></label>
+                    <textarea id="contentProfiles" name="contentProfiles" rows="5"
+                              placeholder="06:00 | https://example.com/morning&#10;18:00 | https://example.com/evening">${escapeHtml(values.contentProfiles)}</textarea>
+                    <p class="hint">Repeat a start time to add several swipeable URLs to one profile. The last profile wraps through midnight.</p>
+                    ${checkbox("idleScreenEnabled", "Show a URL after inactivity", values.idleScreenEnabled)}
+                    <label for="idleScreenUrl">Idle screen URL</label>
+                    <input id="idleScreenUrl" name="idleScreenUrl" value="${escapeHtml(values.idleScreenUrl)}"
+                           placeholder="https://example.com/idle">
+                    <label for="idleTimeoutMinutes">Inactivity timeout (minutes)</label>
+                    <input id="idleTimeoutMinutes" name="idleTimeoutMinutes" type="number"
+                           min="1" max="1440" value="${values.idleTimeoutMinutes}" required>
+                    <p class="hint">The first touch returns to the current dashboard and is consumed to prevent accidental actions.</p>
+                  </section>
+
+                  <section class="card">
                     <h2>Brightness</h2>
                     ${checkbox("autoBrightnessEnabled", "Use the ambient light sensor", values.autoBrightnessEnabled)}
                     <div class="grid two">

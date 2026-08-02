@@ -82,6 +82,14 @@ class RemoteConfigHttpHandlerTest {
             put("dashboardUrls", "https://one.example\nhttp://192.168.1.20/dashboard")
             put("autoRotateEnabled", "on")
             put("autoRotateIntervalSeconds", "45")
+            put("contentScheduleEnabled", "on")
+            put(
+                "contentProfiles",
+                "06:00 | https://one.example/morning\n18:00 | https://one.example/evening"
+            )
+            put("idleScreenEnabled", "on")
+            put("idleScreenUrl", "https://one.example/idle")
+            put("idleTimeoutMinutes", "10")
             put("minBrightness", "12")
             put("maxBrightness", "220")
             put("scheduleEnabled", "on")
@@ -101,6 +109,12 @@ class RemoteConfigHttpHandlerTest {
         )
         assertTrue(config.autoRotateEnabled)
         assertEquals(45, config.autoRotateIntervalSeconds)
+        assertTrue(config.contentScheduleEnabled)
+        assertEquals(2, config.contentProfiles.size)
+        assertEquals("06:00", config.contentProfiles.first().startTime)
+        assertTrue(config.idleScreenEnabled)
+        assertEquals("https://one.example/idle", config.idleScreenUrl)
+        assertEquals(10, config.idleTimeoutMinutes)
         assertEquals(12, config.minBrightness)
         assertEquals(220, config.maxBrightness)
         assertTrue(config.scheduleEnabled)
@@ -176,6 +190,9 @@ class RemoteConfigHttpHandlerTest {
         "dashboardUrls" to "https://example.com",
         "dashboardAllowedOrigins" to "",
         "autoRotateIntervalSeconds" to "30",
+        "contentProfiles" to "",
+        "idleScreenUrl" to "",
+        "idleTimeoutMinutes" to "5",
         "autoBrightnessEnabled" to "on",
         "minBrightness" to "5",
         "maxBrightness" to "255",

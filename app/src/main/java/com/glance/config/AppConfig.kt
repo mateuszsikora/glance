@@ -3,6 +3,9 @@ package com.glance.config
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Base64
+import com.glance.content.ContentProfile
+import org.json.JSONArray
+import org.json.JSONObject
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.UUID
@@ -48,6 +51,66 @@ class AppConfig(context: Context) {
                 .putString(KEY_DASHBOARD_ALLOWED_ORIGINS, value.joinToString(SEPARATOR))
                 .apply()
         }
+
+    // --- Time-based dashboard content ---
+
+    var contentScheduleEnabled: Boolean
+        get() = prefs.getBoolean(KEY_CONTENT_SCHEDULE_ENABLED, false)
+        set(value) = prefs.edit().putBoolean(KEY_CONTENT_SCHEDULE_ENABLED, value).apply()
+
+    var contentProfiles: List<ContentProfile>
+        get() {
+            val raw = prefs.getString(KEY_CONTENT_PROFILES, null) ?: return emptyList()
+            return runCatching {
+                val array = JSONArray(raw)
+                buildList {
+                    for (index in 0 until array.length()) {
+                        val item = array.getJSONObject(index)
+                        val urlsJson = item.getJSONArray(PROFILE_URLS)
+                        val urls = buildList {
+                            for (urlIndex in 0 until urlsJson.length()) {
+                                urlsJson.optString(urlIndex)
+                                    .trim()
+                                    .takeIf(String::isNotBlank)
+                                    ?.let(::add)
+                            }
+                        }
+                        if (urls.isNotEmpty()) {
+                            add(ContentProfile(item.getString(PROFILE_START_TIME), urls))
+                        }
+                    }
+                }
+            }.getOrDefault(emptyList())
+        }
+        set(value) {
+            val array = JSONArray()
+            value.forEach { profile ->
+                array.put(
+                    JSONObject()
+                        .put(PROFILE_START_TIME, profile.startTime)
+                        .put(PROFILE_URLS, JSONArray(profile.urls))
+                )
+            }
+            prefs.edit().putString(KEY_CONTENT_PROFILES, array.toString()).apply()
+        }
+
+    var idleScreenEnabled: Boolean
+        get() = prefs.getBoolean(KEY_IDLE_SCREEN_ENABLED, false)
+        set(value) = prefs.edit().putBoolean(KEY_IDLE_SCREEN_ENABLED, value).apply()
+
+    var idleScreenUrl: String
+        get() = prefs.getString(KEY_IDLE_SCREEN_URL, "").orEmpty()
+        set(value) = prefs.edit().putString(KEY_IDLE_SCREEN_URL, value.trim()).apply()
+
+    var idleTimeoutMinutes: Int
+        get() = prefs.getInt(KEY_IDLE_TIMEOUT_MINUTES, DEFAULT_IDLE_TIMEOUT_MINUTES)
+            .coerceIn(MIN_IDLE_TIMEOUT_MINUTES, MAX_IDLE_TIMEOUT_MINUTES)
+        set(value) = prefs.edit()
+            .putInt(
+                KEY_IDLE_TIMEOUT_MINUTES,
+                value.coerceIn(MIN_IDLE_TIMEOUT_MINUTES, MAX_IDLE_TIMEOUT_MINUTES)
+            )
+            .apply()
 
     // --- Home Assistant MQTT integration ---
 
@@ -284,6 +347,11 @@ class AppConfig(context: Context) {
 
         private const val KEY_DASHBOARD_URLS = "dashboard_urls"
         private const val KEY_DASHBOARD_ALLOWED_ORIGINS = "dashboard_allowed_origins"
+        private const val KEY_CONTENT_SCHEDULE_ENABLED = "content_schedule_enabled"
+        private const val KEY_CONTENT_PROFILES = "content_profiles"
+        private const val KEY_IDLE_SCREEN_ENABLED = "idle_screen_enabled"
+        private const val KEY_IDLE_SCREEN_URL = "idle_screen_url"
+        private const val KEY_IDLE_TIMEOUT_MINUTES = "idle_timeout_minutes"
         private const val KEY_MQTT_ENABLED = "mqtt_enabled"
         private const val KEY_MQTT_BROKER_HOST = "mqtt_broker_host"
         private const val KEY_MQTT_BROKER_PORT = "mqtt_broker_port"
@@ -316,6 +384,11 @@ class AppConfig(context: Context) {
         private const val KEY_AUTO_ROTATE_INTERVAL = "auto_rotate_interval"
 
         private const val DEFAULT_DASHBOARD_URL = "https://example.com"
+        private const val PROFILE_START_TIME = "start_time"
+        private const val PROFILE_URLS = "urls"
+        const val MIN_IDLE_TIMEOUT_MINUTES = 1
+        const val MAX_IDLE_TIMEOUT_MINUTES = 1_440
+        private const val DEFAULT_IDLE_TIMEOUT_MINUTES = 5
         private const val DEFAULT_MQTT_PORT = 1883
         private const val DISCOVERY_CLEANUP_SEPARATOR = "\t"
         private const val DEFAULT_SETTINGS_PIN = "1234"
