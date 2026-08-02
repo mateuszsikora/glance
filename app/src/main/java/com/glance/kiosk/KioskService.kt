@@ -22,6 +22,7 @@ import com.glance.config.AppConfig
 import com.glance.mqtt.MqttLightCommand
 import com.glance.mqtt.MqttReportedState
 import com.glance.mqtt.MqttStateManager
+import com.glance.remote.RemoteConfigServer
 import com.glance.screen.ScheduleManager
 
 /**
@@ -39,6 +40,7 @@ class KioskService : Service() {
     private lateinit var devicePolicyManager: DevicePolicyManager
     private var mqttStateManager: MqttStateManager? = null
     private var scheduleManager: ScheduleManager? = null
+    private var remoteConfigServer: RemoteConfigServer? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var initialized = false
     private var configReloadInProgress = false
@@ -125,6 +127,8 @@ class KioskService : Service() {
         mainHandler.removeCallbacksAndMessages(null)
         mqttStateManager?.stop()
         mqttStateManager = null
+        remoteConfigServer?.stop()
+        remoteConfigServer = null
         releaseWakeLock()
         if (initialized) {
             unregisterReceiver(screenStateReceiver)
@@ -159,6 +163,7 @@ class KioskService : Service() {
 
         startMqtt()
         scheduleManager = ScheduleManager(this, config).also { it.start() }
+        reconcileRemoteConfigServer()
     }
 
     private fun startMqtt() {
@@ -175,6 +180,8 @@ class KioskService : Service() {
     }
 
     private fun reloadConfig() {
+        mainHandler.removeCallbacks(reconcileRemoteConfigRunnable)
+        mainHandler.postDelayed(reconcileRemoteConfigRunnable, REMOTE_SERVER_RELOAD_DELAY_MS)
         if (configReloadInProgress) {
             configReloadRequested = true
             Log.i(TAG, "Configuration reload already running; another reload was queued")
@@ -213,6 +220,32 @@ class KioskService : Service() {
         if (configReloadRequested) {
             configReloadRequested = false
             reloadConfig()
+        }
+    }
+
+    private val reconcileRemoteConfigRunnable = Runnable { reconcileRemoteConfigServer() }
+
+    private fun reconcileRemoteConfigServer() {
+        if (!config.remoteConfigEnabled) {
+            remoteConfigServer?.stop()
+            remoteConfigServer = null
+            return
+        }
+        if (remoteConfigServer != null) return
+
+        val server = RemoteConfigServer(config) {
+            mainHandler.post {
+                if (destroyed) return@post
+                sendBroadcast(Intent(MainActivity.ACTION_RELOAD_UI).setPackage(packageName))
+                reloadConfig()
+            }
+        }
+        try {
+            server.start()
+            remoteConfigServer = server
+        } catch (e: Exception) {
+            Log.e(TAG, "Unable to start remote configuration server", e)
+            server.stop()
         }
     }
 
@@ -361,6 +394,7 @@ class KioskService : Service() {
         private const val WAKE_LOCK_TIMEOUT_MS = 10_000L
         private const val WAKE_LOCK_RELEASE_DELAY_MS = 3_000L
         private const val ACTIVITY_CONTROL_RETRY_MS = 750L
+        private const val REMOTE_SERVER_RELOAD_DELAY_MS = 750L
 
         const val ACTION_RELOAD_CONFIG = "com.glance.action.RELOAD_CONFIG"
         const val ACTION_COMMAND_SCREEN = "com.glance.action.COMMAND_SCREEN"

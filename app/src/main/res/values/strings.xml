@@ -41,6 +41,12 @@
     <string name="mqtt_device_name_hint">Device name in Home Assistant</string>
     <string name="mqtt_discovery_prefix_hint">Discovery prefix (default homeassistant)</string>
     <string name="mqtt_help">Publishes a retained MQTT Discovery light with ON/OFF, brightness and availability. No HA token or YAML helpers required.</string>
+    <string name="remote_config_title">Remote configuration</string>
+    <string name="remote_config_enabled_label">Allow settings from another device on this LAN</string>
+    <string name="remote_config_disabled_help">Enable and save to start the panel on port 8080.</string>
+    <string name="remote_config_ready_help">After saving, open:\n%1$s</string>
+    <string name="remote_config_no_address_help">Panel enabled on port 8080; connect the tablet to Wi-Fi or Ethernet to see its address.</string>
+    <string name="remote_config_security_help">The panel uses unencrypted HTTP and the settings PIN. Enable it only on a trusted local network.</string>
     <string name="settings_pin_hint">New settings PIN (blank keeps the current PIN)</string>
     <string name="debug_info_title">Debug Info</string>
     <string name="save">Save</string>

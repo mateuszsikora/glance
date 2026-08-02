@@ -7,13 +7,14 @@ Glance is a single-module native Android application written in Kotlin. It suppo
 - `MainActivity` owns the fullscreen UI, time-based dashboard selection, dashboard pager, idle-screen overlay and timer, settings gesture, brightness controller, reversible soft-off overlay, and communication with the background services.
 - `ContentSchedulePolicy` resolves the active local-time profile, while `IdleTimeoutTracker` keeps elapsed-time inactivity calculations independent from wall-clock changes.
 - `DashboardPagerAdapter` and `WebViewFragment` create one WebView page per configured dashboard. `DashboardOrigin` restricts top-level navigation to the dashboard origin and explicitly allowed login origins.
-- `KioskService` is the foreground control plane. It owns MQTT, screen commands, schedule state, and relaunch behavior independently of the Activity lifecycle.
+- `KioskService` is the foreground control plane. It owns MQTT, the optional remote configuration server, screen commands, schedule state, and relaunch behavior independently of the Activity lifecycle.
 - `WatchdogService` performs health checks, periodic reloads, and memory-pressure recovery while avoiding unnecessary WebView work when the screen is off.
 - `ScheduleManager` and `ScheduleReceiver` calculate and deliver daily screen transitions. `BootReceiver` restores the kiosk and reschedules work after boot, package replacement, clock, time-zone, and exact-alarm permission changes.
 - `ScreenController` implements screen state changes. Device Owner mode can use `lockNow()`; regular-app mode uses a reversible black overlay and window brightness.
 - `BrightnessController` maps ambient-light readings or remote brightness commands to the Android window.
 - `AppConfig` stores configuration and lifecycle state in private `SharedPreferences`. `SecretStore` encrypts the MQTT password using AES-GCM with a non-exportable Android Keystore key.
 - `SettingsActivity` validates and applies user configuration behind a salted PBKDF2 PIN verifier with retry lockout.
+- `RemoteConfigServer` exposes an opt-in, LAN-only HTTP form on port 8080. It shares `AppConfig`, validation, PIN lockout and the service reload path with on-device settings.
 
 ## Data flow
 
@@ -24,15 +25,17 @@ Glance is a single-module native Android application written in Kotlin. It suppo
 5. The Activity reports resulting screen and brightness state back to the service, which publishes retained MQTT state.
 6. After inactivity, the Activity overlays a separately origin-restricted idle WebView. Its first touch is consumed, the current time profile is resolved again, and the underlying dashboard is revealed.
 7. The watchdog asks the current visible WebView for a health response and broadcasts a package-scoped reload request when recovery is needed.
+8. An authenticated remote form save updates `AppConfig`, asks `KioskService` to rebuild MQTT and schedule state, and broadcasts the same dashboard reload used by local settings.
 
 ## Security model
 
 - Dashboard and broker endpoints are entirely user-configured. The app has no project-operated backend or telemetry.
 - Top-level WebView navigation is origin restricted. Additional authentication origins require explicit configuration.
 - MQTT credentials stay in private application storage; the password is encrypted at rest. WebView credentials and cookies remain under Android WebView's storage model.
+- Remote configuration is disabled by default. When enabled, it uses bounded HTTP parsing, a limited worker pool, PIN retry lockout, expiring in-memory sessions, CSRF tokens, restrictive response headers, and never renders the stored MQTT password.
 - Android backups are disabled. Receivers, services, and settings are not exported unless Android requires an exported entry point with a platform permission.
 - Device Owner, signing keys, settings PINs, dashboard sessions, and broker credentials are trust anchors and must be protected operationally.
-- Cleartext HTTP and MQTT are supported for local deployments, so transport confidentiality depends on endpoint configuration and network trust.
+- Cleartext dashboard HTTP, remote configuration HTTP, and MQTT are supported for local deployments, so transport confidentiality depends on endpoint configuration and network trust. Remote settings should be enabled only on a trusted LAN.
 
 ## Lifecycle and provisioning constraints
 

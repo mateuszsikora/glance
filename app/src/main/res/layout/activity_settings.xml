@@ -441,6 +441,49 @@
             android:background="#FF404040"
             android:layout_marginBottom="16dp" />
 
+        <!-- Remote configuration -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/remote_config_title"
+            android:textColor="#FFFFFFFF"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/switchRemoteConfig"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/remote_config_enabled_label"
+            android:textColor="#FFFFFFFF"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:id="@+id/textRemoteConfigAddress"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#FFB0B0B0"
+            android:textSize="13sp"
+            android:textIsSelectable="true"
+            android:fontFamily="monospace"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/remote_config_security_help"
+            android:textColor="#FFFFC107"
+            android:textSize="12sp"
+            android:layout_marginBottom="16dp" />
+
+        <!-- Divider -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#FF404040"
+            android:layout_marginBottom="16dp" />
+
         <!-- Settings PIN -->
         <EditText
             android:id="@+id/editPin"

@@ -23,6 +23,7 @@ import com.glance.R
 import com.glance.config.AppConfig
 import com.glance.kiosk.KioskService
 import com.glance.kiosk.LockTaskHelper
+import com.glance.remote.RemoteConfigAddress
 import com.glance.screen.ScheduleManager
 import com.glance.watchdog.WatchdogService
 import com.google.android.material.button.MaterialButton
@@ -59,6 +60,8 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var editMqttPassword: EditText
     private lateinit var editMqttDeviceName: EditText
     private lateinit var editMqttDiscoveryPrefix: EditText
+    private lateinit var switchRemoteConfig: SwitchCompat
+    private lateinit var textRemoteConfigAddress: TextView
     private lateinit var editPin: EditText
     private lateinit var textDebugInfo: TextView
     private var awaitingExactAlarmAccess = false
@@ -203,6 +206,8 @@ class SettingsActivity : AppCompatActivity() {
         editMqttPassword = findViewById(R.id.editMqttPassword)
         editMqttDeviceName = findViewById(R.id.editMqttDeviceName)
         editMqttDiscoveryPrefix = findViewById(R.id.editMqttDiscoveryPrefix)
+        switchRemoteConfig = findViewById(R.id.switchRemoteConfig)
+        textRemoteConfigAddress = findViewById(R.id.textRemoteConfigAddress)
         editPin = findViewById(R.id.editPin)
         textDebugInfo = findViewById(R.id.textDebugInfo)
     }
@@ -244,6 +249,11 @@ class SettingsActivity : AppCompatActivity() {
         }
         editMqttDeviceName.setText(config.mqttDeviceName)
         editMqttDiscoveryPrefix.setText(config.mqttDiscoveryPrefix)
+        switchRemoteConfig.isChecked = config.remoteConfigEnabled
+        showRemoteConfigAddress()
+        switchRemoteConfig.setOnCheckedChangeListener { _, enabled ->
+            showRemoteConfigAddress(enabled)
+        }
         editPin.setText("")
     }
 
@@ -464,6 +474,7 @@ class SettingsActivity : AppCompatActivity() {
         config.mqttUsername = editMqttUsername.text.toString().trim()
         config.mqttDeviceName = editMqttDeviceName.text.toString().trim().ifBlank { "Glance Tablet" }
         config.mqttDiscoveryPrefix = discoveryPrefix
+        config.remoteConfigEnabled = switchRemoteConfig.isChecked
 
         if (newPin.isNotBlank()) {
             config.setSettingsPin(newPin)
@@ -605,9 +616,21 @@ class SettingsActivity : AppCompatActivity() {
             appendLine("Auto brightness: ${config.autoBrightnessEnabled}")
             appendLine("MQTT: ${if (config.mqttEnabled) "${config.mqttBrokerHost}:${config.mqttBrokerPort}" else "disabled"}")
             appendLine("MQTT discovery: ${config.mqttDiscoveryPrefix}")
+            appendLine("Remote configuration: ${if (config.remoteConfigEnabled) "enabled" else "disabled"}")
         }
 
         textDebugInfo.text = info
+    }
+
+    private fun showRemoteConfigAddress(enabled: Boolean = switchRemoteConfig.isChecked) {
+        val urls = RemoteConfigAddress.localUrls()
+        textRemoteConfigAddress.text = when {
+            !enabled && urls.isEmpty() -> getString(R.string.remote_config_disabled_help)
+            urls.isEmpty() ->
+                getString(R.string.remote_config_no_address_help)
+            !enabled -> getString(R.string.remote_config_ready_help, urls.joinToString("\n"))
+            else -> urls.joinToString("\n")
+        }
     }
 
     companion object {
