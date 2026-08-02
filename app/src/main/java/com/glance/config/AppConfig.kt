@@ -162,6 +162,12 @@ class AppConfig(context: Context) {
         get() = prefs.getInt(KEY_HEALTH_CHECK_INTERVAL, 30).coerceIn(10, 3600)
         set(value) = prefs.edit().putInt(KEY_HEALTH_CHECK_INTERVAL, value.coerceIn(10, 3600)).apply()
 
+    // --- Remote configuration ---
+
+    var remoteConfigEnabled: Boolean
+        get() = prefs.getBoolean(KEY_REMOTE_CONFIG_ENABLED, false)
+        set(value) = prefs.edit().putBoolean(KEY_REMOTE_CONFIG_ENABLED, value).apply()
+
     // --- Kiosk lifecycle ---
 
     var isKioskSuspended: Boolean
@@ -190,6 +196,9 @@ class AppConfig(context: Context) {
     val needsLegacyPinUpgrade: Boolean
         get() = !prefs.contains(KEY_SETTINGS_PIN_HASH) && prefs.contains(KEY_SETTINGS_PIN)
 
+    val settingsPinRevision: Long
+        get() = prefs.getLong(KEY_SETTINGS_PIN_REVISION, 0L)
+
     fun verifySettingsPin(candidate: String): Boolean {
         val encodedHash = prefs.getString(KEY_SETTINGS_PIN_HASH, null)
         val encodedSalt = prefs.getString(KEY_SETTINGS_PIN_SALT, null)
@@ -217,6 +226,7 @@ class AppConfig(context: Context) {
         prefs.edit()
             .putString(KEY_SETTINGS_PIN_SALT, Base64.encodeToString(salt, Base64.NO_WRAP))
             .putString(KEY_SETTINGS_PIN_HASH, Base64.encodeToString(hash, Base64.NO_WRAP))
+            .putLong(KEY_SETTINGS_PIN_REVISION, settingsPinRevision + 1L)
             .remove(KEY_SETTINGS_PIN)
             .apply()
     }
@@ -293,9 +303,11 @@ class AppConfig(context: Context) {
         private const val KEY_SCHEDULE_ENABLED = "schedule_enabled"
         private const val KEY_RELOAD_INTERVAL = "reload_interval_hours"
         private const val KEY_HEALTH_CHECK_INTERVAL = "health_check_interval_seconds"
+        private const val KEY_REMOTE_CONFIG_ENABLED = "remote_config_enabled"
         private const val KEY_SETTINGS_PIN = "settings_pin"
         private const val KEY_SETTINGS_PIN_HASH = "settings_pin_hash"
         private const val KEY_SETTINGS_PIN_SALT = "settings_pin_salt"
+        private const val KEY_SETTINGS_PIN_REVISION = "settings_pin_revision"
         private const val KEY_PIN_FAILED_ATTEMPTS = "pin_failed_attempts"
         private const val KEY_PIN_LOCK_UNTIL = "pin_lock_until"
         private const val KEY_KIOSK_SUSPENDED = "kiosk_suspended"

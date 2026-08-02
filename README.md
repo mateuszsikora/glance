@@ -19,7 +19,7 @@ The project targets Android 14 (API 34) and supports Android 8.0 (API 26) and ne
 - scheduled screen on/off, including overnight windows;
 - Home Assistant MQTT discovery with retained state and availability;
 - watchdog health checks and memory-pressure recovery;
-- PIN-protected settings and encrypted MQTT password storage.
+- PIN-protected on-device and LAN settings, with encrypted MQTT password storage.
 
 See [the architecture overview](docs/architecture.md) for component and data-flow details.
 
@@ -41,6 +41,12 @@ Glance is currently distributed as source code. There is no official prebuilt AP
 3. Build and install the release APK.
 4. Provision Glance as Device Owner with `adb shell dpm set-device-owner com.glance/.AdminReceiver`.
 5. Launch Glance, tap the top-right corner five times, create a settings PIN, and configure the dashboard and optional MQTT integration.
+
+To continue configuration from a computer, enable `Remote configuration` in the protected
+settings screen and save. Open one of the displayed `http://<tablet-ip>:8080/` addresses from a
+device on the same network and sign in with the settings PIN. The panel applies changes without an
+application restart. Its sessions expire after 30 minutes, repeated wrong PINs trigger the same
+lockout as on-device settings, and a PIN change signs out all remote sessions.
 
 Use a disposable test device before provisioning a tablet you depend on. Changing the application ID or signing key later can require another factory reset.
 
@@ -101,6 +107,20 @@ The published application ID is `com.glance`. Fork maintainers should choose a u
 ## Networking
 
 Home Assistant is commonly hosted over plain `http://` on a local network, so Glance currently allows cleartext application traffic. MQTT commonly uses plain TCP port `1883`. Both expose traffic to other participants on that network. Prefer a valid HTTPS dashboard and an `ssl://` MQTT broker whenever possible, and use Glance only on a network you trust.
+
+The optional remote configuration panel listens on TCP port `8080` on the tablet's network
+interfaces. It is disabled by default and requires the settings PIN. The embedded server accepts
+only a small bounded subset of HTTP needed by its forms, limits concurrent requests and request
+sizes, uses short-lived `HttpOnly`/`SameSite` sessions and CSRF tokens, and never sends the stored
+MQTT password to the browser. A blank MQTT password field preserves the stored credential; use the
+explicit checkbox to clear it.
+
+The panel deliberately uses HTTP so a browser can connect directly by IP without certificate
+setup. Consequently, the PIN and any newly submitted MQTT password are not encrypted in transit.
+Enable it only on a trusted LAN, keep untrusted clients off that network, and disable the panel
+after use when persistent access is unnecessary. Reserving the tablet's address in DHCP keeps its
+URL stable. Android 17 requires an additional local-network runtime permission after the app moves
+to target SDK 37; the current target SDK 34 continues to use the existing `INTERNET` permission.
 
 Top-level WebView navigation stays on the configured dashboard origin by default. If a dashboard uses OAuth or SSO on another host, add each trusted authentication origin under `Allowed login origins` in settings. Paths are ignored; scheme, host, and effective port must match exactly. Leave the list empty for same-origin authentication.
 
