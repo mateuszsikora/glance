@@ -1,6 +1,10 @@
 # Glance
 
-Glance is a lightweight Android kiosk that turns an old tablet into an always-on, wall-mounted web dashboard. It supports multiple dashboard views, Device Owner kiosk mode, automatic brightness, scheduled screen control, a watchdog, and Home Assistant MQTT discovery.
+[![Android CI](https://github.com/mateuszsikora/glance/actions/workflows/android.yml/badge.svg?branch=master)](https://github.com/mateuszsikora/glance/actions/workflows/android.yml)
+
+Give an old Android tablet a second life as a dedicated Home Assistant or web dashboard.
+
+Glance is a lightweight, self-hosted Android kiosk for an always-on, wall-mounted display. It supports multiple dashboard views, Device Owner kiosk mode, automatic brightness, scheduled screen control, a watchdog, and Home Assistant MQTT discovery.
 
 The project targets Android 14 (API 34) and supports Android 8.0 (API 26) and newer. Development and security fixes track the latest `master` branch and, once releases are published, the most recent release.
 
@@ -19,9 +23,30 @@ The project targets Android 14 (API 34) and supports Android 8.0 (API 26) and ne
 
 See [the architecture overview](docs/architecture.md) for component and data-flow details.
 
+## Who is this for?
+
+Glance is intended for people who want to reuse an older Android tablet as a dedicated smart-home or information display. It is a good fit when you:
+
+- already have a Home Assistant, Grafana, or other web dashboard;
+- want the tablet to start automatically and remain in a controlled kiosk UI;
+- are comfortable using ADB once for installation and Device Owner provisioning;
+- prefer a local application with no analytics, advertising, or project-operated cloud service.
+
+Glance is currently distributed as source code. There is no official prebuilt APK release yet, so you must build and sign the application yourself.
+
+## Quick start
+
+1. Prepare a dedicated tablet running Android 8.0 or newer. Device Owner provisioning normally requires a factory reset and no configured accounts.
+2. Configure a stable release signing key using the instructions below.
+3. Build and install the release APK.
+4. Provision Glance as Device Owner with `adb shell dpm set-device-owner com.glance/.AdminReceiver`.
+5. Launch Glance, tap the top-right corner five times, create a settings PIN, and configure the dashboard and optional MQTT integration.
+
+Use a disposable test device before provisioning a tablet you depend on. Changing the application ID or signing key later can require another factory reset.
+
 ## Building
 
-Requirements: JDK 17, Android SDK platform 34, and build-tools 34.0.0.
+Requirements: JDK 17, Android SDK platform 37, and Build Tools 36.0.0. The checked-in Gradle Wrapper supplies Gradle 9.5.
 
 Point Gradle at your SDK by creating an untracked `local.properties`:
 

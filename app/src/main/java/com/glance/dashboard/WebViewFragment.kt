@@ -30,7 +30,7 @@ class WebViewFragment : Fragment() {
 
     private val retryRunnable = Runnable {
         if (_binding == null || rendererGone || !isAdded || url.isBlank()) return@Runnable
-        Log.i(TAG, "Retrying load: $url")
+        Log.i(TAG, "Retrying dashboard load")
         loadUrl(url)
     }
 
@@ -71,7 +71,6 @@ class WebViewFragment : Fragment() {
                 javaScriptEnabled = true
                 javaScriptCanOpenWindowsAutomatically = false
                 domStorageEnabled = true
-                databaseEnabled = true
                 allowFileAccess = false
                 allowContentAccess = false
                 mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
@@ -118,7 +117,7 @@ class WebViewFragment : Fragment() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
                     isLoaded = !mainFrameError
-                    Log.d(TAG, "Dashboard origin loaded: ${DashboardOrigin.from(url)}")
+                    Log.d(TAG, "Dashboard page loaded")
                 }
 
                 override fun onReceivedError(
