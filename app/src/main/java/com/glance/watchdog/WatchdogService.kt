@@ -140,6 +140,9 @@ class WatchdogService : Service() {
         )
     }
 
+    // These callbacks still matter on the supported Android 8-14 devices even though
+    // Android 15 deprecated the legacy trim levels for newer platform behavior.
+    @Suppress("DEPRECATION")
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
         if (level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW ||

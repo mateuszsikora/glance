@@ -74,7 +74,7 @@ class MqttStateManager(
             connectWithInitialRetry()
         } catch (e: Exception) {
             running = false
-            Log.e(TAG, "Failed to start MQTT", e)
+            Log.e(TAG, "Failed to start MQTT (${failureKind(e)})")
         }
     }
 
@@ -97,7 +97,7 @@ class MqttStateManager(
                         .waitForCompletion(DISCONNECT_TIMEOUT_MS)
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "MQTT shutdown did not complete cleanly", e)
+                Log.w(TAG, "MQTT shutdown did not complete cleanly (${failureKind(e)})")
             } finally {
                 try {
                     // A configuration reload can race an asynchronous connect. Forced close is
@@ -105,7 +105,7 @@ class MqttStateManager(
                     // same client ID and the broker continuously evicts the replacement client.
                     mqttClient.close(true)
                 } catch (e: Exception) {
-                    Log.w(TAG, "MQTT client could not be closed", e)
+                    Log.w(TAG, "MQTT client could not be closed (${failureKind(e)})")
                 }
             }
         }
@@ -125,7 +125,7 @@ class MqttStateManager(
         val mqttClient = client
         if (mqttClient?.isConnected != true) {
             config.queueDiscoveryCleanup(cleanupServerUri, topics.discovery)
-            Log.w(TAG, "Discovery cleanup queued until broker reconnects: ${topics.discovery}")
+            Log.w(TAG, "Discovery cleanup queued until broker reconnects")
             mainHandler.post(onComplete)
             return
         }
@@ -138,10 +138,10 @@ class MqttStateManager(
             mainHandler.removeCallbacks(timeout)
             if (delivered) {
                 config.markDiscoveryCleanupComplete(cleanupServerUri, topics.discovery)
-                Log.i(TAG, "MQTT discovery removal confirmed: ${topics.discovery}")
+                Log.i(TAG, "MQTT discovery removal confirmed")
             } else {
                 config.queueDiscoveryCleanup(cleanupServerUri, topics.discovery)
-                Log.w(TAG, "Discovery cleanup timed out; queued for retry: ${topics.discovery}")
+                Log.w(TAG, "Discovery cleanup timed out; queued for retry")
             }
             mainHandler.post(onComplete)
         }
@@ -163,13 +163,16 @@ class MqttStateManager(
                         asyncActionToken: IMqttToken?,
                         exception: Throwable?
                     ) {
-                        Log.w(TAG, "MQTT discovery removal failed", exception)
+                        Log.w(
+                            TAG,
+                            "MQTT discovery removal failed (${failureKind(exception)})"
+                        )
                         finish(delivered = false)
                     }
                 }
             )
         } catch (e: MqttException) {
-            Log.w(TAG, "Unable to publish MQTT discovery removal", e)
+            Log.w(TAG, "Unable to publish MQTT discovery removal (${failureKind(e)})")
             finish(delivered = false)
         }
     }
@@ -193,14 +196,14 @@ class MqttStateManager(
 
                 override fun onFailure(asyncActionToken: IMqttToken?, exception: Throwable?) {
                     connecting = false
-                    Log.w(TAG, "Initial MQTT connection failed: ${exception?.message}")
+                    Log.w(TAG, "Initial MQTT connection failed (${failureKind(exception)})")
                     scheduleInitialReconnect()
                 }
             })
-            Log.i(TAG, "Connecting to MQTT $serverUri")
+            Log.i(TAG, "Connecting to MQTT broker")
         } catch (e: Exception) {
             connecting = false
-            Log.w(TAG, "MQTT connect attempt failed synchronously", e)
+            Log.w(TAG, "MQTT connect attempt failed synchronously (${failureKind(e)})")
             scheduleInitialReconnect()
         }
     }
@@ -268,14 +271,14 @@ class MqttStateManager(
                 publish(topics.availability, "online", retained = true)
                 publishState()
             } catch (e: MqttException) {
-                Log.e(TAG, "Failed to initialize MQTT subscriptions", e)
+                Log.e(TAG, "Failed to initialize MQTT subscriptions (${failureKind(e)})")
             }
         }
 
         override fun connectionLost(cause: Throwable?) {
             connecting = false
             if (running && client === callbackClient) {
-                Log.w(TAG, "MQTT connection lost: ${cause?.message}")
+                Log.w(TAG, "MQTT connection lost (${failureKind(cause)})")
             }
         }
 
@@ -305,7 +308,7 @@ class MqttStateManager(
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Invalid MQTT light command: $payload", e)
+            Log.e(TAG, "Invalid MQTT light command (${failureKind(e)})")
         }
     }
 
@@ -318,14 +321,14 @@ class MqttStateManager(
             appVersion = BuildConfig.VERSION_NAME
         )
         publish(topics.discovery, payload, retained = true)
-        Log.i(TAG, "MQTT discovery published: ${topics.discovery}")
+        Log.i(TAG, "MQTT discovery published")
     }
 
     private fun cleanupQueuedDiscovery() {
         config.pendingDiscoveryCleanupTopics(serverUri).forEach { topic ->
             if (publish(topic, "", retained = true)) {
                 config.markDiscoveryCleanupComplete(serverUri, topic)
-                Log.i(TAG, "Removed queued MQTT discovery entry: $topic")
+                Log.i(TAG, "Removed queued MQTT discovery entry")
             }
         }
     }
@@ -346,8 +349,17 @@ class MqttStateManager(
             mqttClient.publish(topic, message(payload, retained))
             true
         } catch (e: MqttException) {
-            Log.w(TAG, "MQTT publish failed for $topic", e)
+            Log.w(TAG, "MQTT publish failed (${failureKind(e)})")
             false
+        }
+    }
+
+    /** Diagnostic classification that never includes endpoints, topics, payloads, or secrets. */
+    private fun failureKind(error: Throwable?): String {
+        return when (error) {
+            is MqttException -> "reason=${error.reasonCode}"
+            null -> "unknown"
+            else -> error.javaClass.simpleName
         }
     }
 

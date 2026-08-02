@@ -4,7 +4,7 @@ Thanks for helping improve Glance. Small, focused pull requests are easiest to r
 
 ## Development setup
 
-Use JDK 17 and Android SDK platform 34 with build-tools 34.0.0. Point Gradle to the SDK in an untracked `local.properties` file, then run:
+Use JDK 17, Android SDK platform 37, and Build Tools 36.0.0. The checked-in wrapper supplies Gradle 9.5. Point Gradle to the SDK in an untracked `local.properties` file, then run:
 
 ```sh
 ./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease

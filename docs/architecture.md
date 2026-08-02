@@ -1,6 +1,6 @@
 # Architecture
 
-Glance is a single-module native Android application written in Kotlin. It supports Android 8.0 (API 26) and newer, compiles and targets API 34, and is designed for long-running wall-mounted tablets.
+Glance is a single-module native Android application written in Kotlin. It supports Android 8.0 (API 26) and newer, compiles against API 37, targets API 34, and is designed for long-running wall-mounted tablets.
 
 ## Runtime components
 
