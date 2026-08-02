@@ -2,6 +2,7 @@ package com.glance.config
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import com.glance.content.ContentProfile
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -47,6 +48,7 @@ class AppConfigTest {
             .putInt("reload_interval_hours", -4)
             .putInt("health_check_interval_seconds", 0)
             .putInt("mqtt_broker_port", 90_000)
+            .putInt("idle_timeout_minutes", 0)
             .commit()
         val config = AppConfig(context)
 
@@ -55,6 +57,7 @@ class AppConfigTest {
         assertEquals(1, config.webviewReloadIntervalHours)
         assertEquals(10, config.healthCheckIntervalSeconds)
         assertEquals(1883, config.mqttBrokerPort)
+        assertEquals(1, config.idleTimeoutMinutes)
     }
 
     @Test
@@ -84,6 +87,31 @@ class AppConfigTest {
         AppConfig(context).dashboardAllowedOrigins = origins
 
         assertEquals(origins, AppConfig(context).dashboardAllowedOrigins)
+    }
+
+    @Test
+    fun storesContentProfilesAndIdleScreenSettings() {
+        val profiles = listOf(
+            ContentProfile(
+                "06:00",
+                listOf("https://morning.example.test", "https://weather.example.test")
+            ),
+            ContentProfile("18:00", listOf("https://evening.example.test"))
+        )
+        AppConfig(context).apply {
+            contentScheduleEnabled = true
+            contentProfiles = profiles
+            idleScreenEnabled = true
+            idleScreenUrl = "https://photos.example.test"
+            idleTimeoutMinutes = 15
+        }
+
+        val restored = AppConfig(context)
+        assertTrue(restored.contentScheduleEnabled)
+        assertEquals(profiles, restored.contentProfiles)
+        assertTrue(restored.idleScreenEnabled)
+        assertEquals("https://photos.example.test", restored.idleScreenUrl)
+        assertEquals(15, restored.idleTimeoutMinutes)
     }
 
     companion object {

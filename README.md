@@ -14,6 +14,7 @@ The project targets Android 14 (API 34) and supports Android 8.0 (API 26) and ne
 ## Features
 
 - fullscreen, swipeable WebView dashboards with origin-restricted top-level navigation;
+- time-based dashboard profiles and a touch-to-return idle URL;
 - Device Owner LockTask mode and boot recovery;
 - ambient-light and MQTT-controlled brightness;
 - scheduled screen on/off, including overnight windows;
@@ -97,6 +98,20 @@ adb shell dpm set-device-owner com.glance/.AdminReceiver
 ### Forks and application identity
 
 The published application ID is `com.glance`. Fork maintainers should choose a unique `applicationId` and namespace before provisioning devices or publishing an APK. Changing identity later creates a different Android app and cannot update an existing `com.glance` Device Owner installation. Likewise, changing the signing certificate can require removing Device Owner state or factory-resetting the tablet.
+
+## Scheduled content and idle screen
+
+`Dashboard URLs` remain the default content. Enable `Show different dashboards by time` to replace them with local-time profiles. Enter one mapping per line:
+
+```text
+06:00 | https://dashboard.example.test/morning
+18:00 | https://dashboard.example.test/evening
+18:00 | https://weather.example.test/
+```
+
+A profile starts at its configured minute and remains active until the next profile. The final profile wraps through midnight. Repeating a start time adds multiple swipeable URLs to that profile and uses the existing auto-rotation setting.
+
+The optional idle screen loads a separate URL after the configured number of minutes without a touch. Its first touch is consumed and returns to the profile for the current time, so it cannot accidentally activate dashboard controls. The idle timer is suspended while the display is logically or physically off. The idle URL keeps the display powered; use the separate screen ON/OFF schedule when the goal is to save power.
 
 ## Networking
 
