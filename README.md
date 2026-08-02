@@ -4,7 +4,7 @@
 
 Give an old Android tablet a second life as a dedicated Home Assistant or web dashboard.
 
-Glance is a lightweight, self-hosted Android kiosk for an always-on, wall-mounted display. It supports multiple dashboard views, Device Owner kiosk mode, automatic brightness, scheduled screen control, a watchdog, and Home Assistant MQTT discovery.
+Glance is a lightweight, self-hosted Android kiosk for an always-on, wall-mounted display. It supports multiple dashboard views, browser-based configuration from another device, Device Owner kiosk mode, automatic brightness, scheduled screen control, a watchdog, and Home Assistant MQTT discovery.
 
 The project targets Android 14 (API 34) and supports Android 8.0 (API 26) and newer. Development and security fixes track the latest `master` branch and, once releases are published, the most recent release.
 
@@ -19,7 +19,8 @@ The project targets Android 14 (API 34) and supports Android 8.0 (API 26) and ne
 - scheduled screen on/off, including overnight windows;
 - Home Assistant MQTT discovery with retained state and availability;
 - watchdog health checks and memory-pressure recovery;
-- PIN-protected on-device and LAN settings, with encrypted MQTT password storage.
+- PIN-protected remote configuration from any browser on the same LAN;
+- encrypted MQTT password storage with no cloud account or companion app required.
 
 See [the architecture overview](docs/architecture.md) for component and data-flow details.
 
@@ -34,6 +35,28 @@ Glance is intended for people who want to reuse an older Android tablet as a ded
 
 Glance is currently distributed as source code. There is no official prebuilt APK release yet, so you must build and sign the application yourself.
 
+## Configure the tablet from your computer
+
+Once the tablet is mounted, you do not need to take it down or type long URLs on its touchscreen.
+Glance can expose an opt-in settings panel directly on your local network:
+
+```text
+http://192.168.1.42:8080/
+```
+
+Open that address from a computer or phone, sign in with the tablet's settings PIN, and manage:
+
+- dashboard URLs, allowed login origins, rotation and timing;
+- automatic and minimum/maximum brightness;
+- screen wake and turn-off schedules;
+- Home Assistant MQTT connection and discovery;
+- remote access and the settings PIN itself.
+
+Changes are validated and applied immediately without restarting the application. The browser talks
+directly to the tablet—there is no Glance cloud service, account, or separate desktop application.
+Remote configuration is disabled by default and the tablet shows the correct URL when it is enabled.
+See [Networking](#networking) for the HTTP security model.
+
 ## Quick start
 
 1. Prepare a dedicated tablet running Android 8.0 or newer. Device Owner provisioning normally requires a factory reset and no configured accounts.
@@ -42,11 +65,10 @@ Glance is currently distributed as source code. There is no official prebuilt AP
 4. Provision Glance as Device Owner with `adb shell dpm set-device-owner com.glance/.AdminReceiver`.
 5. Launch Glance, tap the top-right corner five times, create a settings PIN, and configure the dashboard and optional MQTT integration.
 
-To continue configuration from a computer, enable `Remote configuration` in the protected
-settings screen and save. Open one of the displayed `http://<tablet-ip>:8080/` addresses from a
-device on the same network and sign in with the settings PIN. The panel applies changes without an
-application restart. Its sessions expire after 30 minutes, repeated wrong PINs trigger the same
-lockout as on-device settings, and a PIN change signs out all remote sessions.
+To continue configuration from a computer, enable `Remote configuration`, save, and open one of
+the displayed addresses from a device on the same network. Sessions expire after 30 minutes,
+repeated wrong PINs trigger the same lockout as on-device settings, and a PIN change signs out all
+remote sessions.
 
 Use a disposable test device before provisioning a tablet you depend on. Changing the application ID or signing key later can require another factory reset.
 
