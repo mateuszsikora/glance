@@ -4,7 +4,8 @@ Glance is a single-module native Android application written in Kotlin. It suppo
 
 ## Runtime components
 
-- `MainActivity` owns the fullscreen UI, dashboard pager, settings gesture, brightness controller, reversible soft-off overlay, and communication with the background services.
+- `MainActivity` owns the fullscreen UI, time-based dashboard selection, dashboard pager, idle-screen overlay and timer, settings gesture, brightness controller, reversible soft-off overlay, and communication with the background services.
+- `ContentSchedulePolicy` resolves the active local-time profile, while `IdleTimeoutTracker` keeps elapsed-time inactivity calculations independent from wall-clock changes.
 - `DashboardPagerAdapter` and `WebViewFragment` create one WebView page per configured dashboard. `DashboardOrigin` restricts top-level navigation to the dashboard origin and explicitly allowed login origins.
 - `KioskService` is the foreground control plane. It owns MQTT, screen commands, schedule state, and relaunch behavior independently of the Activity lifecycle.
 - `WatchdogService` performs health checks, periodic reloads, and memory-pressure recovery while avoiding unnecessary WebView work when the screen is off.
@@ -17,11 +18,12 @@ Glance is a single-module native Android application written in Kotlin. It suppo
 ## Data flow
 
 1. `GlanceApp` creates the shared configuration and notification channels.
-2. `MainActivity` renders configured dashboard URLs and starts both foreground services unless kiosk mode was deliberately suspended.
+2. `MainActivity` resolves the current content profile, renders its dashboard URLs, and starts both foreground services unless kiosk mode was deliberately suspended.
 3. `KioskService` connects to the configured broker, publishes Home Assistant discovery/state/availability, and converts MQTT or schedule requests into screen and brightness commands.
 4. Commands that require UI state are sent through package-scoped, non-exported broadcasts to `MainActivity`; Device Owner screen-off can be executed directly by the service.
 5. The Activity reports resulting screen and brightness state back to the service, which publishes retained MQTT state.
-6. The watchdog asks the current WebView for a health response and broadcasts a package-scoped reload request when recovery is needed.
+6. After inactivity, the Activity overlays a separately origin-restricted idle WebView. Its first touch is consumed, the current time profile is resolved again, and the underlying dashboard is revealed.
+7. The watchdog asks the current visible WebView for a health response and broadcasts a package-scoped reload request when recovery is needed.
 
 ## Security model
 
@@ -40,4 +42,4 @@ Vendor battery management can still interfere with long-running services. Deploy
 
 ## Verification
 
-Unit tests cover configuration, navigation origins, MQTT topics/endpoints/reconnect policy, scheduling, settings validation, and watchdog lifecycle. CI runs unit tests, Android lint, and debug and release builds. Hardware-dependent Device Owner and OEM behavior requires real-device testing.
+Unit tests cover configuration, navigation origins, MQTT topics/endpoints/reconnect policy, screen and content scheduling, idle-timeout calculations, settings validation, and watchdog lifecycle. CI runs unit tests, Android lint, and debug and release builds. Hardware-dependent Device Owner and OEM behavior requires real-device testing.

@@ -1,6 +1,7 @@
 package com.glance.settings
 
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -27,7 +28,41 @@ class ConfigValidatorTest {
         assertFalse(ConfigValidator.isValidBrightnessRange(200, 100))
         assertTrue(ConfigValidator.isValidRotateInterval(30))
         assertFalse(ConfigValidator.isValidRotateInterval(0))
+        assertTrue(ConfigValidator.isValidIdleTimeout(5))
+        assertFalse(ConfigValidator.isValidIdleTimeout(0))
         assertTrue(ConfigValidator.isValidSettingsPin("583902"))
         assertFalse(ConfigValidator.isValidSettingsPin("1234"))
+    }
+
+    @Test
+    fun parsesAndFormatsScheduledContentProfiles() {
+        val result = ConfigValidator.parseContentProfiles(
+            """
+            18:00 | https://evening.example.test
+            06:00 | https://morning.example.test
+            18:00 | https://weather.example.test
+            18:00 | https://weather.example.test
+            """.trimIndent()
+        )
+
+        assertEquals(null, result.error)
+        assertEquals(listOf("06:00", "18:00"), result.profiles.map { it.startTime })
+        assertEquals(2, result.profiles.last().urls.size)
+        assertEquals(
+            "06:00 | https://morning.example.test\n" +
+                "18:00 | https://evening.example.test\n" +
+                "18:00 | https://weather.example.test",
+            ConfigValidator.formatContentProfiles(result.profiles)
+        )
+    }
+
+    @Test
+    fun reportsLineContainingInvalidScheduledContent() {
+        val result = ConfigValidator.parseContentProfiles(
+            "06:00 | https://morning.example.test\ninvalid"
+        )
+
+        assertEquals("Line 2 must use HH:mm | URL", result.error)
+        assertTrue(result.profiles.isEmpty())
     }
 }
