@@ -168,7 +168,7 @@ Android System WebView performs TLS validation and stores the dashboard's browse
 
 Glance exposes the tablet screen as a brightness-capable MQTT light. It publishes a retained Home Assistant discovery payload, state, and availability/LWT. No helper entities, template YAML, or Home Assistant access token are required.
 
-MQTT and the daily screen schedule run in the foreground kiosk service, independently from the dashboard Activity. Initial broker failures use exponential backoff, while established sessions use Paho automatic reconnect.
+MQTT and the daily screen schedule run in the foreground kiosk service, independently from the dashboard Activity. Initial broker failures use exponential backoff, while established sessions use Paho automatic reconnect. Keep-alive pings are driven by wakeup alarms rather than a plain timer, so the broker session survives the tablet suspending with the screen off instead of dropping to the last will and marking the entity unavailable.
 
 1. Configure an MQTT broker and the MQTT integration in Home Assistant.
 2. Create a dedicated, least-privilege broker login for the tablet.
