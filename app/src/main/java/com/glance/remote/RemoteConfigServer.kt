@@ -120,6 +120,8 @@ class RemoteConfigServer(
                     BufferedOutputStream(client.getOutputStream()),
                     response
                 )
+                runCatching { response.afterSend?.invoke() }
+                    .onFailure { Log.w(TAG, "Remote configuration post-response action failed", it) }
             } catch (e: RemoteHttpException) {
                 runCatching {
                     RemoteHttpCodec.writeResponse(
@@ -159,7 +161,9 @@ internal data class RemoteHttpRequest(
 internal data class RemoteHttpResponse(
     val status: Int,
     val headers: Map<String, String>,
-    val body: ByteArray
+    val body: ByteArray,
+    /** Runs only after the complete response has been flushed to the browser. */
+    val afterSend: (() -> Unit)? = null
 ) {
     companion object {
         fun html(
@@ -190,7 +194,8 @@ internal class RemoteConfigHttpHandler(
         val csrfToken: String,
         var expiresAt: Long,
         val createdAt: Long,
-        val pinRevision: Long
+        val pinRevision: Long,
+        var notice: String? = null
     )
 
     private val updater = RemoteConfigUpdater(config)
@@ -222,7 +227,13 @@ internal class RemoteConfigHttpHandler(
         }
         val session = sessionFor(request)
             ?: return RemoteHttpResponse.html(200, loginPage())
-        return RemoteHttpResponse.html(200, settingsPage(session, updater.snapshot()))
+        val notice = synchronized(sessionLock) {
+            session.notice.also { session.notice = null }
+        }
+        return RemoteHttpResponse.html(
+            200,
+            settingsPage(session, updater.snapshot(), notice)
+        )
     }
 
     private fun login(request: RemoteHttpRequest): RemoteHttpResponse {
@@ -266,28 +277,34 @@ internal class RemoteConfigHttpHandler(
         return when (val result = synchronized(updateLock) { updater.apply(parameters) }) {
             is RemoteConfigUpdateResult.Error -> RemoteHttpResponse.html(
                 400,
-                settingsPage(session, updater.snapshot(), result.message, isError = true)
+                settingsPage(
+                    session,
+                    updater.snapshot(),
+                    result.message,
+                    isError = true,
+                    submittedValues = parameters
+                )
             )
             is RemoteConfigUpdateResult.Success -> {
-                onConfigChanged()
-                if (result.pinChanged) {
+                val response = if (result.pinChanged) {
                     clearSessions()
                     RemoteHttpResponse.html(
                         200,
                         loginPage("Settings saved. Sign in with the new PIN."),
                         mapOf("Set-Cookie" to expiredSessionCookie())
                     )
+                } else if (!config.remoteConfigEnabled) {
+                    RemoteHttpResponse.html(200, remoteAccessDisabledPage())
                 } else {
-                    val message = if (config.remoteConfigEnabled) {
-                        "Settings saved and applied."
-                    } else {
-                        "Settings saved. Remote configuration is now disabled."
+                    synchronized(sessionLock) {
+                        session.notice = "Settings saved and applied."
                     }
-                    RemoteHttpResponse.html(
-                        200,
-                        settingsPage(session, updater.snapshot(), message)
-                    )
+                    RemoteHttpResponse.redirect("/")
                 }
+                // Reloading can stop this server when remote access was unchecked. Deferring the
+                // callback prevents the active socket from being interrupted before the browser
+                // receives its confirmation page.
+                response.copy(afterSend = onConfigChanged)
             }
         }
     }
@@ -378,17 +395,21 @@ internal class RemoteConfigHttpHandler(
         message = message,
         isError = message?.startsWith("Wrong") == true || message?.startsWith("Too many") == true,
         content = """
-            <div class="card narrow">
-              <h1>Glance</h1>
-              <p>Enter the settings PIN configured on the tablet.</p>
-              <form method="post" action="/login">
-                <label for="pin">Settings PIN</label>
-                <input id="pin" name="pin" type="password" inputmode="numeric"
-                       pattern="[0-9]{4,12}" minlength="4" maxlength="12"
-                       autocomplete="current-password" required autofocus>
-                <button type="submit">Sign in</button>
-              </form>
-              <p class="warning">This page uses unencrypted HTTP. Use it only on a trusted local network.</p>
+            <div class="auth-shell">
+              <div class="brand"><span class="brand-mark" aria-hidden="true">G</span><span>Glance</span></div>
+              <section class="card auth-card">
+                <p class="eyebrow">Remote configuration</p>
+                <h1>Welcome back</h1>
+                <p>Enter the settings PIN shown on your tablet to continue.</p>
+                <form method="post" action="/login" accept-charset="UTF-8">
+                  <div class="field"><label for="pin">Settings PIN</label>
+                    <input id="pin" name="pin" type="password" inputmode="numeric"
+                           pattern="[0-9]{4,12}" minlength="4" maxlength="12"
+                           autocomplete="current-password" required autofocus></div>
+                  <button class="primary wide" type="submit">Sign in</button>
+                </form>
+              </section>
+              <div class="security-note compact"><span aria-hidden="true">i</span><p>This is an unencrypted local connection. Use it only on a network you trust.</p></div>
             </div>
         """.trimIndent()
     )
@@ -396,9 +417,29 @@ internal class RemoteConfigHttpHandler(
     private fun setupRequiredPage(): String = page(
         title = "Setup required",
         content = """
-            <div class="card narrow">
-              <h1>Finish setup on the tablet</h1>
-              <p>Open Glance settings on the tablet and create a non-default settings PIN first.</p>
+            <div class="auth-shell">
+              <div class="brand"><span class="brand-mark" aria-hidden="true">G</span><span>Glance</span></div>
+              <section class="card auth-card">
+                <p class="eyebrow">One more step</p>
+                <h1>Finish setup on the tablet</h1>
+                <p>Open Glance settings on the tablet and create a non-default settings PIN first.</p>
+              </section>
+            </div>
+        """.trimIndent()
+    )
+
+    private fun remoteAccessDisabledPage(): String = page(
+        title = "Settings saved",
+        content = """
+            <div class="auth-shell">
+              <div class="brand"><span class="brand-mark" aria-hidden="true">G</span><span>Glance</span></div>
+              <section class="card auth-card completion-card">
+                <span class="completion-mark" aria-hidden="true">✓</span>
+                <p class="eyebrow">Changes applied</p>
+                <h1>Remote access is off</h1>
+                <p>Your settings were saved and this configuration server has been disabled.</p>
+                <p class="hint">You can close this tab. To connect again, enable remote configuration in Glance settings on the tablet.</p>
+              </section>
             </div>
         """.trimIndent()
     )
@@ -407,8 +448,15 @@ internal class RemoteConfigHttpHandler(
         session: Session,
         values: RemoteConfigSnapshot,
         message: String? = null,
-        isError: Boolean = false
+        isError: Boolean = false,
+        submittedValues: Map<String, String>? = null
     ): String {
+        fun value(name: String, fallback: String): String =
+            escapeHtml(submittedValues?.get(name) ?: fallback)
+
+        fun checked(name: String, fallback: Boolean): Boolean =
+            if (submittedValues == null) fallback else submittedValues[name] == "on"
+
         val passwordStatus = when {
             values.mqttPasswordUnreadable -> "Stored password is unreadable; replace or clear it."
             values.mqttPasswordConfigured -> "A password is stored. Leave blank to keep it."
@@ -419,111 +467,168 @@ internal class RemoteConfigHttpHandler(
             message = message,
             isError = isError,
             content = """
-                <header>
-                  <div><h1>Glance settings</h1><p>Configure this tablet from your local network.</p></div>
-                  <span class="badge">LAN · HTTP</span>
+                <header class="topbar">
+                  <div class="brand"><span class="brand-mark" aria-hidden="true">G</span><span>Glance</span></div>
+                  <div class="topbar-actions">
+                    <span class="badge"><span class="status-dot"></span>Local connection</span>
+                    <form method="post" action="/logout">
+                      <button type="submit" class="ghost small-button">Sign out</button>
+                    </form>
+                  </div>
                 </header>
-                <form method="post" action="/save">
+                <div class="page-intro">
+                  <p class="eyebrow">Remote configuration</p>
+                  <h1>Tablet settings</h1>
+                  <p>Changes are validated on the tablet and applied as soon as you save.</p>
+                </div>
+                <form id="remote-settings-form" method="post" action="/save" accept-charset="UTF-8">
                   <input type="hidden" name="csrf" value="${escapeHtml(session.csrfToken)}">
+                  <div class="settings-layout">
+                    <nav class="section-nav card" aria-label="Settings sections">
+                      <p class="nav-title">On this page</p>
+                      <a href="#dashboards">Dashboards</a>
+                      <a href="#content">Scheduled content</a>
+                      <a href="#brightness">Brightness</a>
+                      <a href="#screen">Screen schedule</a>
+                      <a href="#mqtt">Home Assistant MQTT</a>
+                      <a href="#access">Remote access &amp; PIN</a>
+                      <div class="nav-note"><span aria-hidden="true">⌁</span><p>Connected directly to your tablet over the local network.</p></div>
+                    </nav>
 
-                  <section class="card">
-                    <h2>Dashboards</h2>
-                    <label for="dashboardUrls">Dashboard URLs <small>one per line</small></label>
-                    <textarea id="dashboardUrls" name="dashboardUrls" rows="4" required>${escapeHtml(values.dashboardUrls)}</textarea>
-                    <label for="dashboardAllowedOrigins">Allowed login origins <small>optional, one per line</small></label>
-                    <textarea id="dashboardAllowedOrigins" name="dashboardAllowedOrigins" rows="3">${escapeHtml(values.dashboardAllowedOrigins)}</textarea>
-                    ${checkbox("autoRotateEnabled", "Auto-rotate dashboards", values.autoRotateEnabled)}
-                    <label for="autoRotateIntervalSeconds">Rotate interval (seconds)</label>
-                    <input id="autoRotateIntervalSeconds" name="autoRotateIntervalSeconds" type="number"
-                           min="5" max="86400" value="${values.autoRotateIntervalSeconds}" required>
-                  </section>
+                    <div class="settings-stack">
+                      <section id="dashboards" class="card settings-card">
+                        ${sectionHeading("01", "Dashboards", "Choose what Glance displays and how pages rotate.")}
+                        <div class="section-body">
+                          <div class="field"><label for="dashboardUrls">Dashboard URLs <small>one per line</small></label>
+                            <textarea id="dashboardUrls" name="dashboardUrls" rows="4" spellcheck="false" required>${value("dashboardUrls", values.dashboardUrls)}</textarea></div>
+                          <div class="field"><label for="dashboardAllowedOrigins">Allowed login origins <small>optional</small></label>
+                            <textarea id="dashboardAllowedOrigins" name="dashboardAllowedOrigins" rows="3" spellcheck="false">${value("dashboardAllowedOrigins", values.dashboardAllowedOrigins)}</textarea>
+                            <p class="hint">Only add trusted OAuth or SSO origins, one per line.</p></div>
+                          ${checkbox("autoRotateEnabled", "Auto-rotate dashboards", checked("autoRotateEnabled", values.autoRotateEnabled))}
+                          <div class="field compact-field"><label for="autoRotateIntervalSeconds">Rotate every</label>
+                            <div class="input-with-suffix"><input id="autoRotateIntervalSeconds" name="autoRotateIntervalSeconds" type="number" inputmode="numeric"
+                              min="5" max="86400" value="${value("autoRotateIntervalSeconds", values.autoRotateIntervalSeconds.toString())}" required><span>seconds</span></div></div>
+                        </div>
+                      </section>
 
-                  <section class="card">
-                    <h2>Scheduled content</h2>
-                    ${checkbox("contentScheduleEnabled", "Show different dashboards by time", values.contentScheduleEnabled)}
-                    <label for="contentProfiles">Content profiles <small>one HH:mm | URL entry per line</small></label>
-                    <textarea id="contentProfiles" name="contentProfiles" rows="5"
-                              placeholder="06:00 | https://example.com/morning&#10;18:00 | https://example.com/evening">${escapeHtml(values.contentProfiles)}</textarea>
-                    <p class="hint">Repeat a start time to add several swipeable URLs to one profile. The last profile wraps through midnight.</p>
-                    ${checkbox("idleScreenEnabled", "Show a URL after inactivity", values.idleScreenEnabled)}
-                    <label for="idleScreenUrl">Idle screen URL</label>
-                    <input id="idleScreenUrl" name="idleScreenUrl" value="${escapeHtml(values.idleScreenUrl)}"
-                           placeholder="https://example.com/idle">
-                    <label for="idleTimeoutMinutes">Inactivity timeout (minutes)</label>
-                    <input id="idleTimeoutMinutes" name="idleTimeoutMinutes" type="number"
-                           min="1" max="1440" value="${values.idleTimeoutMinutes}" required>
-                    <p class="hint">The first touch returns to the current dashboard and is consumed to prevent accidental actions.</p>
-                  </section>
+                      <section id="content" class="card settings-card">
+                        ${sectionHeading("02", "Scheduled content", "Adapt the dashboard to the time of day or inactivity.")}
+                        <div class="section-body">
+                          ${checkbox("contentScheduleEnabled", "Show different dashboards by time", checked("contentScheduleEnabled", values.contentScheduleEnabled))}
+                          <div class="field"><label for="contentProfiles">Content profiles <small>HH:mm | URL</small></label>
+                            <textarea id="contentProfiles" name="contentProfiles" rows="5" spellcheck="false"
+                              placeholder="06:00 | https://example.com/morning&#10;18:00 | https://example.com/evening">${value("contentProfiles", values.contentProfiles)}</textarea>
+                            <p class="hint">Repeat a start time for several swipeable URLs. The last profile wraps through midnight.</p></div>
+                          <div class="subsection">
+                            ${checkbox("idleScreenEnabled", "Show a URL after inactivity", checked("idleScreenEnabled", values.idleScreenEnabled))}
+                            <div class="grid two">
+                              <div class="field"><label for="idleScreenUrl">Idle screen URL</label>
+                                <input id="idleScreenUrl" name="idleScreenUrl" type="url" value="${value("idleScreenUrl", values.idleScreenUrl)}" placeholder="https://example.com/idle"></div>
+                              <div class="field"><label for="idleTimeoutMinutes">Inactivity timeout</label>
+                                <div class="input-with-suffix"><input id="idleTimeoutMinutes" name="idleTimeoutMinutes" type="number" inputmode="numeric"
+                                  min="1" max="1440" value="${value("idleTimeoutMinutes", values.idleTimeoutMinutes.toString())}" required><span>minutes</span></div></div>
+                            </div>
+                            <p class="hint">The first touch returns to the current dashboard without activating its controls.</p>
+                          </div>
+                        </div>
+                      </section>
 
-                  <section class="card">
-                    <h2>Brightness</h2>
-                    ${checkbox("autoBrightnessEnabled", "Use the ambient light sensor", values.autoBrightnessEnabled)}
-                    <div class="grid two">
-                      <div><label for="minBrightness">Minimum (0-255)</label>
-                        <input id="minBrightness" name="minBrightness" type="number" min="0" max="255" value="${values.minBrightness}" required></div>
-                      <div><label for="maxBrightness">Maximum (0-255)</label>
-                        <input id="maxBrightness" name="maxBrightness" type="number" min="0" max="255" value="${values.maxBrightness}" required></div>
+                      <section id="brightness" class="card settings-card">
+                        ${sectionHeading("03", "Brightness", "Set a comfortable range for the display.")}
+                        <div class="section-body">
+                          ${checkbox("autoBrightnessEnabled", "Use the ambient light sensor", checked("autoBrightnessEnabled", values.autoBrightnessEnabled))}
+                          <div class="grid two">
+                            <div class="field"><label for="minBrightness">Minimum <small>0–255</small></label>
+                              <input id="minBrightness" name="minBrightness" type="number" inputmode="numeric" min="0" max="255" value="${value("minBrightness", values.minBrightness.toString())}" required></div>
+                            <div class="field"><label for="maxBrightness">Maximum <small>0–255</small></label>
+                              <input id="maxBrightness" name="maxBrightness" type="number" inputmode="numeric" min="0" max="255" value="${value("maxBrightness", values.maxBrightness.toString())}" required></div>
+                          </div>
+                        </div>
+                      </section>
+
+                      <section id="screen" class="card settings-card">
+                        ${sectionHeading("04", "Screen schedule", "Automatically wake the display and turn it off overnight.")}
+                        <div class="section-body">
+                          ${checkbox("scheduleEnabled", "Automatically wake and turn off the screen", checked("scheduleEnabled", values.scheduleEnabled))}
+                          <div class="grid two">
+                            <div class="field"><label for="screenOnTime">Wake at</label>
+                              <input id="screenOnTime" name="screenOnTime" type="time" value="${value("screenOnTime", values.screenOnTime)}" required></div>
+                            <div class="field"><label for="screenOffTime">Turn off at</label>
+                              <input id="screenOffTime" name="screenOffTime" type="time" value="${value("screenOffTime", values.screenOffTime)}" required></div>
+                          </div>
+                          <p class="hint">Exact timing requires exact-alarm access on the tablet.</p>
+                        </div>
+                      </section>
+
+                      <section id="mqtt" class="card settings-card">
+                        ${sectionHeading("05", "Home Assistant MQTT", "Connect Glance to Home Assistant discovery and controls.")}
+                        <div class="section-body">
+                          ${checkbox("mqttEnabled", "Enable MQTT and automatic HA discovery", checked("mqttEnabled", values.mqttEnabled))}
+                          <div class="grid two">
+                            <div class="field"><label for="mqttBrokerHost">Broker host</label>
+                              <input id="mqttBrokerHost" name="mqttBrokerHost" value="${value("mqttBrokerHost", values.mqttBrokerHost)}" placeholder="192.168.1.10" spellcheck="false"></div>
+                            <div class="field"><label for="mqttBrokerPort">Broker port</label>
+                              <input id="mqttBrokerPort" name="mqttBrokerPort" type="number" inputmode="numeric" min="1" max="65535" value="${value("mqttBrokerPort", values.mqttBrokerPort.toString())}" required></div>
+                            <div class="field"><label for="mqttUsername">Username</label>
+                              <input id="mqttUsername" name="mqttUsername" value="${value("mqttUsername", values.mqttUsername)}" autocomplete="username"></div>
+                            <div class="field"><label for="mqttPassword">New password <small>optional</small></label>
+                              <input id="mqttPassword" name="mqttPassword" type="password" autocomplete="new-password">
+                              <p class="hint">${escapeHtml(passwordStatus)}</p></div>
+                          </div>
+                          ${checkbox("clearMqttPassword", "Clear the stored MQTT password", checked("clearMqttPassword", false), subtle = true)}
+                          <div class="grid two">
+                            <div class="field"><label for="mqttDeviceName">Device name</label>
+                              <input id="mqttDeviceName" name="mqttDeviceName" value="${value("mqttDeviceName", values.mqttDeviceName)}"></div>
+                            <div class="field"><label for="mqttDiscoveryPrefix">Discovery prefix</label>
+                              <input id="mqttDiscoveryPrefix" name="mqttDiscoveryPrefix" value="${value("mqttDiscoveryPrefix", values.mqttDiscoveryPrefix)}" spellcheck="false"></div>
+                          </div>
+                        </div>
+                      </section>
+
+                      <section id="access" class="card settings-card">
+                        ${sectionHeading("06", "Remote access &amp; PIN", "Control access to this page and rotate its PIN.")}
+                        <div class="section-body">
+                          ${checkbox("remoteConfigEnabled", "Keep remote configuration enabled", checked("remoteConfigEnabled", values.remoteConfigEnabled))}
+                          <div class="inline-warning"><span aria-hidden="true">!</span><p>Turning this off closes the panel after saving. It can only be re-enabled on the tablet.</p></div>
+                          <div class="grid two">
+                            <div class="field"><label for="newPin">New settings PIN <small>blank keeps current</small></label>
+                              <input id="newPin" name="newPin" type="password" inputmode="numeric" minlength="4" maxlength="12" pattern="[0-9]{4,12}" autocomplete="new-password"></div>
+                            <div class="field"><label for="confirmPin">Confirm new PIN</label>
+                              <input id="confirmPin" name="confirmPin" type="password" inputmode="numeric" minlength="4" maxlength="12" pattern="[0-9]{4,12}" autocomplete="new-password"></div>
+                          </div>
+                        </div>
+                      </section>
                     </div>
-                  </section>
+                  </div>
 
-                  <section class="card">
-                    <h2>Screen schedule</h2>
-                    ${checkbox("scheduleEnabled", "Automatically wake and turn off the screen", values.scheduleEnabled)}
-                    <div class="grid two">
-                      <div><label for="screenOnTime">Wake at</label>
-                        <input id="screenOnTime" name="screenOnTime" type="time" value="${escapeHtml(values.screenOnTime)}" required></div>
-                      <div><label for="screenOffTime">Turn off at</label>
-                        <input id="screenOffTime" name="screenOffTime" type="time" value="${escapeHtml(values.screenOffTime)}" required></div>
-                    </div>
-                    <p class="hint">Exact timing requires exact-alarm access granted on the tablet.</p>
-                  </section>
-
-                  <section class="card">
-                    <h2>Home Assistant MQTT</h2>
-                    ${checkbox("mqttEnabled", "Enable MQTT and automatic HA discovery", values.mqttEnabled)}
-                    <div class="grid two">
-                      <div><label for="mqttBrokerHost">Broker host</label>
-                        <input id="mqttBrokerHost" name="mqttBrokerHost" value="${escapeHtml(values.mqttBrokerHost)}" placeholder="192.168.1.10"></div>
-                      <div><label for="mqttBrokerPort">Broker port</label>
-                        <input id="mqttBrokerPort" name="mqttBrokerPort" type="number" min="1" max="65535" value="${values.mqttBrokerPort}" required></div>
-                    </div>
-                    <label for="mqttUsername">Username</label>
-                    <input id="mqttUsername" name="mqttUsername" value="${escapeHtml(values.mqttUsername)}" autocomplete="username">
-                    <label for="mqttPassword">New password</label>
-                    <input id="mqttPassword" name="mqttPassword" type="password" autocomplete="new-password">
-                    <p class="hint">${escapeHtml(passwordStatus)}</p>
-                    ${checkbox("clearMqttPassword", "Clear the stored MQTT password", false)}
-                    <label for="mqttDeviceName">Device name</label>
-                    <input id="mqttDeviceName" name="mqttDeviceName" value="${escapeHtml(values.mqttDeviceName)}">
-                    <label for="mqttDiscoveryPrefix">Discovery prefix</label>
-                    <input id="mqttDiscoveryPrefix" name="mqttDiscoveryPrefix" value="${escapeHtml(values.mqttDiscoveryPrefix)}">
-                  </section>
-
-                  <section class="card">
-                    <h2>Remote access and PIN</h2>
-                    ${checkbox("remoteConfigEnabled", "Keep remote configuration enabled", values.remoteConfigEnabled)}
-                    <p class="hint">Disabling this closes the panel after saving. Re-enable it in settings on the tablet.</p>
-                    <div class="grid two">
-                      <div><label for="newPin">New settings PIN <small>blank keeps current</small></label>
-                        <input id="newPin" name="newPin" type="password" inputmode="numeric" pattern="[0-9]{4,12}" autocomplete="new-password"></div>
-                      <div><label for="confirmPin">Confirm new PIN</label>
-                        <input id="confirmPin" name="confirmPin" type="password" inputmode="numeric" pattern="[0-9]{4,12}" autocomplete="new-password"></div>
-                    </div>
-                  </section>
-
-                  <button class="primary" type="submit">Save and apply</button>
+                  <div class="save-bar">
+                    <div><strong>Ready to apply?</strong><span>Glance validates every field before changing the tablet.</span></div>
+                    <button class="primary" type="submit">Save and apply</button>
+                  </div>
                 </form>
-                <form method="post" action="/logout" class="logout">
-                  <button type="submit" class="secondary">Sign out</button>
-                </form>
-                <p class="warning">HTTP traffic, including submitted credentials, is not encrypted. Use this panel only on a trusted LAN.</p>
+                <div class="security-note"><span aria-hidden="true">i</span><p><strong>Local HTTP connection.</strong> Traffic, including submitted credentials, is not encrypted. Use this panel only on a trusted LAN.</p></div>
             """.trimIndent()
         )
     }
 
-    private fun checkbox(name: String, label: String, checked: Boolean): String =
-        "<label class=\"check\"><input type=\"checkbox\" name=\"$name\"" +
-            (if (checked) " checked" else "") + "><span>${escapeHtml(label)}</span></label>"
+    private fun sectionHeading(number: String, title: String, description: String): String = """
+        <div class="section-heading">
+          <span class="section-number" aria-hidden="true">$number</span>
+          <div><h2>$title</h2><p>$description</p></div>
+        </div>
+    """.trimIndent()
+
+    private fun checkbox(
+        name: String,
+        label: String,
+        checked: Boolean,
+        subtle: Boolean = false
+    ): String =
+        "<label class=\"toggle-row${if (subtle) " subtle" else ""}\">" +
+            "<input type=\"checkbox\" name=\"$name\"" +
+            (if (checked) " checked" else "") +
+            "><span class=\"toggle-track\" aria-hidden=\"true\"></span>" +
+            "<span class=\"toggle-label\">${escapeHtml(label)}</span></label>"
 
     private fun page(
         title: String,
@@ -532,7 +637,10 @@ internal class RemoteConfigHttpHandler(
         content: String = "<div class=\"card narrow\"><h1>${escapeHtml(title)}</h1></div>"
     ): String {
         val banner = message?.let {
-            "<div class=\"banner ${if (isError) "error" else "success"}\">${escapeHtml(it)}</div>"
+            "<div class=\"banner ${if (isError) "error" else "success"}\" " +
+                "role=\"${if (isError) "alert" else "status"}\" aria-live=\"polite\">" +
+                "<span aria-hidden=\"true\">${if (isError) "!" else "✓"}</span>" +
+                "<p>${escapeHtml(it)}</p></div>"
         }.orEmpty()
         return """
             <!doctype html>
@@ -542,31 +650,148 @@ internal class RemoteConfigHttpHandler(
               <meta name="viewport" content="width=device-width,initial-scale=1">
               <title>${escapeHtml(title)} · Glance</title>
               <style>
-                :root { color-scheme: dark; font: 16px/1.45 system-ui,-apple-system,sans-serif; background:#0d1117; color:#e6edf3; }
+                :root {
+                  color-scheme:dark;
+                  font:15px/1.55 Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+                  --bg:#080c11; --surface:#10171f; --surface-raised:#151e28; --field:#0b1118;
+                  --border:#273341; --border-strong:#394858; --text:#f1f5f9; --muted:#91a0af;
+                  --accent:#4ade80; --accent-strong:#22c55e; --accent-ink:#052e16;
+                  --blue:#60a5fa; --warning:#fbbf24; --danger:#fb7185;
+                  background:var(--bg); color:var(--text);
+                }
                 * { box-sizing:border-box; }
-                body { margin:0; padding:32px 18px 64px; }
-                main { width:min(860px,100%); margin:auto; }
-                header { display:flex; align-items:center; justify-content:space-between; gap:20px; margin-bottom:20px; }
-                h1,h2,p { margin-top:0; } h1 { margin-bottom:4px; } h2 { font-size:1.15rem; }
-                header p { color:#8b949e; margin:0; }
-                .badge { white-space:nowrap; border:1px solid #d29922; color:#e3b341; border-radius:999px; padding:5px 10px; font-size:.8rem; }
-                .card { background:#161b22; border:1px solid #30363d; border-radius:12px; padding:22px; margin-bottom:18px; }
-                .narrow { max-width:430px; margin:10vh auto 0; }
-                label { display:block; color:#c9d1d9; font-weight:600; margin:16px 0 6px; }
-                label:first-of-type { margin-top:0; } small,.hint { color:#8b949e; font-weight:400; font-size:.85rem; }
-                input,textarea { width:100%; border:1px solid #484f58; border-radius:7px; background:#0d1117; color:#e6edf3; padding:10px 12px; font:inherit; }
-                textarea { resize:vertical; } input:focus,textarea:focus { outline:2px solid #2f81f7; border-color:transparent; }
-                .grid { display:grid; gap:16px; } .two { grid-template-columns:repeat(2,minmax(0,1fr)); }
-                .check { display:flex; align-items:center; gap:10px; font-weight:500; }
-                .check input { width:18px; height:18px; margin:0; }
-                button { border:0; border-radius:7px; padding:11px 18px; font:600 1rem system-ui; cursor:pointer; }
-                form > button, .narrow button { width:100%; margin-top:18px; }
-                .primary,button { color:white; background:#238636; } .secondary { background:#30363d; }
-                .logout button { margin-top:0; }
-                .banner { border-radius:8px; padding:12px 15px; margin-bottom:18px; }
-                .success { background:#153b24; border:1px solid #238636; } .error { background:#4c1f24; border:1px solid #da3633; }
-                .warning { color:#e3b341; font-size:.85rem; margin:20px 2px 0; }
-                @media (max-width:600px) { body { padding-top:18px; } .two { grid-template-columns:1fr; } .card { padding:17px; } }
+                html { scroll-behavior:smooth; background:var(--bg); }
+                body {
+                  min-height:100vh; margin:0; padding:28px 22px 64px;
+                  background:
+                    radial-gradient(circle at 15% -10%,rgba(34,197,94,.12),transparent 30rem),
+                    radial-gradient(circle at 95% 10%,rgba(59,130,246,.08),transparent 28rem),var(--bg);
+                }
+                main { width:min(1080px,100%); margin:auto; }
+                h1,h2,p { margin-top:0; }
+                h1 { margin-bottom:10px; font-size:clamp(1.8rem,4vw,2.45rem); line-height:1.12; letter-spacing:-.035em; }
+                h2 { margin:0 0 3px; font-size:1.18rem; line-height:1.3; letter-spacing:-.015em; }
+                a { color:inherit; }
+                .topbar { display:flex; align-items:center; justify-content:space-between; gap:18px; min-height:44px; margin-bottom:56px; }
+                .brand { display:flex; align-items:center; gap:10px; font-size:1.05rem; font-weight:750; letter-spacing:-.02em; }
+                .brand-mark {
+                  display:grid; place-items:center; width:34px; height:34px; border-radius:11px;
+                  color:var(--accent-ink); background:linear-gradient(145deg,#86efac,var(--accent-strong));
+                  box-shadow:0 0 0 1px rgba(134,239,172,.25),0 8px 24px rgba(34,197,94,.14);
+                  font-size:.95rem; font-weight:850;
+                }
+                .topbar-actions { display:flex; align-items:center; gap:10px; }
+                .badge {
+                  display:inline-flex; align-items:center; gap:8px; white-space:nowrap; padding:7px 11px;
+                  border:1px solid var(--border); border-radius:999px; color:#b9c4ce; background:rgba(16,23,31,.76);
+                  font-size:.77rem; font-weight:650;
+                }
+                .status-dot { width:7px; height:7px; border-radius:50%; background:var(--accent); box-shadow:0 0 0 4px rgba(74,222,128,.1); }
+                .page-intro { max-width:650px; margin-bottom:30px; }
+                .page-intro > p:last-child,.auth-card > p:not(.eyebrow),.completion-card > p { color:var(--muted); margin-bottom:0; font-size:1.02rem; }
+                .eyebrow { margin:0 0 9px; color:var(--accent); font-size:.75rem; font-weight:800; letter-spacing:.12em; text-transform:uppercase; }
+                .card { border:1px solid var(--border); border-radius:18px; background:rgba(16,23,31,.94); box-shadow:0 16px 50px rgba(0,0,0,.12); }
+                .settings-layout { display:grid; grid-template-columns:220px minmax(0,1fr); gap:22px; align-items:start; }
+                .section-nav { position:sticky; top:22px; padding:16px 12px; }
+                .nav-title { margin:2px 10px 8px; color:var(--muted); font-size:.72rem; font-weight:800; letter-spacing:.1em; text-transform:uppercase; }
+                .section-nav > a { display:block; padding:8px 10px; border-radius:9px; color:#b8c3cd; text-decoration:none; font-size:.87rem; font-weight:600; }
+                .section-nav > a:hover,.section-nav > a:focus-visible { color:var(--text); background:var(--surface-raised); outline:none; }
+                .nav-note { display:flex; gap:9px; margin:14px 4px 0; padding:13px 8px 3px; border-top:1px solid var(--border); color:var(--muted); }
+                .nav-note > span { color:var(--accent); font-size:1.1rem; }
+                .nav-note p { margin:0; font-size:.74rem; line-height:1.45; }
+                .settings-stack { min-width:0; }
+                .settings-card { margin:0 0 18px; scroll-margin-top:22px; overflow:hidden; }
+                .section-heading { display:flex; gap:14px; padding:22px 24px 19px; border-bottom:1px solid var(--border); background:linear-gradient(180deg,rgba(255,255,255,.018),transparent); }
+                .section-heading p { margin:0; color:var(--muted); font-size:.86rem; }
+                .section-number { display:grid; place-items:center; flex:0 0 31px; height:31px; border:1px solid #315341; border-radius:9px; color:var(--accent); background:rgba(34,197,94,.07); font-size:.69rem; font-weight:800; }
+                .section-body { padding:24px; }
+                .field { min-width:0; margin-bottom:18px; }
+                .field:last-child { margin-bottom:0; }
+                label:not(.toggle-row) { display:block; margin:0 0 7px; color:#dce4ea; font-size:.86rem; font-weight:680; }
+                small,.hint { color:var(--muted); font-weight:450; font-size:.78rem; }
+                .hint { margin:7px 1px 0; line-height:1.5; }
+                input,textarea {
+                  width:100%; min-height:44px; border:1px solid var(--border-strong); border-radius:10px;
+                  background:var(--field); color:var(--text); padding:10px 12px; font:inherit;
+                  box-shadow:inset 0 1px 0 rgba(255,255,255,.02); transition:border-color .15s,box-shadow .15s;
+                }
+                textarea { min-height:96px; resize:vertical; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.85rem; line-height:1.55; }
+                input::placeholder,textarea::placeholder { color:#627181; }
+                input:hover,textarea:hover { border-color:#4b5c6d; }
+                input:focus,textarea:focus { outline:none; border-color:var(--blue); box-shadow:0 0 0 3px rgba(96,165,250,.14); }
+                input:invalid:not(:focus):not(:placeholder-shown) { border-color:var(--danger); }
+                .grid { display:grid; gap:18px; }
+                .two { grid-template-columns:repeat(2,minmax(0,1fr)); }
+                .compact-field { max-width:260px; margin-top:18px; }
+                .input-with-suffix { display:flex; align-items:stretch; }
+                .input-with-suffix input { border-radius:10px 0 0 10px; }
+                .input-with-suffix > span { display:flex; align-items:center; padding:0 12px; border:1px solid var(--border-strong); border-left:0; border-radius:0 10px 10px 0; color:var(--muted); background:var(--surface-raised); font-size:.78rem; }
+                .subsection { margin-top:22px; padding-top:22px; border-top:1px solid var(--border); }
+                .toggle-row { position:relative; display:flex; align-items:center; gap:12px; margin:0; padding:13px 14px; border:1px solid var(--border); border-radius:12px; background:var(--surface-raised); cursor:pointer; }
+                .toggle-row + .field,.toggle-row + .grid { margin-top:20px; }
+                .toggle-row.subtle { margin:-2px 0 20px; padding:10px 0; border:0; background:transparent; }
+                .toggle-row input { position:absolute; width:1px; height:1px; opacity:0; }
+                .toggle-track { position:relative; flex:0 0 40px; width:40px; height:23px; border:1px solid #526170; border-radius:999px; background:#303b46; transition:.18s; }
+                .toggle-track::after { content:""; position:absolute; top:3px; left:3px; width:15px; height:15px; border-radius:50%; background:#c5ced6; box-shadow:0 1px 3px rgba(0,0,0,.4); transition:.18s; }
+                .toggle-row input:checked + .toggle-track { border-color:var(--accent-strong); background:var(--accent-strong); }
+                .toggle-row input:checked + .toggle-track::after { left:20px; background:white; }
+                .toggle-row input:focus-visible + .toggle-track { outline:2px solid var(--blue); outline-offset:3px; }
+                .toggle-label { color:#e1e8ed; font-size:.88rem; font-weight:650; }
+                .inline-warning { display:flex; align-items:flex-start; gap:10px; margin:14px 0 20px; color:#e8c66a; }
+                .inline-warning span,.security-note > span { display:grid; place-items:center; flex:0 0 22px; height:22px; border:1px solid rgba(251,191,36,.35); border-radius:50%; font-size:.72rem; font-weight:800; }
+                .inline-warning p { margin:1px 0 0; font-size:.78rem; line-height:1.5; }
+                button { min-height:40px; border:0; border-radius:10px; padding:10px 18px; font:700 .88rem system-ui,-apple-system,sans-serif; cursor:pointer; transition:transform .12s,background .12s,box-shadow .12s; }
+                button:active { transform:translateY(1px); }
+                button:focus-visible { outline:2px solid var(--blue); outline-offset:3px; }
+                .primary { min-width:154px; color:var(--accent-ink); background:linear-gradient(180deg,#63e995,var(--accent-strong)); box-shadow:0 7px 22px rgba(34,197,94,.14); }
+                .primary:hover { background:linear-gradient(180deg,#7bedaa,#2dd269); }
+                .ghost { color:#c8d2da; background:var(--surface); border:1px solid var(--border); }
+                .ghost:hover { color:white; border-color:var(--border-strong); background:var(--surface-raised); }
+                .small-button { min-height:34px; padding:6px 11px; font-size:.78rem; }
+                .wide { width:100%; margin-top:4px; }
+                .save-bar { position:sticky; bottom:16px; z-index:4; display:flex; align-items:center; justify-content:space-between; gap:18px; margin:8px 0 24px 242px; padding:14px 16px 14px 18px; border:1px solid #34503e; border-radius:15px; background:rgba(16,27,21,.94); box-shadow:0 15px 45px rgba(0,0,0,.35); backdrop-filter:blur(14px); }
+                .save-bar div { display:flex; flex-direction:column; }
+                .save-bar strong { font-size:.86rem; }
+                .save-bar span { color:var(--muted); font-size:.73rem; }
+                .security-note { display:flex; align-items:flex-start; gap:10px; max-width:760px; margin:0 0 0 242px; color:#b8a369; }
+                .security-note p { margin:0; font-size:.77rem; line-height:1.5; }
+                .security-note.compact { margin:18px 0 0; color:var(--muted); }
+                .banner { display:flex; align-items:flex-start; gap:10px; margin:0 0 20px; padding:13px 15px; border-radius:12px; }
+                .banner > span { font-weight:850; }
+                .banner p { margin:0; font-size:.87rem; font-weight:650; }
+                .success { color:#bff5ce; background:#0d2b18; border:1px solid #28623b; }
+                .error { color:#fecdd3; background:#35151b; border:1px solid #793442; }
+                .auth-shell { width:min(430px,100%); margin:8vh auto 0; }
+                .auth-shell > .brand { justify-content:center; margin-bottom:20px; }
+                .auth-card { padding:30px; }
+                .auth-card h1 { font-size:1.75rem; }
+                .auth-card > p:not(.eyebrow) { margin-bottom:24px; }
+                .completion-card { text-align:center; }
+                .completion-mark { display:grid; place-items:center; width:54px; height:54px; margin:0 auto 20px; border-radius:17px; color:var(--accent-ink); background:var(--accent); font-size:1.45rem; font-weight:900; }
+                .completion-card .hint { margin-top:18px; font-size:.82rem; }
+                @media (max-width:780px) {
+                  body { padding:22px 16px 56px; }
+                  .topbar { margin-bottom:40px; }
+                  .settings-layout { grid-template-columns:1fr; }
+                  .section-nav { display:none; }
+                  .save-bar { margin-left:0; }
+                  .security-note { margin-left:0; }
+                }
+                @media (max-width:540px) {
+                  body { padding:16px 12px 42px; }
+                  .topbar { margin-bottom:32px; }
+                  .topbar .badge { display:none; }
+                  .page-intro { margin-bottom:24px; }
+                  .page-intro h1 { font-size:2rem; }
+                  .section-heading { padding:19px 17px 17px; }
+                  .section-body { padding:19px 17px; }
+                  .two { grid-template-columns:1fr; gap:0; }
+                  .save-bar { align-items:stretch; flex-direction:column; bottom:8px; }
+                  .save-bar button { width:100%; }
+                  .auth-shell { margin-top:5vh; }
+                  .auth-card { padding:24px 20px; }
+                }
+                @media (prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto!important; transition:none!important; } }
               </style>
             </head>
             <body><main>$banner$content</main></body>
@@ -621,7 +846,10 @@ internal object RemoteHttpCodec {
             headers[name] = value
         }
 
-        val contentLength = headers["content-length"]?.toIntOrNull() ?: 0
+        val contentLengthHeader = headers["content-length"]
+        val contentLength = contentLengthHeader?.toIntOrNull()
+            ?: if (contentLengthHeader == null) 0
+            else throw RemoteHttpException(400, "Invalid Content-Length")
         if (contentLength < 0 || contentLength > MAX_BODY_BYTES) {
             throw RemoteHttpException(413, "Request body is too large")
         }

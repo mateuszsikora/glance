@@ -38,6 +38,17 @@ class RemoteHttpCodecTest {
         RemoteHttpCodec.readRequest(BufferedInputStream(ByteArrayInputStream(raw)))
     }
 
+    @Test(expected = RemoteHttpException::class)
+    fun rejectsMalformedContentLength() {
+        val raw = (
+            "POST /save HTTP/1.1\r\n" +
+                "Host: tablet\r\n" +
+                "Content-Length: definitely-not-a-number\r\n\r\n"
+            ).toByteArray(StandardCharsets.US_ASCII)
+
+        RemoteHttpCodec.readRequest(BufferedInputStream(ByteArrayInputStream(raw)))
+    }
+
     @Test
     fun writesSecurityHeadersAndExactLength() {
         val bytes = ByteArrayOutputStream()

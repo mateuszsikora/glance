@@ -6,6 +6,7 @@ import com.glance.config.AppConfig
 import java.net.URLEncoder
 import java.net.Socket
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.atomic.AtomicInteger
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -100,9 +101,14 @@ class RemoteConfigHttpHandlerTest {
 
         val response = handler.handle(post("/save", parameters, sessionCookie))
 
-        assertEquals(200, response.status)
-        assertTrue(response.text().contains("Settings saved and applied"))
+        assertEquals(303, response.status)
+        assertEquals("/", response.headers["Location"])
+        assertEquals(0, changes)
+        requireNotNull(response.afterSend).invoke()
         assertEquals(1, changes)
+        val confirmation = handler.handle(get("/", sessionCookie))
+        assertTrue(confirmation.text().contains("Settings saved and applied"))
+        assertFalse(handler.handle(get("/", sessionCookie)).text().contains("Settings saved and applied"))
         assertEquals(
             listOf("https://one.example", "http://192.168.1.20/dashboard"),
             config.dashboardUrls
@@ -141,8 +147,74 @@ class RemoteConfigHttpHandlerTest {
 
         assertEquals(200, response.status)
         assertTrue(response.text().contains("Sign in with the new PIN"))
+        assertEquals(0, changes)
+        requireNotNull(response.afterSend).invoke()
+        assertEquals(1, changes)
         assertTrue(config.verifySettingsPin("847261"))
         assertTrue(handler.handle(get("/", sessionCookie)).text().contains("Enter the settings PIN"))
+    }
+
+    @Test
+    fun disablingRemoteAccessSendsConfirmationBeforeReloadingServer() {
+        val handler = handler()
+        val sessionCookie = login(handler)
+        val page = handler.handle(get("/", sessionCookie)).text()
+        val csrf = requireNotNull(
+            Regex("name=\"csrf\" value=\"([^\"]+)\"").find(page)?.groupValues?.get(1)
+        )
+        val parameters = validSettings(csrf).toMutableMap().apply {
+            remove("remoteConfigEnabled")
+        }
+
+        val response = handler.handle(post("/save", parameters, sessionCookie))
+
+        assertEquals(200, response.status)
+        assertTrue(response.text().contains("Remote access is off"))
+        assertTrue(response.text().contains("You can close this tab"))
+        assertFalse(response.text().contains("remote-settings-form"))
+        assertFalse(config.remoteConfigEnabled)
+        assertEquals(0, changes)
+
+        requireNotNull(response.afterSend).invoke()
+        assertEquals(1, changes)
+    }
+
+    @Test
+    fun validationErrorKeepsSubmittedValuesAndShowsAccessibleBanner() {
+        val handler = handler()
+        val sessionCookie = login(handler)
+        val page = handler.handle(get("/", sessionCookie)).text()
+        val csrf = requireNotNull(
+            Regex("name=\"csrf\" value=\"([^\"]+)\"").find(page)?.groupValues?.get(1)
+        )
+        val parameters = validSettings(csrf).toMutableMap().apply {
+            put("dashboardUrls", "not a dashboard URL")
+            put("mqttDeviceName", "Unsaved living room tablet")
+        }
+
+        val response = handler.handle(post("/save", parameters, sessionCookie))
+        val html = response.text()
+
+        assertEquals(400, response.status)
+        assertTrue(html.contains("role=\"alert\""))
+        assertTrue(html.contains("not a dashboard URL"))
+        assertTrue(html.contains("Unsaved living room tablet"))
+        assertEquals(0, changes)
+        assertEquals(listOf("https://example.com"), config.dashboardUrls)
+    }
+
+    @Test
+    fun settingsPageHasResponsiveNavigationAndAccessibleControls() {
+        val handler = handler()
+        val sessionCookie = login(handler)
+
+        val html = handler.handle(get("/", sessionCookie)).text()
+
+        assertTrue(html.contains("id=\"remote-settings-form\""))
+        assertTrue(html.contains("aria-label=\"Settings sections\""))
+        assertTrue(html.contains("class=\"save-bar\""))
+        assertTrue(html.contains("@media (max-width:540px)"))
+        assertTrue(html.contains("accept-charset=\"UTF-8\""))
     }
 
     @Test
@@ -172,6 +244,61 @@ class RemoteConfigHttpHandlerTest {
             assertTrue(response.startsWith("HTTP/1.1 200 OK\r\n"))
             assertTrue(response.contains("Enter the settings PIN"))
             assertTrue(response.contains("Content-Security-Policy:"))
+        } finally {
+            server.stop()
+        }
+    }
+
+    @Test
+    fun embeddedServerFinishesDisabledConfirmationBeforeStopping() {
+        val callbacks = AtomicInteger()
+        lateinit var server: RemoteConfigServer
+        server = RemoteConfigServer(config, port = 0) {
+            callbacks.incrementAndGet()
+            server.stop()
+        }
+        try {
+            server.start()
+            val port = server.listeningPort
+            val loginBody = "pin=${encode(PIN)}"
+            val loginResponse = socketRequest(
+                port,
+                "POST /login HTTP/1.1\r\n" +
+                    "Host: localhost\r\n" +
+                    "Content-Type: application/x-www-form-urlencoded\r\n" +
+                    "Content-Length: ${loginBody.toByteArray(StandardCharsets.UTF_8).size}\r\n" +
+                    "Connection: close\r\n\r\n$loginBody"
+            )
+            val cookie = requireNotNull(
+                Regex("(?im)^Set-Cookie: ([^;]+)").find(loginResponse)?.groupValues?.get(1)
+            )
+            val settingsResponse = socketRequest(
+                port,
+                "GET / HTTP/1.1\r\nHost: localhost\r\nCookie: $cookie\r\nConnection: close\r\n\r\n"
+            )
+            val csrf = requireNotNull(
+                Regex("name=\"csrf\" value=\"([^\"]+)\"")
+                    .find(settingsResponse)?.groupValues?.get(1)
+            )
+            val saveBody = validSettings(csrf)
+                .filterKeys { it != "remoteConfigEnabled" }
+                .entries.joinToString("&") { (name, value) -> "${encode(name)}=${encode(value)}" }
+
+            val saveResponse = socketRequest(
+                port,
+                "POST /save HTTP/1.1\r\n" +
+                    "Host: localhost\r\n" +
+                    "Cookie: $cookie\r\n" +
+                    "Content-Type: application/x-www-form-urlencoded\r\n" +
+                    "Content-Length: ${saveBody.toByteArray(StandardCharsets.UTF_8).size}\r\n" +
+                    "Connection: close\r\n\r\n$saveBody"
+            )
+
+            assertTrue(saveResponse.startsWith("HTTP/1.1 200 OK\r\n"))
+            assertTrue(saveResponse.contains("Remote access is off"))
+            assertTrue(saveResponse.endsWith("</html>"))
+            assertEquals(1, callbacks.get())
+            assertEquals(-1, server.listeningPort)
         } finally {
             server.stop()
         }
@@ -230,6 +357,13 @@ class RemoteConfigHttpHandlerTest {
 
     private fun encode(value: String): String =
         URLEncoder.encode(value, StandardCharsets.UTF_8.name())
+
+    private fun socketRequest(port: Int, request: String): String =
+        Socket("127.0.0.1", port).use { socket ->
+            socket.getOutputStream().write(request.toByteArray(StandardCharsets.UTF_8))
+            socket.getOutputStream().flush()
+            socket.getInputStream().bufferedReader(StandardCharsets.UTF_8).readText()
+        }
 
     private fun RemoteHttpResponse.text(): String = body.toString(StandardCharsets.UTF_8)
 
