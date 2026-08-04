@@ -26,9 +26,11 @@ import java.util.concurrent.atomic.AtomicInteger
 class RemoteConfigServer(
     private val config: AppConfig,
     private val port: Int = RemoteConfigAddress.PORT,
+    private val onUpdateCheckRequested: () -> Unit = {},
+    // Kept last so that a trailing lambda still binds to the reload callback.
     private val onConfigChanged: () -> Unit
 ) {
-    private val handler = RemoteConfigHttpHandler(config, onConfigChanged)
+    private val handler = RemoteConfigHttpHandler(config, onConfigChanged, onUpdateCheckRequested)
     private val workerNumber = AtomicInteger()
     private val workers = ThreadPoolExecutor(
         2,
@@ -189,6 +191,7 @@ internal data class RemoteHttpResponse(
 internal class RemoteConfigHttpHandler(
     private val config: AppConfig,
     private val onConfigChanged: () -> Unit,
+    private val onUpdateCheckRequested: () -> Unit = {},
     private val now: () -> Long = System::currentTimeMillis
 ) {
     private data class Session(
@@ -216,6 +219,7 @@ internal class RemoteConfigHttpHandler(
             "GET" to "/" -> showHome(request)
             "POST" to "/login" -> login(request)
             "POST" to "/save" -> save(request)
+            "POST" to "/update-check" -> checkForUpdate(request)
             "POST" to "/logout" -> logout(request)
             else -> RemoteHttpResponse.html(404, page("Not found", "The requested page does not exist."))
         }
@@ -309,6 +313,30 @@ internal class RemoteConfigHttpHandler(
                 response.copy(afterSend = onConfigChanged)
             }
         }
+    }
+
+    /**
+     * Runs an update check immediately instead of waiting for the watchdog's hourly timer.
+     *
+     * The check runs on its own thread and the browser is answered at once: a download over a slow
+     * link would otherwise hold this request open well past the server's own socket timeouts. The
+     * outcome shows up in the status line on the next page load.
+     */
+    private fun checkForUpdate(request: RemoteHttpRequest): RemoteHttpResponse {
+        val session = sessionFor(request) ?: return RemoteHttpResponse.redirect("/")
+        val parameters = formParameters(request)
+        if (!constantTimeEquals(session.csrfToken, parameters["csrf"].orEmpty())) {
+            return RemoteHttpResponse.html(403, page("Request rejected", "Invalid form token."))
+        }
+
+        val notice = if (config.updateUrl.isBlank()) {
+            "Set an update manifest URL before checking."
+        } else {
+            onUpdateCheckRequested()
+            "Checking for updates. Reload this page in a moment for the result."
+        }
+        synchronized(sessionLock) { session.notice = notice }
+        return RemoteHttpResponse.redirect("/")
     }
 
     private fun logout(request: RemoteHttpRequest): RemoteHttpResponse {
@@ -614,7 +642,11 @@ internal class RemoteConfigHttpHandler(
                           <div class="field"><label for="updateUrl">Update manifest URL <small>blank disables updates</small></label>
                             <input id="updateUrl" name="updateUrl" value="${value("updateUrl", values.updateUrl)}" placeholder="http://192.168.1.10:8080/glance-update.json" spellcheck="false"></div>
                           <p class="hint">${escapeHtml(updateStatusText)}</p>
+                          <p class="hint">Glance checks hourly on its own. Use the button below right after publishing a build; it also retries a version that was abandoned after repeated failures. Save the URL first — the check reads the stored value.</p>
                           <div class="inline-warning"><span aria-hidden="true">!</span><p>Updates install silently and require Device Owner. Only an APK signed with the certificate of the installed build is accepted.</p></div>
+                          <!-- formaction retargets the surrounding settings form, so this needs no
+                               nested form (invalid HTML) and no script (blocked by the CSP). -->
+                          <button class="ghost" type="submit" formaction="/update-check">Check for updates now</button>
                         </div>
                       </section>
 

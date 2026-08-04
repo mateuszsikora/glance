@@ -59,6 +59,9 @@
     <string name="update_status_disabled">Update checks are disabled.</string>
     <string name="update_status_last">Last check: %1$s</string>
     <string name="update_url_invalid">Update manifest URL must use http:// or https://</string>
+    <string name="update_check_now">Check for updates now</string>
+    <string name="update_check_started">Checking for updates. Reopen settings for the result.</string>
+    <string name="update_check_needs_url">Save an update manifest URL first.</string>
     <string name="settings_pin_hint">New settings PIN (blank keeps the current PIN)</string>
     <string name="debug_info_title">Debug Info</string>
     <string name="save">Save</string>

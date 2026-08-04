@@ -59,6 +59,24 @@ class UpdatePolicyTest {
     }
 
     @Test
+    fun anOperatorRequestedCheckOverridesBothGuards() {
+        val attempts = UpdateAttempts(versionCode = 10, count = UpdatePolicy.MAX_ATTEMPTS)
+
+        assertEquals(
+            UpdateDecision.Install,
+            decide(offered = 10, installed = 9, attempts = attempts, uptimeMs = 0, force = true)
+        )
+    }
+
+    @Test
+    fun forcingStillWillNotInstallAnOlderBuild() {
+        assertEquals(
+            UpdateDecision.UpToDate,
+            decide(offered = 9, installed = 10, uptimeMs = 0, force = true)
+        )
+    }
+
+    @Test
     fun failuresAccumulatePerVersionAndResetOnANewOne() {
         val first = UpdatePolicy.recordFailure(UpdateAttempts(0, 0), versionCode = 10)
         val second = UpdatePolicy.recordFailure(first, versionCode = 10)
@@ -73,13 +91,15 @@ class UpdatePolicyTest {
         offered: Int,
         installed: Int,
         attempts: UpdateAttempts = UpdateAttempts(0, 0),
-        uptimeMs: Long = UpdatePolicy.MIN_UPTIME_MS
+        uptimeMs: Long = UpdatePolicy.MIN_UPTIME_MS,
+        force: Boolean = false
     ): UpdateDecision {
         return UpdatePolicy.decide(
             manifest = UpdateManifest(offered, offered.toString(), "https://host/a.apk", DIGEST),
             installedVersionCode = installed,
             attempts = attempts,
-            uptimeMs = uptimeMs
+            uptimeMs = uptimeMs,
+            force = force
         )
     }
 

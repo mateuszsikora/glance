@@ -30,6 +30,7 @@ import com.glance.kiosk.KioskService
 import com.glance.kiosk.LockTaskHelper
 import com.glance.remote.RemoteConfigAddress
 import com.glance.screen.ScheduleManager
+import com.glance.update.UpdateChecker
 import com.glance.watchdog.WatchdogService
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.chip.Chip
@@ -223,6 +224,9 @@ class SettingsActivity : AppCompatActivity() {
         textRemoteConfigAddress = findViewById(R.id.textRemoteConfigAddress)
         editUpdateUrl = findViewById(R.id.editUpdateUrl)
         textUpdateStatus = findViewById(R.id.textUpdateStatus)
+        findViewById<MaterialButton>(R.id.btnCheckForUpdate).setOnClickListener {
+            checkForUpdateNow()
+        }
         editPin = findViewById(R.id.editPin)
         textDebugInfo = findViewById(R.id.textDebugInfo)
     }
@@ -744,6 +748,21 @@ class SettingsActivity : AppCompatActivity() {
             !enabled -> getString(R.string.remote_config_ready_help, urls.joinToString("\n"))
             else -> urls.joinToString("\n")
         }
+    }
+
+    /**
+     * Reads the stored URL rather than the text field: the check is a separate action from saving,
+     * so an unsaved edit must not silently decide where the tablet fetches an APK from.
+     */
+    private fun checkForUpdateNow() {
+        if (config.updateUrl.isBlank()) {
+            Toast.makeText(this, R.string.update_check_needs_url, Toast.LENGTH_LONG).show()
+            return
+        }
+        Toast.makeText(this, R.string.update_check_started, Toast.LENGTH_LONG).show()
+        Thread {
+            runCatching { UpdateChecker(applicationContext).checkNow(force = true) }
+        }.start()
     }
 
     private fun showUpdateStatus() {

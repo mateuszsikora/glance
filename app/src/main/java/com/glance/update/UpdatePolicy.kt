@@ -31,13 +31,21 @@ object UpdatePolicy {
     /** How long the running build must stay up before it may install a replacement. */
     const val MIN_UPTIME_MS = 15 * 60 * 1000L
 
+    /**
+     * [force] marks a check an operator asked for explicitly. Both remaining guards exist to stop
+     * an unattended tablet from churning on its own, so a human standing at the settings page
+     * overrides them: the crash-loop guard has nothing to protect against when someone is watching,
+     * and an abandoned version is exactly what a manual retry is for.
+     */
     fun decide(
         manifest: UpdateManifest,
         installedVersionCode: Int,
         attempts: UpdateAttempts,
-        uptimeMs: Long
+        uptimeMs: Long,
+        force: Boolean = false
     ): UpdateDecision {
         if (manifest.versionCode <= installedVersionCode) return UpdateDecision.UpToDate
+        if (force) return UpdateDecision.Install
         if (attempts.versionCode == manifest.versionCode && attempts.count >= MAX_ATTEMPTS) {
             return UpdateDecision.Abandoned
         }

@@ -18,7 +18,7 @@ class UpdateChecker(
     private val installedVersionCode: Int = BuildConfig.VERSION_CODE
 ) {
 
-    fun checkNow() {
+    fun checkNow(force: Boolean = false) {
         val url = config.updateUrl
         if (url.isBlank()) return
 
@@ -35,7 +35,8 @@ class UpdateChecker(
             manifest = manifest,
             installedVersionCode = installedVersionCode,
             attempts = config.updateAttempts,
-            uptimeMs = SystemClock.elapsedRealtime() - GlanceApp.instance.processStartElapsedMs
+            uptimeMs = SystemClock.elapsedRealtime() - GlanceApp.instance.processStartElapsedMs,
+            force = force
         )
         when (decision) {
             UpdateDecision.UpToDate -> record("Up to date (build $installedVersionCode)")

@@ -80,6 +80,11 @@ http://<host>:8080/glance-update.json
 Leave it blank to disable update checks entirely. Glance checks hourly and reports the last outcome
 on the same screen.
 
+**Check for updates now** runs a check immediately instead of waiting for the next hourly tick. Use
+it right after publishing a build. It also overrides both failure guards described below, because
+those exist to stop an unattended tablet from churning on its own, and neither applies when someone
+is standing at the settings page asking for the update.
+
 ## The manifest
 
 The updater generates this, but any tool that produces the same shape will do:
@@ -115,6 +120,8 @@ guards limit the damage:
   that keeps restarting therefore never installs its successor, which keeps the tablet reachable
   through the remote configuration panel.
 - A `versionCode` that fails to install three times is abandoned until a newer one is published.
+
+Both guards are bypassed by **Check for updates now**, which is an explicit operator action.
 
 The way out of a bad build is a **higher** `versionCode` containing the fix. Keep the signing key
 backed up: without it no tablet provisioned with it can ever be updated again, and Device Owner
