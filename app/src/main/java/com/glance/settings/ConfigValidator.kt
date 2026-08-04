@@ -30,6 +30,11 @@ object ConfigValidator {
         return scheme in setOf("http", "https") && !uri.host.isNullOrBlank()
     }
 
+    /** A blank manifest URL disables update checks, so only a non-blank value has to parse. */
+    fun isValidUpdateUrl(value: String): Boolean {
+        return value.isBlank() || isValidDashboardUrl(value)
+    }
+
     fun isValidMqttHost(value: String): Boolean {
         return runCatching { MqttEndpoint.serverUri(value, 1883) }.isSuccess
     }

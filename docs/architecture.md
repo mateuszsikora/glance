@@ -15,6 +15,7 @@ Glance is a single-module native Android application written in Kotlin. It suppo
 - `AppConfig` stores configuration and lifecycle state in private `SharedPreferences`. `SecretStore` encrypts the MQTT password using AES-GCM with a non-exportable Android Keystore key.
 - `SettingsActivity` validates and applies user configuration behind a salted PBKDF2 PIN verifier with retry lockout.
 - `RemoteConfigServer` exposes an opt-in, LAN-only HTTP form on port 8080. It shares `AppConfig`, validation, PIN lockout and the service reload path with on-device settings.
+- `UpdateChecker` polls an operator-supplied manifest from the watchdog's timers. `UpdateManifestParser` and `UpdatePolicy` hold the pure parsing and decision logic; `UpdateInstaller` verifies the APK's signing certificate against the running installation and installs it through `PackageInstaller` using Device Owner privileges.
 
 ## Data flow
 
@@ -35,6 +36,7 @@ Glance is a single-module native Android application written in Kotlin. It suppo
 - Remote configuration is disabled by default. When enabled, it uses bounded HTTP parsing, a limited worker pool, PIN retry lockout, expiring in-memory sessions, CSRF tokens, restrictive response headers, and never renders the stored MQTT password.
 - Android backups are disabled. Receivers, services, and settings are not exported unless Android requires an exported entry point with a platform permission.
 - Device Owner, signing keys, settings PINs, dashboard sessions, and broker credentials are trust anchors and must be protected operationally.
+- Self-hosted updates are disabled by default and have no built-in URL. An update is installed only when its versionCode increases, its published digest matches, and it is signed by the certificate of the running installation, so the update transport is not a trust anchor.
 - Cleartext dashboard HTTP, remote configuration HTTP, and MQTT are supported for local deployments, so transport confidentiality depends on endpoint configuration and network trust. Remote settings should be enabled only on a trusted LAN.
 
 ## Lifecycle and provisioning constraints
@@ -45,4 +47,4 @@ Vendor battery management can still interfere with long-running services. Deploy
 
 ## Verification
 
-Unit tests cover configuration, navigation origins, MQTT topics/endpoints/reconnect policy/keep-alive alarms, screen and content scheduling, idle-timeout calculations, settings validation, watchdog lifecycle, dashboard reachability probing, and staleness decisions. CI runs unit tests, Android lint, and debug and release builds. Hardware-dependent Device Owner and OEM behavior requires real-device testing.
+Unit tests cover configuration, navigation origins, MQTT topics/endpoints/reconnect policy/keep-alive alarms, screen and content scheduling, idle-timeout calculations, settings validation, update manifest parsing and install policy, watchdog lifecycle, dashboard reachability probing, and staleness decisions. CI runs unit tests, Android lint, and debug and release builds. Hardware-dependent Device Owner and OEM behavior requires real-device testing.

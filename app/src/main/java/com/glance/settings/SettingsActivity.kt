@@ -72,6 +72,8 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var editMqttDiscoveryPrefix: EditText
     private lateinit var switchRemoteConfig: SwitchCompat
     private lateinit var textRemoteConfigAddress: TextView
+    private lateinit var editUpdateUrl: EditText
+    private lateinit var textUpdateStatus: TextView
     private lateinit var editPin: EditText
     private lateinit var textDebugInfo: TextView
     private var awaitingExactAlarmAccess = false
@@ -219,6 +221,8 @@ class SettingsActivity : AppCompatActivity() {
         editMqttDiscoveryPrefix = findViewById(R.id.editMqttDiscoveryPrefix)
         switchRemoteConfig = findViewById(R.id.switchRemoteConfig)
         textRemoteConfigAddress = findViewById(R.id.textRemoteConfigAddress)
+        editUpdateUrl = findViewById(R.id.editUpdateUrl)
+        textUpdateStatus = findViewById(R.id.textUpdateStatus)
         editPin = findViewById(R.id.editPin)
         textDebugInfo = findViewById(R.id.textDebugInfo)
     }
@@ -265,6 +269,8 @@ class SettingsActivity : AppCompatActivity() {
         switchRemoteConfig.setOnCheckedChangeListener { _, enabled ->
             showRemoteConfigAddress(enabled)
         }
+        editUpdateUrl.setText(config.updateUrl)
+        showUpdateStatus()
         editPin.setText("")
     }
 
@@ -414,6 +420,12 @@ class SettingsActivity : AppCompatActivity() {
             return
         }
 
+        val updateUrl = editUpdateUrl.text.toString().trim()
+        if (!ConfigValidator.isValidUpdateUrl(updateUrl)) {
+            Toast.makeText(this, R.string.update_url_invalid, Toast.LENGTH_LONG).show()
+            return
+        }
+
         val newPin = editPin.text.toString().trim()
         if (newPin.isNotEmpty() && !ConfigValidator.isValidSettingsPin(newPin)) {
             Toast.makeText(
@@ -484,6 +496,7 @@ class SettingsActivity : AppCompatActivity() {
         config.mqttDeviceName = editMqttDeviceName.text.toString().trim().ifBlank { "Glance Tablet" }
         config.mqttDiscoveryPrefix = discoveryPrefix
         config.remoteConfigEnabled = switchRemoteConfig.isChecked
+        config.updateUrl = updateUrl
 
         if (newPin.isNotBlank()) {
             config.setSettingsPin(newPin)
@@ -730,6 +743,15 @@ class SettingsActivity : AppCompatActivity() {
                 getString(R.string.remote_config_no_address_help)
             !enabled -> getString(R.string.remote_config_ready_help, urls.joinToString("\n"))
             else -> urls.joinToString("\n")
+        }
+    }
+
+    private fun showUpdateStatus() {
+        val status = config.updateStatus
+        textUpdateStatus.text = when {
+            config.updateUrl.isBlank() -> getString(R.string.update_status_disabled)
+            status.isBlank() -> getString(R.string.update_status_idle)
+            else -> getString(R.string.update_status_last, status)
         }
     }
 

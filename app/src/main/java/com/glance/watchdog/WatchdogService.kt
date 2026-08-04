@@ -17,6 +17,7 @@ import com.glance.GlanceApp
 import com.glance.MainActivity
 import com.glance.R
 import com.glance.content.ContentSchedulePolicy
+import com.glance.update.UpdateChecker
 import java.time.LocalDateTime
 import java.util.concurrent.Executors
 
@@ -26,6 +27,7 @@ import java.util.concurrent.Executors
 class WatchdogService : Service() {
 
     private val handler = Handler(Looper.getMainLooper())
+    private val updateExecutor = Executors.newSingleThreadExecutor()
     private var lastMemoryReloadElapsedMs = 0L
     private var loopsStarted = false
     private var reloadPendingUntilScreenOn = false
@@ -54,6 +56,7 @@ class WatchdogService : Service() {
             loopsStarted = true
             startHealthCheckLoop()
             startPeriodicReloadLoop()
+            startUpdateCheckLoop()
         }
         Log.i(TAG, "WatchdogService started")
         return START_STICKY
@@ -89,6 +92,27 @@ class WatchdogService : Service() {
                 handler.postDelayed(this, intervalMs)
             }
         }, intervalMs)
+    }
+
+    /**
+     * Self-hosted update checks share the watchdog because it already owns the long-running,
+     * screen-aware timers. The first check is deliberately later than
+     * [com.glance.update.UpdatePolicy.MIN_UPTIME_MS] so a build that cannot stay up never reaches
+     * the point of installing its successor.
+     */
+    private fun startUpdateCheckLoop() {
+        handler.postDelayed(object : Runnable {
+            override fun run() {
+                if (destroyed) return
+                if (GlanceApp.instance.appConfig.updateUrl.isNotBlank()) {
+                    updateExecutor.execute {
+                        runCatching { UpdateChecker(applicationContext).checkNow() }
+                            .onFailure { Log.w(TAG, "Update check failed", it) }
+                    }
+                }
+                handler.postDelayed(this, UPDATE_CHECK_INTERVAL_MS)
+            }
+        }, UPDATE_CHECK_INITIAL_DELAY_MS)
     }
 
     private fun performHealthCheck() {
@@ -234,6 +258,7 @@ class WatchdogService : Service() {
         destroyed = true
         handler.removeCallbacksAndMessages(null)
         probeExecutor.shutdownNow()
+        updateExecutor.shutdown()
         loopsStarted = false
         super.onDestroy()
     }
@@ -253,6 +278,8 @@ class WatchdogService : Service() {
         private const val MEMORY_THRESHOLD_PERCENT = 85
         private const val MEMORY_RELOAD_COOLDOWN_MS = 60_000L
         private const val BYTES_PER_MB = 1024L * 1024L
+        private const val UPDATE_CHECK_INITIAL_DELAY_MS = 16 * 60 * 1000L
+        private const val UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000L
 
         const val ACTION_RELOAD_WEBVIEW = "com.glance.ACTION_RELOAD_WEBVIEW"
         const val ACTION_HEALTH_CHECK = "com.glance.ACTION_HEALTH_CHECK"

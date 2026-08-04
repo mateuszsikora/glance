@@ -473,6 +473,11 @@ internal class RemoteConfigHttpHandler(
             values.mqttPasswordConfigured -> "A password is stored. Leave blank to keep it."
             else -> "No password is stored."
         }
+        val updateStatusText = when {
+            values.updateUrl.isBlank() -> "Update checks are disabled."
+            values.updateStatus.isBlank() -> "Waiting for the first update check."
+            else -> "Last check: ${values.updateStatus}"
+        }
         return page(
             title = "Settings",
             message = message,
@@ -503,6 +508,7 @@ internal class RemoteConfigHttpHandler(
                       <a href="#brightness">Brightness</a>
                       <a href="#screen">Screen schedule</a>
                       <a href="#mqtt">Home Assistant MQTT</a>
+                      <a href="#updates">Self-hosted updates</a>
                       <a href="#access">Remote access &amp; PIN</a>
                       <div class="nav-note"><span aria-hidden="true">⌁</span><p>Connected directly to your tablet over the local network.</p></div>
                     </nav>
@@ -602,8 +608,18 @@ internal class RemoteConfigHttpHandler(
                         </div>
                       </section>
 
+                      <section id="updates" class="card settings-card">
+                        ${sectionHeading("06", "Self-hosted updates", "Point Glance at an update manifest you publish yourself.")}
+                        <div class="section-body">
+                          <div class="field"><label for="updateUrl">Update manifest URL <small>blank disables updates</small></label>
+                            <input id="updateUrl" name="updateUrl" value="${value("updateUrl", values.updateUrl)}" placeholder="http://192.168.1.10:8080/glance-update.json" spellcheck="false"></div>
+                          <p class="hint">${escapeHtml(updateStatusText)}</p>
+                          <div class="inline-warning"><span aria-hidden="true">!</span><p>Updates install silently and require Device Owner. Only an APK signed with the certificate of the installed build is accepted.</p></div>
+                        </div>
+                      </section>
+
                       <section id="access" class="card settings-card">
-                        ${sectionHeading("06", "Remote access &amp; PIN", "Control access to this page and rotate its PIN.")}
+                        ${sectionHeading("07", "Remote access &amp; PIN", "Control access to this page and rotate its PIN.")}
                         <div class="section-body">
                           ${checkbox("remoteConfigEnabled", "Keep remote configuration enabled", checked("remoteConfigEnabled", values.remoteConfigEnabled))}
                           <div class="inline-warning"><span aria-hidden="true">!</span><p>Turning this off closes the panel after saving. It can only be re-enabled on the tablet.</p></div>

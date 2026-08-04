@@ -21,6 +21,7 @@ The project targets Android 14 (API 34) and supports Android 8.0 (API 26) and ne
 - Home Assistant MQTT discovery with retained state and availability;
 - watchdog health checks, memory-pressure recovery, and an automatic reload once a dashboard comes back after a server restart or network outage;
 - PIN-protected remote configuration from any browser on the same LAN;
+- optional self-hosted over-the-air updates, signed with your own key;
 - encrypted MQTT password storage with no cloud account or companion app required.
 
 See [the architecture overview](docs/architecture.md) for component and data-flow details.
@@ -34,7 +35,7 @@ Glance is intended for people who want to reuse an older Android tablet as a ded
 - are comfortable using ADB once for installation and Device Owner provisioning;
 - prefer a local application with no analytics, advertising, or project-operated cloud service.
 
-Glance is currently distributed as source code. There is no official prebuilt APK release yet, so you must build and sign the application yourself.
+Glance is currently distributed as source code. There is no official prebuilt APK release, so you must build and sign the application yourself. Continuous integration publishes an *unsigned* build artifact for each `master` commit, which Android cannot install as-is; it exists so that self-hosted updaters can sign it with their own key. See [Self-hosted updates](#self-hosted-updates).
 
 ## Configure the tablet from your computer
 
@@ -197,6 +198,34 @@ Without Device Owner privileges, OFF uses a reversible soft-off (black overlay a
 The optional schedule defines a daytime or overnight ON window. A manual MQTT command overrides the current state until the next scheduled transition. On Android 12 and newer, Glance requests exact-alarm access; when approximate alarms are selected, Android may deliver a transition later than its configured minute. Time, time-zone, package-update, and reboot events reschedule both alarms.
 
 MQTT passwords are encrypted at rest with an Android Keystore AES-GCM key. Encryption at rest does not protect plain MQTT traffic in transit.
+
+## Self-hosted updates
+
+A wall-mounted tablet does not have to come down for every change. Glance can check an update
+manifest that **you** publish, verify it, and install it silently as Device Owner.
+
+There is no project-operated update service and no default URL; update checks are disabled until
+you configure one. The signing key stays on your machine — continuous integration only produces the
+unsigned artifact, because building needs x86-only Android tools while signing needs nothing but a
+JVM. That split also keeps the machine holding your key from ever running Gradle or a third-party
+build dependency.
+
+```sh
+cd tools/updater
+mkdir -p keys && cp /path/to/glance-release.jks keys/
+printf '%s' 'your-keystore-password' > keys/keystore-password
+$EDITOR compose.yml          # set GLANCE_REPO and GLANCE_PUBLIC_URL
+docker compose up -d
+```
+
+Then set `Update manifest URL` in settings, on the tablet or through the remote configuration
+panel, to `http://<host>:8080/glance-update.json`. Glance checks hourly and installs a build only
+when its `versionCode` is higher, its checksum matches, and it is signed by the certificate that
+signed the running installation. The image runs on both x86 and a Raspberry Pi.
+
+Android cannot downgrade a package, so a bad build is recovered by publishing a higher
+`versionCode`, not by rolling back. See [the full procedure](docs/self-hosted-updates.md) for the
+manifest format, the failure guards, and the security model.
 
 ## Privacy
 
