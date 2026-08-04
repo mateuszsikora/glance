@@ -1,6 +1,7 @@
 package com.glance.remote
 
 import com.glance.config.AppConfig
+import com.glance.content.ContentProfile
 import com.glance.settings.ConfigValidator
 
 internal data class RemoteConfigSnapshot(
@@ -9,7 +10,7 @@ internal data class RemoteConfigSnapshot(
     val autoRotateEnabled: Boolean,
     val autoRotateIntervalSeconds: Int,
     val contentScheduleEnabled: Boolean,
-    val contentProfiles: String,
+    val contentProfiles: List<ContentProfile>,
     val idleScreenEnabled: Boolean,
     val idleScreenUrl: String,
     val idleTimeoutMinutes: Int,
@@ -46,7 +47,7 @@ internal class RemoteConfigUpdater(private val config: AppConfig) {
             autoRotateEnabled = config.autoRotateEnabled,
             autoRotateIntervalSeconds = config.autoRotateIntervalSeconds,
             contentScheduleEnabled = config.contentScheduleEnabled,
-            contentProfiles = ConfigValidator.formatContentProfiles(config.contentProfiles),
+            contentProfiles = config.contentProfiles,
             idleScreenEnabled = config.idleScreenEnabled,
             idleScreenUrl = config.idleScreenUrl,
             idleTimeoutMinutes = config.idleTimeoutMinutes,
@@ -88,9 +89,18 @@ internal class RemoteConfigUpdater(private val config: AppConfig) {
             )
         }
 
-        val contentProfilesResult = ConfigValidator.parseContentProfiles(
-            parameters["contentProfiles"].orEmpty()
-        )
+        val contentProfileRows = RemoteContentProfiles.drafts(parameters)
+        val contentProfilesText = parameters["contentProfiles"].orEmpty()
+        val contentProfilesResult = if (
+            contentProfileRows != null &&
+            (contentProfileRows.isNotEmpty() || contentProfilesText.isBlank())
+        ) {
+            // The row editor is authoritative, except when it posted no rows at all and a
+            // scripted client supplied the text form instead.
+            ConfigValidator.buildContentProfiles(contentProfileRows)
+        } else {
+            ConfigValidator.parseContentProfiles(contentProfilesText)
+        }
         if (contentProfilesResult.error != null) {
             return error(contentProfilesResult.error)
         }

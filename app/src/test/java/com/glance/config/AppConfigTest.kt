@@ -3,6 +3,7 @@ package com.glance.config
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.glance.content.ContentProfile
+import java.time.DayOfWeek
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -96,7 +97,11 @@ class AppConfigTest {
                 "06:00",
                 listOf("https://morning.example.test", "https://weather.example.test")
             ),
-            ContentProfile("18:00", listOf("https://evening.example.test"))
+            ContentProfile(
+                "18:00",
+                listOf("https://evening.example.test"),
+                setOf(DayOfWeek.SATURDAY, DayOfWeek.SUNDAY)
+            )
         )
         AppConfig(context).apply {
             contentScheduleEnabled = true

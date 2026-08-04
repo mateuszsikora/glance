@@ -17,7 +17,7 @@ import com.glance.GlanceApp
 import com.glance.MainActivity
 import com.glance.R
 import com.glance.content.ContentSchedulePolicy
-import java.time.LocalTime
+import java.time.LocalDateTime
 import java.util.concurrent.Executors
 
 /**
@@ -155,7 +155,7 @@ class WatchdogService : Service() {
     private fun activeDashboardUrl(): String? {
         val config = GlanceApp.instance.appConfig
         return ContentSchedulePolicy.activeUrls(
-            now = LocalTime.now(),
+            now = LocalDateTime.now(),
             defaultUrls = config.dashboardUrls,
             scheduleEnabled = config.contentScheduleEnabled,
             profiles = config.contentProfiles

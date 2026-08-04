@@ -14,7 +14,7 @@ The project targets Android 14 (API 34) and supports Android 8.0 (API 26) and ne
 ## Features
 
 - fullscreen, swipeable WebView dashboards with origin-restricted top-level navigation;
-- time-based dashboard profiles and a touch-to-return idle URL;
+- day- and time-based dashboard profiles and a touch-to-return idle URL;
 - Device Owner LockTask mode and boot recovery;
 - ambient-light and MQTT-controlled brightness;
 - scheduled screen on/off, including overnight windows;
@@ -47,7 +47,7 @@ http://192.168.1.42:8080/
 
 Open that address from a computer or phone, sign in with the tablet's settings PIN, and manage:
 
-- dashboard URLs, allowed login origins, rotation and time-based content profiles;
+- dashboard URLs, allowed login origins, rotation and scheduled content profiles;
 - the idle-screen URL and inactivity timeout;
 - automatic and minimum/maximum brightness;
 - screen wake and turn-off schedules;
@@ -130,15 +130,22 @@ The published application ID is `com.glance`. Fork maintainers should choose a u
 
 ## Scheduled content and idle screen
 
-`Dashboard URLs` remain the default content. Enable `Show different dashboards by time` to replace them with local-time profiles. Enter one mapping per line:
+`Dashboard URLs` remain the default content. Enable `Show different dashboards on a schedule` to replace them with local-time profiles. Each profile is a row with a start time, the days it applies to, and one or more URLs — add rows with `+ Add profile` on the tablet or in the remote panel.
+
+A profile starts at its configured minute on each selected day and remains active until the next profile starts, including across midnight. Leaving every day unselected means the profile repeats daily. When a day-specific profile and a daily profile start at the same minute, the day-specific one wins. Several URLs in one profile become swipeable and use the existing auto-rotation setting.
+
+For example, a weekday profile at 06:00 stays on screen through Friday night until a weekend profile takes over on Saturday at 09:00.
+
+A save posted programmatically to the panel may send an equivalent text form instead of rows, one mapping per line, in a `contentProfiles` field:
 
 ```text
-06:00 | https://dashboard.example.test/morning
+Mon-Fri 06:00 | https://dashboard.example.test/work
+Sat,Sun 09:00 | https://dashboard.example.test/weekend
 18:00 | https://dashboard.example.test/evening
 18:00 | https://weather.example.test/
 ```
 
-A profile starts at its configured minute and remains active until the next profile. The final profile wraps through midnight. Repeating a start time adds multiple swipeable URLs to that profile and uses the existing auto-rotation setting.
+Day prefixes accept single days (`Mon`), ranges (`Mon-Fri`, including wrapping ones such as `Fri-Mon`), comma-separated lists (`Mon,Wed,Fri`) and the aliases `weekdays`, `weekend` and `daily`. Omitting the prefix means every day.
 
 The optional idle screen loads a separate URL after the configured number of minutes without a touch. Its first touch is consumed and returns to the profile for the current time, so it cannot accidentally activate dashboard controls. The idle timer is suspended while the display is logically or physically off. The idle URL keeps the display powered; use the separate screen ON/OFF schedule when the goal is to save power.
 

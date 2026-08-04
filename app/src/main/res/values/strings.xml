@@ -14,9 +14,14 @@
     <string name="auto_rotate_dashboards">Auto-rotate dashboards</string>
     <string name="rotate_interval_hint">Rotate interval (seconds)</string>
     <string name="content_schedule_title">Scheduled content</string>
-    <string name="content_schedule_enabled">Show different dashboards by time</string>
-    <string name="content_profiles_hint">06:00 | https://example.com/morning\n18:00 | https://example.com/evening</string>
-    <string name="content_schedule_help">One entry per line: HH:mm | URL. Repeat a start time to rotate several URLs in that profile. The last profile remains active through midnight.</string>
+    <string name="content_schedule_enabled">Show different dashboards on a schedule</string>
+    <string name="content_profile_add">+ Add profile</string>
+    <string name="content_profile_remove">Remove</string>
+    <string name="content_profile_default_time">06:00</string>
+    <string name="content_profile_days_hint">No day selected = every day.</string>
+    <string name="content_profile_urls_hint">Dashboard URLs (one per line)</string>
+    <string name="content_profiles_empty">No profiles yet. Add one to choose what appears and when.</string>
+    <string name="content_schedule_help">A profile starts at its time on the selected days and stays active until the next one starts, including across midnight. Several URLs in one profile become swipeable and use the auto-rotation setting.</string>
     <string name="idle_screen_title">Idle screen</string>
     <string name="idle_screen_enabled">Show a URL after inactivity</string>
     <string name="idle_screen_url_hint">Idle screen URL</string>

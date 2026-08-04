@@ -31,7 +31,7 @@ import com.glance.screen.ScreenController
 import com.glance.settings.SettingsActivity
 import com.glance.watchdog.WatchdogService
 import com.glance.watchdog.WebViewHealthChecker
-import java.time.LocalTime
+import java.time.LocalDateTime
 
 class MainActivity : AppCompatActivity() {
 
@@ -225,7 +225,7 @@ class MainActivity : AppCompatActivity() {
     private fun setupDashboard() {
         val config = GlanceApp.instance.appConfig
         val urls = ContentSchedulePolicy.activeUrls(
-            now = LocalTime.now(),
+            now = LocalDateTime.now(),
             defaultUrls = config.dashboardUrls,
             scheduleEnabled = config.contentScheduleEnabled,
             profiles = config.contentProfiles
@@ -260,7 +260,7 @@ class MainActivity : AppCompatActivity() {
         val config = GlanceApp.instance.appConfig
         installDashboardUrls(
             ContentSchedulePolicy.activeUrls(
-                now = LocalTime.now(),
+                now = LocalDateTime.now(),
                 defaultUrls = config.dashboardUrls,
                 scheduleEnabled = config.contentScheduleEnabled,
                 profiles = config.contentProfiles
