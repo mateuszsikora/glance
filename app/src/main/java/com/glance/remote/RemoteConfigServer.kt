@@ -12,6 +12,7 @@ import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketException
+import java.net.SocketTimeoutException
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
@@ -126,6 +127,8 @@ class RemoteConfigServer(
                 )
                 runCatching { response.afterSend?.invoke() }
                     .onFailure { Log.w(TAG, "Remote configuration post-response action failed", it) }
+            } catch (_: RemoteHttpIdleException) {
+                Log.d(TAG, "Client connected without sending a request; closing quietly")
             } catch (e: RemoteHttpException) {
                 runCatching {
                     RemoteHttpCodec.writeResponse(
@@ -924,7 +927,15 @@ internal object RemoteHttpCodec {
         var matched = 0
         val delimiter = byteArrayOf(13, 10, 13, 10)
         while (matched < delimiter.size) {
-            val value = input.read()
+            val value = try {
+                input.read()
+            } catch (e: SocketTimeoutException) {
+                // Browsers routinely preconnect and then send nothing. Such a socket carries no
+                // request, so it gets no response: the browser may later take it from its pool for
+                // a real request and would read whatever was left on it as the answer to that.
+                if (headerBytes.size() == 0) throw RemoteHttpIdleException()
+                throw RemoteHttpException(408, "Request timed out")
+            }
             if (value == -1) throw RemoteHttpException(400, "Incomplete HTTP request")
             headerBytes.write(value)
             if (headerBytes.size() > MAX_HEADER_BYTES) {
@@ -1020,6 +1031,9 @@ internal object RemoteHttpCodec {
 }
 
 internal class RemoteHttpException(val status: Int, override val message: String) : IOException(message)
+
+/** A client connected but never began a request, so there is nothing to answer. */
+internal class RemoteHttpIdleException : IOException()
 
 private fun constantTimeEquals(left: String, right: String): Boolean = MessageDigest.isEqual(
     left.toByteArray(StandardCharsets.UTF_8),

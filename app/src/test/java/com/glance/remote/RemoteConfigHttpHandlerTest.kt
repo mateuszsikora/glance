@@ -234,6 +234,25 @@ class RemoteConfigHttpHandlerTest {
     }
 
     @Test
+    fun embeddedServerAnswersNothingWhenTheClientNeverSendsARequest() {
+        // Browsers preconnect and often send nothing on the extra socket. Answering it with an
+        // error page used to surface as a spurious "Internal server error" in the browser, because
+        // the connection could be taken from the pool for a later, real request.
+        val server = RemoteConfigServer(config, port = 0) { changes++ }
+        try {
+            server.start()
+            val response = Socket("127.0.0.1", server.listeningPort).use { socket ->
+                socket.soTimeout = SOCKET_READ_TIMEOUT_MS
+                socket.getInputStream().bufferedReader(StandardCharsets.UTF_8).readText()
+            }
+
+            assertEquals("", response)
+        } finally {
+            server.stop()
+        }
+    }
+
+    @Test
     fun embeddedServerServesTheLoginPageOverLoopback() {
         val server = RemoteConfigServer(config, port = 0) { changes++ }
         try {
@@ -555,5 +574,8 @@ class RemoteConfigHttpHandlerTest {
     companion object {
         private const val PREFS_NAME = "glance_config"
         private const val PIN = "583902"
+
+        /** Comfortably longer than the server's own idle timeout, so the close is what ends the read. */
+        private const val SOCKET_READ_TIMEOUT_MS = 15_000
     }
 }
