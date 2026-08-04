@@ -6,7 +6,7 @@ Security fixes are made on the `master` branch and included in the next release.
 
 ## Reporting a vulnerability
 
-Do not open a public issue for a suspected vulnerability. Use [GitHub private vulnerability reporting](https://github.com/mateuszsikora/glance/security/advisories/new). If that channel is unavailable, email `ms1qaz@gmail.com` with the subject `Glance security report`.
+Do not open a public issue for a suspected vulnerability. Use [GitHub private vulnerability reporting](https://github.com/mateuszsikora/glance/security/advisories/new); a report filed there is visible only to the maintainers.
 
 Please include:
 
