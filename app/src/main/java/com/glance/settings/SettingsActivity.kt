@@ -1,13 +1,16 @@
 package com.glance.settings
 
 import android.app.AlarmManager
+import android.app.TimePickerDialog
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings as AndroidSettings
 import android.text.InputType
+import android.text.format.DateFormat
 import android.webkit.WebView
+import android.view.View
 import android.view.WindowManager
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -21,12 +24,18 @@ import com.glance.GlanceApp
 import com.glance.MainActivity
 import com.glance.R
 import com.glance.config.AppConfig
+import com.glance.content.ContentProfile
+import com.glance.content.WeekDays
 import com.glance.kiosk.KioskService
 import com.glance.kiosk.LockTaskHelper
 import com.glance.remote.RemoteConfigAddress
 import com.glance.screen.ScheduleManager
 import com.glance.watchdog.WatchdogService
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.chip.Chip
+import com.google.android.material.chip.ChipGroup
+import java.time.DayOfWeek
+import java.time.LocalTime
 import java.util.Locale
 
 /**
@@ -43,7 +52,8 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var switchAutoRotate: SwitchCompat
     private lateinit var editAutoRotateInterval: EditText
     private lateinit var switchContentSchedule: SwitchCompat
-    private lateinit var editContentProfiles: EditText
+    private lateinit var containerContentProfiles: LinearLayout
+    private lateinit var textContentProfilesEmpty: TextView
     private lateinit var switchIdleScreen: SwitchCompat
     private lateinit var editIdleScreenUrl: EditText
     private lateinit var editIdleTimeoutMinutes: EditText
@@ -189,7 +199,8 @@ class SettingsActivity : AppCompatActivity() {
         switchAutoRotate = findViewById(R.id.switchAutoRotate)
         editAutoRotateInterval = findViewById(R.id.editAutoRotateInterval)
         switchContentSchedule = findViewById(R.id.switchContentSchedule)
-        editContentProfiles = findViewById(R.id.editContentProfiles)
+        containerContentProfiles = findViewById(R.id.containerContentProfiles)
+        textContentProfilesEmpty = findViewById(R.id.textContentProfilesEmpty)
         switchIdleScreen = findViewById(R.id.switchIdleScreen)
         editIdleScreenUrl = findViewById(R.id.editIdleScreenUrl)
         editIdleTimeoutMinutes = findViewById(R.id.editIdleTimeoutMinutes)
@@ -218,7 +229,7 @@ class SettingsActivity : AppCompatActivity() {
         switchAutoRotate.isChecked = config.autoRotateEnabled
         editAutoRotateInterval.setText(config.autoRotateIntervalSeconds.toString())
         switchContentSchedule.isChecked = config.contentScheduleEnabled
-        editContentProfiles.setText(ConfigValidator.formatContentProfiles(config.contentProfiles))
+        renderContentProfiles(config.contentProfiles)
         switchIdleScreen.isChecked = config.idleScreenEnabled
         editIdleScreenUrl.setText(config.idleScreenUrl)
         editIdleTimeoutMinutes.setText(
@@ -304,9 +315,7 @@ class SettingsActivity : AppCompatActivity() {
             return
         }
 
-        val contentProfilesResult = ConfigValidator.parseContentProfiles(
-            editContentProfiles.text.toString()
-        )
+        val contentProfilesResult = ConfigValidator.buildContentProfiles(contentProfileDrafts())
         if (contentProfilesResult.error != null) {
             Toast.makeText(this, contentProfilesResult.error, Toast.LENGTH_LONG).show()
             return
@@ -554,7 +563,98 @@ class SettingsActivity : AppCompatActivity() {
         super.onSaveInstanceState(outState)
     }
 
+    private fun renderContentProfiles(profiles: List<ContentProfile>) {
+        containerContentProfiles.removeAllViews()
+        profiles.forEach(::addContentProfileRow)
+        showContentProfilesEmptyState()
+    }
+
+    private fun addContentProfileRow(profile: ContentProfile) {
+        val row = layoutInflater.inflate(
+            R.layout.item_content_profile,
+            containerContentProfiles,
+            false
+        )
+
+        val timeButton = row.findViewById<MaterialButton>(R.id.btnProfileTime)
+        timeButton.text = profile.startTime
+        timeButton.setOnClickListener { showProfileTimePicker(timeButton) }
+
+        val dayGroup = row.findViewById<ChipGroup>(R.id.chipGroupDays)
+        WeekDays.ALL.forEach { day ->
+            val chip = layoutInflater.inflate(
+                R.layout.item_content_profile_day,
+                dayGroup,
+                false
+            ) as Chip
+            chip.text = WeekDays.shortName(day)
+            chip.tag = day
+            chip.isChecked = day in profile.days
+            dayGroup.addView(chip)
+        }
+
+        row.findViewById<EditText>(R.id.editProfileUrls).setText(profile.urls.joinToString("\n"))
+        row.findViewById<MaterialButton>(R.id.btnRemoveProfile).setOnClickListener {
+            containerContentProfiles.removeView(row)
+            showContentProfilesEmptyState()
+        }
+
+        containerContentProfiles.addView(row)
+    }
+
+    private fun showContentProfilesEmptyState() {
+        textContentProfilesEmpty.visibility =
+            if (containerContentProfiles.childCount == 0) View.VISIBLE else View.GONE
+    }
+
+    private fun showProfileTimePicker(timeButton: MaterialButton) {
+        val current = runCatching { LocalTime.parse(timeButton.text.toString()) }.getOrNull()
+            ?: DEFAULT_PROFILE_TIME
+        TimePickerDialog(
+            this,
+            { _, hour, minute ->
+                timeButton.text = String.format(Locale.ROOT, "%02d:%02d", hour, minute)
+            },
+            current.hour,
+            current.minute,
+            DateFormat.is24HourFormat(this)
+        ).show()
+    }
+
+    private fun contentProfileDrafts(): List<ContentProfileDraft> {
+        return (0 until containerContentProfiles.childCount).map { index ->
+            val row = containerContentProfiles.getChildAt(index)
+            val dayGroup = row.findViewById<ChipGroup>(R.id.chipGroupDays)
+            val days = (0 until dayGroup.childCount)
+                .map { dayGroup.getChildAt(it) as Chip }
+                .filter { it.isChecked }
+                .map { it.tag as DayOfWeek }
+                .toSet()
+
+            ContentProfileDraft(
+                startTime = row.findViewById<MaterialButton>(R.id.btnProfileTime).text
+                    .toString()
+                    .trim(),
+                urls = row.findViewById<EditText>(R.id.editProfileUrls).text
+                    .toString()
+                    .lines()
+                    .map(String::trim)
+                    .filter(String::isNotBlank),
+                days = WeekDays.normalize(days)
+            )
+        }
+    }
+
     private fun setupButtons() {
+        findViewById<MaterialButton>(R.id.btnAddContentProfile).setOnClickListener {
+            addContentProfileRow(
+                ContentProfile(
+                    getString(R.string.content_profile_default_time),
+                    emptyList()
+                )
+            )
+            showContentProfilesEmptyState()
+        }
         findViewById<MaterialButton>(R.id.btnSave).setOnClickListener { saveConfig() }
         findViewById<MaterialButton>(R.id.btnCancel).setOnClickListener { finish() }
         findViewById<MaterialButton>(R.id.btnExitKiosk).setOnClickListener { exitKioskMode() }
@@ -636,6 +736,7 @@ class SettingsActivity : AppCompatActivity() {
     companion object {
         private const val STATE_AWAITING_EXACT_ALARM_ACCESS =
             "awaiting_exact_alarm_access"
+        private val DEFAULT_PROFILE_TIME: LocalTime = LocalTime.of(6, 0)
     }
 
 }

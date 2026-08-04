@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="#FF242424"
+    android:padding="12dp"
+    android:layout_marginBottom="8dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnProfileTime"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minWidth="96dp"
+            android:textSize="18sp"
+            android:textColor="#FFFFFFFF"
+            android:text="@string/content_profile_default_time" />
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnRemoveProfile"
+            style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/content_profile_remove"
+            android:contentDescription="@string/content_profile_remove" />
+    </LinearLayout>
+
+    <com.google.android.material.chip.ChipGroup
+        android:id="@+id/chipGroupDays"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        app:singleSelection="false" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/content_profile_days_hint"
+        android:textColor="#FFB0B0B0"
+        android:textSize="12sp"
+        android:layout_marginBottom="4dp" />
+
+    <!-- Rows share ids, so their state is rebuilt from the stored profiles, never restored. -->
+    <EditText
+        android:id="@+id/editProfileUrls"
+        android:saveEnabled="false"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:minLines="2"
+        android:gravity="top"
+        android:hint="@string/content_profile_urls_hint"
+        android:inputType="textMultiLine|textUri"
+        android:background="#FF2A2A2A"
+        android:textColor="#FFFFFFFF"
+        android:textColorHint="#FF808080"
+        android:padding="12dp" />
+</LinearLayout>

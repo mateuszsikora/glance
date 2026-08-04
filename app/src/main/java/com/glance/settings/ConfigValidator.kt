@@ -2,14 +2,26 @@ package com.glance.settings
 
 import com.glance.config.AppConfig
 import com.glance.content.ContentProfile
+import com.glance.content.WeekDays
 import com.glance.mqtt.MqttEndpoint
 import java.net.URI
+import java.time.DayOfWeek
 import java.time.LocalTime
 
 data class ContentProfilesParseResult(
     val profiles: List<ContentProfile> = emptyList(),
     val error: String? = null
 )
+
+/** One unvalidated profile as entered in the settings screen or the remote panel. */
+data class ContentProfileDraft(
+    val startTime: String,
+    val urls: List<String>,
+    val days: Set<DayOfWeek> = emptySet()
+) {
+    /** Rows are pre-filled with a start time, so only the URLs decide whether one was used. */
+    val isEmpty: Boolean get() = urls.isEmpty()
+}
 
 object ConfigValidator {
     fun isValidDashboardUrl(value: String): Boolean {
@@ -41,8 +53,9 @@ object ConfigValidator {
             value in AppConfig.MIN_IDLE_TIMEOUT_MINUTES..AppConfig.MAX_IDLE_TIMEOUT_MINUTES
     }
 
+    /** Parses the text format, which keeps remote clients and exported settings scriptable. */
     fun parseContentProfiles(value: String): ContentProfilesParseResult {
-        val groupedUrls = linkedMapOf<String, MutableList<String>>()
+        val drafts = mutableListOf<ContentProfileDraft>()
 
         value.lines().forEachIndexed { index, rawLine ->
             val line = rawLine.trim()
@@ -51,11 +64,17 @@ object ConfigValidator {
             val parts = line.split("|", limit = 2).map(String::trim)
             if (parts.size != 2 || parts.any(String::isBlank)) {
                 return ContentProfilesParseResult(
-                    error = "Line ${index + 1} must use HH:mm | URL"
+                    error = "Line ${index + 1} must use [days] HH:mm | URL"
                 )
             }
 
-            val (time, url) = parts
+            val (schedule, url) = parts
+            val daySeparator = schedule.lastIndexOf(' ')
+            val time = schedule.substring(daySeparator + 1)
+            val days = WeekDays.parse(schedule.take(daySeparator + 1))
+                ?: return ContentProfilesParseResult(
+                    error = "Line ${index + 1} has an invalid day; use Mon-Fri, Sat,Sun or weekend"
+                )
             if (!isValidTime(time)) {
                 return ContentProfilesParseResult(
                     error = "Line ${index + 1} has an invalid time; use HH:mm"
@@ -66,23 +85,59 @@ object ConfigValidator {
                     error = "Line ${index + 1} must contain an http:// or https:// URL"
                 )
             }
-            groupedUrls.getOrPut(time) { mutableListOf() }.add(url)
+            drafts.add(ContentProfileDraft(time, listOf(url), days))
         }
 
-        val profiles = groupedUrls.entries
-            .sortedBy { LocalTime.parse(it.key) }
-            .map { (time, urls) -> ContentProfile(time, urls.distinct()) }
-        return ContentProfilesParseResult(profiles = profiles)
+        return ContentProfilesParseResult(profiles = merge(drafts))
+    }
+
+    /** Validates profiles built from structured editors, numbering errors the way they are shown. */
+    fun buildContentProfiles(drafts: List<ContentProfileDraft>): ContentProfilesParseResult {
+        val validated = mutableListOf<ContentProfileDraft>()
+
+        drafts.forEachIndexed { index, draft ->
+            if (draft.isEmpty) return@forEachIndexed
+            if (!isValidTime(draft.startTime)) {
+                return ContentProfilesParseResult(
+                    error = "Profile ${index + 1} needs a start time in HH:mm format"
+                )
+            }
+            if (draft.urls.any { !isValidDashboardUrl(it) }) {
+                return ContentProfilesParseResult(
+                    error = "Profile ${index + 1} must only contain http:// or https:// URLs"
+                )
+            }
+            validated.add(draft)
+        }
+
+        return ContentProfilesParseResult(profiles = merge(validated))
     }
 
     fun formatContentProfiles(profiles: List<ContentProfile>): String {
         return profiles
-            .sortedBy { runCatching { LocalTime.parse(it.startTime) }.getOrNull() }
+            .sortedWith(profileOrder)
             .flatMap { profile ->
-                profile.urls.map { url -> "${profile.startTime} | $url" }
+                val prefix = WeekDays.format(profile.days).let { if (it.isEmpty()) "" else "$it " }
+                profile.urls.map { url -> "$prefix${profile.startTime} | $url" }
             }
             .joinToString("\n")
     }
+
+    /** Drafts sharing a start time and day set become one rotating profile. */
+    private fun merge(drafts: List<ContentProfileDraft>): List<ContentProfile> {
+        val grouped = linkedMapOf<Pair<String, Set<DayOfWeek>>, MutableList<String>>()
+        drafts.forEach { draft ->
+            grouped.getOrPut(draft.startTime to draft.days) { mutableListOf() }.addAll(draft.urls)
+        }
+        return grouped.entries
+            .map { (key, urls) -> ContentProfile(key.first, urls.distinct(), key.second) }
+            .sortedWith(profileOrder)
+    }
+
+    private val profileOrder = compareBy<ContentProfile>(
+        { runCatching { LocalTime.parse(it.startTime) }.getOrNull() },
+        { WeekDays.format(it.days) }
+    )
 
     fun isValidSettingsPin(value: String): Boolean {
         return value.length in 4..12 && value.all(Char::isDigit) && value != LEGACY_DEFAULT_PIN

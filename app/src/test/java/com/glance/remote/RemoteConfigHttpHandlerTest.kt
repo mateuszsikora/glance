@@ -3,9 +3,15 @@ package com.glance.remote
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.glance.config.AppConfig
+import com.glance.content.ContentProfile
+import java.io.BufferedOutputStream
+import java.io.ByteArrayOutputStream
 import java.net.URLEncoder
 import java.net.Socket
 import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
+import java.time.DayOfWeek
+import java.util.Base64
 import java.util.concurrent.atomic.AtomicInteger
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -304,7 +310,186 @@ class RemoteConfigHttpHandlerTest {
         }
     }
 
+    @Test
+    fun savesContentProfileRowsWithSelectedDays() {
+        val handler = handler()
+        val sessionCookie = login(handler)
+        val parameters = validSettings(csrf(handler, sessionCookie)).toMutableMap().apply {
+            put("contentScheduleEnabled", "on")
+            put("contentProfileRows", "1")
+            put("profile.0.time", "06:00")
+            DayOfWeek.values()
+                .filter { it.value <= 5 }
+                .forEach { put("profile.0.day.${it.name}", "on") }
+            put("profile.0.urls", "https://one.example/work")
+            put("profile.1.time", "09:00")
+            put("profile.1.day.SATURDAY", "on")
+            put("profile.1.day.SUNDAY", "on")
+            put(
+                "profile.1.urls",
+                "https://one.example/weekend\nhttps://one.example/weather"
+            )
+        }
+
+        val response = handler.handle(post("/save", parameters, sessionCookie))
+
+        assertEquals(303, response.status)
+        requireNotNull(response.afterSend).invoke()
+        assertEquals(
+            listOf(
+                ContentProfile(
+                    "06:00",
+                    listOf("https://one.example/work"),
+                    DayOfWeek.values().filter { it.value <= 5 }.toSet()
+                ),
+                ContentProfile(
+                    "09:00",
+                    listOf("https://one.example/weekend", "https://one.example/weather"),
+                    setOf(DayOfWeek.SATURDAY, DayOfWeek.SUNDAY)
+                )
+            ),
+            config.contentProfiles
+        )
+
+        // Saved rows come back as editable fields with their day checkboxes selected.
+        val page = handler.handle(get("/", sessionCookie)).text()
+        assertTrue(page.contains("name=\"profile.0.time\" value=\"06:00\""))
+        assertTrue(page.contains("name=\"profile.0.day.MONDAY\" checked"))
+        assertFalse(page.contains("name=\"profile.0.day.SATURDAY\" checked"))
+        assertTrue(page.contains("name=\"profile.1.day.SUNDAY\" checked"))
+    }
+
+    @Test
+    fun keepsSubmittedProfileRowsWhenValidationFails() {
+        val handler = handler()
+        val sessionCookie = login(handler)
+        val parameters = validSettings(csrf(handler, sessionCookie)).toMutableMap().apply {
+            put("contentScheduleEnabled", "on")
+            put("contentProfileRows", "1")
+            put("profile.0.time", "06:00")
+            put("profile.0.urls", "not-a-url")
+        }
+
+        val response = handler.handle(post("/save", parameters, sessionCookie))
+
+        assertEquals(400, response.status)
+        val page = response.text()
+        assertTrue(page.contains("Profile 1 must only contain http:// or https:// URLs"))
+        assertTrue(page.contains("not-a-url"))
+        assertTrue(config.contentProfiles.isEmpty())
+    }
+
+    @Test
+    fun removingEveryRowClearsTheStoredProfiles() {
+        config.contentProfiles = listOf(
+            ContentProfile("06:00", listOf("https://one.example/morning"))
+        )
+        val handler = handler()
+        val sessionCookie = login(handler)
+        // The row editor posts its marker even when the user deleted every row.
+        val parameters = validSettings(csrf(handler, sessionCookie)).toMutableMap().apply {
+            put("contentProfileRows", "1")
+        }
+
+        val response = handler.handle(post("/save", parameters, sessionCookie))
+
+        assertEquals(303, response.status)
+        requireNotNull(response.afterSend).invoke()
+        assertTrue(config.contentProfiles.isEmpty())
+    }
+
+    @Test
+    fun textFormStillAppliesWhenTheRequestCarriesNoRows() {
+        val handler = handler()
+        val sessionCookie = login(handler)
+        // A scripted client may scrape the form (marker included) and send the text form instead.
+        val parameters = validSettings(csrf(handler, sessionCookie)).toMutableMap().apply {
+            put("contentScheduleEnabled", "on")
+            put("contentProfileRows", "1")
+            put("contentProfiles", "Mon-Fri 06:00 | https://one.example/work")
+        }
+
+        val response = handler.handle(post("/save", parameters, sessionCookie))
+
+        assertEquals(303, response.status)
+        requireNotNull(response.afterSend).invoke()
+        assertEquals(
+            listOf(
+                ContentProfile(
+                    "06:00",
+                    listOf("https://one.example/work"),
+                    DayOfWeek.values().filter { it.value <= 5 }.toSet()
+                )
+            ),
+            config.contentProfiles
+        )
+    }
+
+    @Test
+    fun panelRendersOneEmptyRowWhenNoProfilesAreStored() {
+        val handler = handler()
+        val page = handler.handle(get("/", login(handler))).text()
+
+        // Without this the first profile could not be created when the panel script is blocked.
+        assertTrue(config.contentProfiles.isEmpty())
+        assertTrue(page.contains("name=\"profile.0.time\" value=\"06:00\""))
+        assertFalse(page.contains("name=\"profile.1.time\""))
+    }
+
+    @Test
+    fun inlinePanelScriptMatchesTheContentSecurityPolicyHash() {
+        val handler = handler()
+        val sessionCookie = login(handler)
+        val response = handler.handle(get("/", sessionCookie))
+
+        val script = requireNotNull(
+            Regex("<script>(.*)</script>", RegexOption.DOT_MATCHES_ALL)
+                .find(response.text())?.groupValues?.get(1)
+        )
+        val digest = Base64.getEncoder().encodeToString(
+            MessageDigest.getInstance("SHA-256").digest(script.toByteArray(StandardCharsets.UTF_8))
+        )
+
+        val headers = ByteArrayOutputStream()
+        RemoteHttpCodec.writeResponse(BufferedOutputStream(headers), response)
+        val scriptSource = headers.toString(StandardCharsets.UTF_8.name())
+            .lineSequence()
+            .first { it.startsWith("Content-Security-Policy:") }
+            .substringAfter("Content-Security-Policy:")
+            .split(';')
+            .map(String::trim)
+            .first { it.startsWith("script-src") }
+
+        // The hash is the only way the browser will run the panel script.
+        assertEquals("script-src 'sha256-$digest'", scriptSource)
+    }
+
+    @Test
+    fun panelExposesEveryHookTheScriptLooksUp() {
+        val handler = handler()
+        val page = handler.handle(get("/", login(handler))).text()
+
+        listOf(
+            "id=\"content-profiles\"",
+            "id=\"content-profiles-empty\"",
+            "id=\"content-profile-template\"",
+            "id=\"add-content-profile\"",
+            "class=\"profile-row\"",
+            "class=\"ghost small-button profile-remove\"",
+            "data-name=\"time\"",
+            "data-name=\"urls\"",
+            "data-name=\"day.MONDAY\""
+        ).forEach { hook -> assertTrue(hook, page.contains(hook)) }
+    }
+
     private fun handler() = RemoteConfigHttpHandler(config, { changes++ })
+
+    private fun csrf(handler: RemoteConfigHttpHandler, cookie: String): String {
+        val page = handler.handle(get("/", cookie)).text()
+        return requireNotNull(
+            Regex("name=\"csrf\" value=\"([^\"]+)\"").find(page)?.groupValues?.get(1)
+        )
+    }
 
     private fun login(handler: RemoteConfigHttpHandler): String {
         val response = handler.handle(post("/login", mapOf("pin" to PIN)))

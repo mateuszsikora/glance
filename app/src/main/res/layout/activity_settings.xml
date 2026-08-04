@@ -125,19 +125,28 @@
             android:textColor="#FFFFFFFF"
             android:layout_marginBottom="8dp" />
 
-        <EditText
-            android:id="@+id/editContentProfiles"
+        <LinearLayout
+            android:id="@+id/containerContentProfiles"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:minLines="4"
-            android:gravity="top"
-            android:hint="@string/content_profiles_hint"
-            android:inputType="textMultiLine|textUri"
-            android:background="#FF2A2A2A"
-            android:textColor="#FFFFFFFF"
-            android:textColorHint="#FF808080"
-            android:padding="12dp"
-            android:layout_marginBottom="4dp" />
+            android:orientation="vertical" />
+
+        <TextView
+            android:id="@+id/textContentProfilesEmpty"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/content_profiles_empty"
+            android:textColor="#FFB0B0B0"
+            android:textSize="12sp"
+            android:layout_marginBottom="8dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnAddContentProfile"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/content_profile_add"
+            android:layout_marginBottom="8dp" />
 
         <TextView
             android:layout_width="match_parent"

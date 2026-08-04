@@ -2,6 +2,8 @@ package com.glance.remote
 
 import android.util.Log
 import com.glance.config.AppConfig
+import com.glance.content.WeekDays
+import com.glance.settings.ContentProfileDraft
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.ByteArrayOutputStream
@@ -457,6 +459,15 @@ internal class RemoteConfigHttpHandler(
         fun checked(name: String, fallback: Boolean): Boolean =
             if (submittedValues == null) fallback else submittedValues[name] == "on"
 
+        // Keep rejected input on screen instead of resetting the rows to the stored profiles, and
+        // always offer one row so the first profile can be created without the panel script.
+        val profileDrafts = (
+            submittedValues?.let { RemoteContentProfiles.drafts(it) }
+                ?: values.contentProfiles.map { profile ->
+                    ContentProfileDraft(profile.startTime, profile.urls, profile.days)
+                }
+            ).ifEmpty { listOf(ContentProfileDraft(DEFAULT_PROFILE_TIME, emptyList())) }
+
         val passwordStatus = when {
             values.mqttPasswordUnreadable -> "Stored password is unreadable; replace or clear it."
             values.mqttPasswordConfigured -> "A password is stored. Leave blank to keep it."
@@ -466,6 +477,7 @@ internal class RemoteConfigHttpHandler(
             title = "Settings",
             message = message,
             isError = isError,
+            script = RemotePanelScript.SOURCE,
             content = """
                 <header class="topbar">
                   <div class="brand"><span class="brand-mark" aria-hidden="true">G</span><span>Glance</span></div>
@@ -512,13 +524,18 @@ internal class RemoteConfigHttpHandler(
                       </section>
 
                       <section id="content" class="card settings-card">
-                        ${sectionHeading("02", "Scheduled content", "Adapt the dashboard to the time of day or inactivity.")}
+                        ${sectionHeading("02", "Scheduled content", "Adapt the dashboard to the day, the time, or inactivity.")}
                         <div class="section-body">
-                          ${checkbox("contentScheduleEnabled", "Show different dashboards by time", checked("contentScheduleEnabled", values.contentScheduleEnabled))}
-                          <div class="field"><label for="contentProfiles">Content profiles <small>HH:mm | URL</small></label>
-                            <textarea id="contentProfiles" name="contentProfiles" rows="5" spellcheck="false"
-                              placeholder="06:00 | https://example.com/morning&#10;18:00 | https://example.com/evening">${value("contentProfiles", values.contentProfiles)}</textarea>
-                            <p class="hint">Repeat a start time for several swipeable URLs. The last profile wraps through midnight.</p></div>
+                          ${checkbox("contentScheduleEnabled", "Show different dashboards on a schedule", checked("contentScheduleEnabled", values.contentScheduleEnabled))}
+                          <div class="field"><label id="content-profiles-label">Content profiles</label>
+                            <input type="hidden" name="${RemoteContentProfiles.MARKER_FIELD}" value="1">
+                            <div id="content-profiles" class="profile-list" role="group" aria-labelledby="content-profiles-label">${
+        profileDrafts.mapIndexed { index, draft -> contentProfileRow(index, draft) }.joinToString("")
+    }</div>
+                            <p id="content-profiles-empty" class="profile-empty"${if (profileDrafts.isEmpty()) "" else " hidden"}>No profiles yet. Add one to choose what appears and when.</p>
+                            <button type="button" id="add-content-profile" class="ghost small-button">+ Add profile</button>
+                            <template id="content-profile-template">${contentProfileRow(null, ContentProfileDraft(DEFAULT_PROFILE_TIME, emptyList()))}</template>
+                            <p class="hint">A profile starts at its time on the selected days and stays active until the next one starts, including across midnight. No day selected means every day; several URLs in one profile become swipeable.</p></div>
                           <div class="subsection">
                             ${checkbox("idleScreenEnabled", "Show a URL after inactivity", checked("idleScreenEnabled", values.idleScreenEnabled))}
                             <div class="grid two">
@@ -611,6 +628,35 @@ internal class RemoteConfigHttpHandler(
         )
     }
 
+    /**
+     * One scheduled content row. A null [index] renders the template the panel script clones:
+     * it carries no field names until the script assigns them.
+     */
+    private fun contentProfileRow(index: Int?, draft: ContentProfileDraft): String {
+        fun nameAttribute(suffix: String): String =
+            if (index == null) "" else " name=\"${RemoteContentProfiles.fieldName(index, suffix)}\""
+
+        val dayChips = WeekDays.ALL.joinToString("") { day ->
+            val suffix = RemoteContentProfiles.daySuffix(day)
+            "<label class=\"day-chip\"><input type=\"checkbox\" data-name=\"$suffix\"" +
+                nameAttribute(suffix) + (if (day in draft.days) " checked" else "") +
+                "><span>${escapeHtml(WeekDays.shortName(day))}</span></label>"
+        }
+
+        return "<div class=\"profile-row\">" +
+            "<div class=\"profile-head\">" +
+            "<input type=\"time\" data-name=\"time\"${nameAttribute("time")} " +
+            "value=\"${escapeHtml(draft.startTime)}\" aria-label=\"Start time\">" +
+            "<button type=\"button\" class=\"ghost small-button profile-remove\">Remove</button>" +
+            "</div>" +
+            "<div class=\"day-picker\">$dayChips</div>" +
+            "<textarea data-name=\"urls\"${nameAttribute("urls")} rows=\"2\" spellcheck=\"false\" " +
+            "placeholder=\"https://example.com/morning\" aria-label=\"Dashboard URLs, one per line\">" +
+            escapeHtml(draft.urls.joinToString("\n")) +
+            "</textarea>" +
+            "</div>"
+    }
+
     private fun sectionHeading(number: String, title: String, description: String): String = """
         <div class="section-heading">
           <span class="section-number" aria-hidden="true">$number</span>
@@ -634,7 +680,8 @@ internal class RemoteConfigHttpHandler(
         title: String,
         message: String? = null,
         isError: Boolean = false,
-        content: String = "<div class=\"card narrow\"><h1>${escapeHtml(title)}</h1></div>"
+        content: String = "<div class=\"card narrow\"><h1>${escapeHtml(title)}</h1></div>",
+        script: String? = null
     ): String {
         val banner = message?.let {
             "<div class=\"banner ${if (isError) "error" else "success"}\" " +
@@ -726,6 +773,19 @@ internal class RemoteConfigHttpHandler(
                 .input-with-suffix { display:flex; align-items:stretch; }
                 .input-with-suffix input { border-radius:10px 0 0 10px; }
                 .input-with-suffix > span { display:flex; align-items:center; padding:0 12px; border:1px solid var(--border-strong); border-left:0; border-radius:0 10px 10px 0; color:var(--muted); background:var(--surface-raised); font-size:.78rem; }
+                .profile-list { display:flex; flex-direction:column; gap:12px; }
+                .profile-list:not(:empty) { margin-bottom:14px; }
+                .profile-row { padding:14px; border:1px solid var(--border); border-radius:12px; background:var(--surface-raised); }
+                .profile-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
+                .profile-head input[type=time] { width:auto; min-width:136px; }
+                .profile-row textarea { min-height:64px; }
+                .day-picker { display:flex; flex-wrap:wrap; gap:7px; margin-bottom:12px; }
+                label.day-chip { position:relative; display:inline-flex; margin:0; cursor:pointer; }
+                .day-chip input { position:absolute; width:1px; height:1px; opacity:0; }
+                .day-chip span { padding:7px 12px; border:1px solid var(--border-strong); border-radius:999px; color:#b8c3cd; background:var(--field); font-size:.79rem; font-weight:650; transition:background .15s,color .15s,border-color .15s; }
+                .day-chip input:checked + span { color:var(--accent-ink); border-color:var(--accent-strong); background:var(--accent); }
+                .day-chip input:focus-visible + span { outline:2px solid var(--blue); outline-offset:2px; }
+                .profile-empty { margin:0 0 14px; color:var(--muted); font-size:.82rem; }
                 .subsection { margin-top:22px; padding-top:22px; border-top:1px solid var(--border); }
                 .toggle-row { position:relative; display:flex; align-items:center; gap:12px; margin:0; padding:13px 14px; border:1px solid var(--border); border-radius:12px; background:var(--surface-raised); cursor:pointer; }
                 .toggle-row + .field,.toggle-row + .grid { margin-top:20px; }
@@ -794,12 +854,13 @@ internal class RemoteConfigHttpHandler(
                 @media (prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto!important; transition:none!important; } }
               </style>
             </head>
-            <body><main>$banner$content</main></body>
+            <body><main>$banner$content</main>${script?.let { "<script>$it</script>" }.orEmpty()}</body>
             </html>
         """.trimIndent()
     }
 
     companion object {
+        private const val DEFAULT_PROFILE_TIME = "06:00"
         private const val SESSION_COOKIE = "glance_session"
         private const val SESSION_DURATION_MS = 30L * 60L * 1_000L
         private const val MAX_SESSIONS = 8
@@ -894,7 +955,8 @@ internal object RemoteHttpCodec {
             "X-Content-Type-Options" to "nosniff",
             "Referrer-Policy" to "no-referrer",
             "Content-Security-Policy" to
-                "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; " +
+                "default-src 'none'; style-src 'unsafe-inline'; " +
+                "script-src ${RemotePanelScript.CSP_SOURCE}; form-action 'self'; " +
                 "base-uri 'none'; frame-ancestors 'none'"
         )
         headers.putAll(response.headers)

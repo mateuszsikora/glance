@@ -8,6 +8,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
 import java.security.SecureRandom
+import java.time.DayOfWeek
 import java.util.UUID
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
@@ -76,7 +77,13 @@ class AppConfig(context: Context) {
                             }
                         }
                         if (urls.isNotEmpty()) {
-                            add(ContentProfile(item.getString(PROFILE_START_TIME), urls))
+                            add(
+                                ContentProfile(
+                                    item.getString(PROFILE_START_TIME),
+                                    urls,
+                                    readDays(item.optJSONArray(PROFILE_DAYS))
+                                )
+                            )
                         }
                     }
                 }
@@ -85,14 +92,27 @@ class AppConfig(context: Context) {
         set(value) {
             val array = JSONArray()
             value.forEach { profile ->
-                array.put(
-                    JSONObject()
-                        .put(PROFILE_START_TIME, profile.startTime)
-                        .put(PROFILE_URLS, JSONArray(profile.urls))
-                )
+                val item = JSONObject()
+                    .put(PROFILE_START_TIME, profile.startTime)
+                    .put(PROFILE_URLS, JSONArray(profile.urls))
+                // Profiles written before day support omit the field, which still means "daily".
+                if (profile.days.isNotEmpty()) {
+                    item.put(PROFILE_DAYS, JSONArray(profile.days.map(DayOfWeek::getValue).sorted()))
+                }
+                array.put(item)
             }
             prefs.edit().putString(KEY_CONTENT_PROFILES, array.toString()).apply()
         }
+
+    private fun readDays(array: JSONArray?): Set<DayOfWeek> {
+        if (array == null) return emptySet()
+        return buildSet {
+            for (index in 0 until array.length()) {
+                val value = array.optInt(index, 0)
+                if (value in 1..7) add(DayOfWeek.of(value))
+            }
+        }
+    }
 
     var idleScreenEnabled: Boolean
         get() = prefs.getBoolean(KEY_IDLE_SCREEN_ENABLED, false)
@@ -386,6 +406,7 @@ class AppConfig(context: Context) {
         private const val DEFAULT_DASHBOARD_URL = "https://example.com"
         private const val PROFILE_START_TIME = "start_time"
         private const val PROFILE_URLS = "urls"
+        private const val PROFILE_DAYS = "days"
         const val MIN_IDLE_TIMEOUT_MINUTES = 1
         const val MAX_IDLE_TIMEOUT_MINUTES = 1_440
         private const val DEFAULT_IDLE_TIMEOUT_MINUTES = 5
