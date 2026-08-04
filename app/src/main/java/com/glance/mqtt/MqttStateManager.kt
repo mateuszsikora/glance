@@ -1,5 +1,6 @@
 package com.glance.mqtt
 
+import android.content.Context
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -29,6 +30,7 @@ data class MqttReportedState(
  * [stateProvider] and [commandHandler], so MQTT stays connected while MainActivity is recreated.
  */
 class MqttStateManager(
+    private val context: Context,
     private val config: AppConfig,
     private val stateProvider: () -> MqttReportedState,
     private val commandHandler: (MqttLightCommand) -> Unit
@@ -36,12 +38,14 @@ class MqttStateManager(
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val deviceId = config.mqttDeviceId
+    private val clientId = "glance_${MqttContract.sanitizeId(deviceId)}"
     private val topics = MqttContract.topics(config.mqttDiscoveryPrefix, deviceId)
     private val serverUri by lazy {
         MqttEndpoint.serverUri(config.mqttBrokerHost, config.mqttBrokerPort)
     }
 
     private var client: MqttAsyncClient? = null
+    private var pingSender: AlarmPingSender? = null
     private var connectOptions: MqttConnectOptions? = null
     @Volatile private var running = false
     @Volatile private var connecting = false
@@ -62,13 +66,16 @@ class MqttStateManager(
                 return
             }
             cleanupOnly = !config.mqttEnabled
+            val alarmPingSender = AlarmPingSender(context, clientId)
             val mqttClient = MqttAsyncClient(
                 serverUri,
-                "glance_${MqttContract.sanitizeId(deviceId)}",
-                MemoryPersistence()
+                clientId,
+                MemoryPersistence(),
+                alarmPingSender
             )
             mqttClient.setCallback(createCallback(mqttClient))
             client = mqttClient
+            pingSender = alarmPingSender
             connectOptions = buildConnectOptions()
             running = true
             connectWithInitialRetry()
@@ -84,7 +91,9 @@ class MqttStateManager(
         mainHandler.removeCallbacksAndMessages(null)
 
         val mqttClient = client
+        val alarmPingSender = pingSender
         client = null
+        pingSender = null
         connectOptions = null
         if (mqttClient != null) {
             try {
@@ -109,6 +118,9 @@ class MqttStateManager(
                 }
             }
         }
+        // A forced close skips Paho's own teardown, so the keep-alive alarm and its receiver are
+        // released here instead of leaking into the next manager instance.
+        alarmPingSender?.stop()
         Log.i(TAG, "MQTT manager stopped")
     }
 
@@ -230,7 +242,7 @@ class MqttStateManager(
             isAutomaticReconnect = true
             isCleanSession = true
             connectionTimeout = 10
-            keepAliveInterval = 30
+            keepAliveInterval = KEEP_ALIVE_SECONDS
             maxInflight = 20
             if (config.mqttUsername.isNotBlank()) {
                 userName = config.mqttUsername
@@ -373,6 +385,9 @@ class MqttStateManager(
     companion object {
         private const val TAG = "MqttStateManager"
         private const val QOS = 1
+        // One wakeup per minute keeps the broker session alive without waking the tablet
+        // constantly; the broker gives up after 1.5x this window.
+        private const val KEEP_ALIVE_SECONDS = 60
         private const val DISCONNECT_TIMEOUT_MS = 1_000L
         private const val DISCOVERY_CLEANUP_TIMEOUT_MS = 2_000L
     }

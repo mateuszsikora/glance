@@ -168,6 +168,7 @@ class KioskService : Service() {
 
     private fun startMqtt() {
         mqttStateManager = MqttStateManager(
+            context = this,
             config = config,
             stateProvider = {
                 MqttReportedState(
