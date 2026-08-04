@@ -19,7 +19,7 @@ The project targets Android 14 (API 34) and supports Android 8.0 (API 26) and ne
 - ambient-light and MQTT-controlled brightness;
 - scheduled screen on/off, including overnight windows;
 - Home Assistant MQTT discovery with retained state and availability;
-- watchdog health checks and memory-pressure recovery;
+- watchdog health checks, memory-pressure recovery, and an automatic reload once a dashboard comes back after a server restart or network outage;
 - PIN-protected remote configuration from any browser on the same LAN;
 - encrypted MQTT password storage with no cloud account or companion app required.
 
