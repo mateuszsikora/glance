@@ -78,6 +78,26 @@ one repository as `keys/github-token` and set `GLANCE_GITHUB_TOKEN_FILE` to poin
 network or key material there rather than in `compose.yml`. If the keystore and the key have
 different passwords, add `keys/hallway/key-password`.
 
+### When the updater runs on another machine
+
+Usually it does: a server or a Raspberry Pi rather than the workstation the key lives on. Because
+neither `keys/` nor `compose.override.yml` is in the repository, a fresh clone has neither, and
+`scp` will not create the directory on its own — make it first, or the copy fails before it starts:
+
+```sh
+ssh server 'mkdir -p glance/tools/updater/keys/hallway'
+scp glance-release.jks server:glance/tools/updater/keys/hallway/keystore
+ssh server 'sha256sum glance/tools/updater/keys/hallway/keystore'
+```
+
+Compare that digest with the source before going further. A keystore truncated in transit is not
+rejected on arrival; it surfaces later as a signing error that does not obviously point back at the
+copy.
+
+The key goes straight to the machine that will sign with it. It never passes through the
+repository, the release pipeline, or a registry — which is also why the image is built from this
+directory on each host rather than pulled from somewhere.
+
 Also write `keys/hallway/cert-sha256`, the certificate of the build already installed on that
 tablet. This is worth the one minute it takes. Signing with the wrong key is not a visible failure:
 the container signs happily, the manifest looks correct, and the tablet quietly declines the
