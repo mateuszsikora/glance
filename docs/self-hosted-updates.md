@@ -34,7 +34,7 @@ dependency, and the key never leaves it.
 ## 1. Publish unsigned builds
 
 Every push to `master` builds an unsigned, zip-aligned APK and attaches it, together with a
-`build.json` describing it, to a rolling prerelease tagged `nightly`. `versionCode` is derived from
+`build.json` describing it, to a rolling prerelease tagged `next`. `versionCode` is derived from
 the commit count, so it increases on every commit — Android will not install an update whose
 `versionCode` did not grow.
 
