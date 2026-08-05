@@ -64,25 +64,85 @@ prepare_passwords() {
   chmod 600 "${SECRETS_DIR}/ks" "${SECRETS_DIR}/key"
 }
 
+# A keystore that exists but does not hold the expected key is the expensive mistake: signing
+# succeeds, the manifest looks healthy, and the tablet refuses every update with nothing but
+# "Update is not signed by the installed certificate" in its own log. Checking at startup turns
+# that into an immediate, local failure. keytool reads the password from stdin so it stays out of
+# the process list, the same reason apksigner is given file references.
+verify_key() {
+  local listing fingerprint
+  if ! listing="$(keytool -list -v \
+      -keystore "${GLANCE_KEYSTORE}" \
+      -alias "${GLANCE_KEY_ALIAS}" < "${SECRETS_DIR}/ks" 2>&1)"; then
+    log "keystore ${GLANCE_KEYSTORE} has no usable key '${GLANCE_KEY_ALIAS}'"
+    log "keys present: $(keytool -list -keystore "${GLANCE_KEYSTORE}" < "${SECRETS_DIR}/ks" 2>/dev/null \
+      | sed -n 's/^\([^,]*\), .*PrivateKeyEntry.*/\1/p' | paste -sd' ' -)"
+    exit 1
+  fi
+
+  # keytool prints AA:BB:CC..., apksigner prints aabbcc...; compare in the latter form.
+  fingerprint="$(sed -n 's/^[[:space:]]*SHA256: //p' <<<"$listing" | head -n 1 | tr -d ':' | tr 'A-Z' 'a-z')"
+  log "signing key '${GLANCE_KEY_ALIAS}' certificate ${fingerprint}"
+
+  if [[ -n "${GLANCE_EXPECT_CERT_SHA256:-}" && "$fingerprint" != "${GLANCE_EXPECT_CERT_SHA256,,}" ]]; then
+    log "expected certificate ${GLANCE_EXPECT_CERT_SHA256,,}"
+    log "every update signed with this key would be refused by the tablet; refusing to start"
+    exit 1
+  fi
+}
+
 publish() {
   local version_code="$1" version_name="$2" unsigned="$3"
   local signed="${GLANCE_OUT}/glance-${version_code}.apk"
   local staging="${signed}.tmp"
+  local certs
+
+  # Every step below is checked explicitly. This function runs with errexit suppressed, because
+  # check_once is invoked as `check_once || log ...` so that a transient network failure does not
+  # kill the daemon -- which also means a failing command here would otherwise be ignored and the
+  # manifest would be published pointing at an APK that was never written.
+  rm -f "$staging"
 
   # Passwords are handed over as file references rather than arguments so they never appear in
   # this container's process list.
-  "${APKSIGNER[@]}" sign \
+  # v4 signing is off: it emits a detached .idsig that only incremental installs use, and the
+  # tablet fetches nothing but the APK itself.
+  if ! "${APKSIGNER[@]}" sign \
     --ks "${GLANCE_KEYSTORE}" \
     --ks-key-alias "${GLANCE_KEY_ALIAS}" \
     --ks-pass "file:${SECRETS_DIR}/ks" \
     --key-pass "file:${SECRETS_DIR}/key" \
+    --v4-signing-enabled false \
     --out "$staging" \
-    "$unsigned"
-  "${APKSIGNER[@]}" verify --print-certs "$staging" >/dev/null
+    "$unsigned"; then
+    log "signing build ${version_code} failed; not publishing"
+    rm -f "$staging"
+    return 1
+  fi
+
+  if ! certs="$("${APKSIGNER[@]}" verify --print-certs "$staging" 2>&1)"; then
+    log "signed build ${version_code} failed verification; not publishing"
+    rm -f "$staging"
+    return 1
+  fi
+
+  # Android refuses an update that is not signed by the certificate already installed, and reports
+  # it only in the tablet's log. Comparing the fingerprint here turns that into a visible failure
+  # on the machine doing the signing.
+  local signer_sha
+  signer_sha="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' <<<"$certs" | head -n 1)"
+  if [[ -n "${GLANCE_EXPECT_CERT_SHA256:-}" ]]; then
+    if [[ "${signer_sha,,}" != "${GLANCE_EXPECT_CERT_SHA256,,}" ]]; then
+      log "signed with ${signer_sha:-unknown}, expected ${GLANCE_EXPECT_CERT_SHA256}"
+      log "the tablet would reject this build; check GLANCE_KEYSTORE and GLANCE_KEY_ALIAS"
+      rm -f "$staging"
+      return 1
+    fi
+  fi
 
   local digest
-  digest="$(sha256sum "$staging" | cut -d' ' -f1)"
-  mv "$staging" "$signed"
+  digest="$(sha256sum "$staging" | cut -d' ' -f1)" || { rm -f "$staging"; return 1; }
+  mv "$staging" "$signed" || return 1
 
   # Written last and atomically: a tablet must never read a manifest that points at an APK which
   # is still being copied.
@@ -96,7 +156,7 @@ publish() {
   mv "${MANIFEST}.tmp" "$MANIFEST"
 
   printf '%s' "$version_code" > "$STATE_FILE"
-  log "published build ${version_code} (${version_name})"
+  log "published build ${version_code} (${version_name}) signed by ${signer_sha:-unknown}"
 
   # Older APKs are kept briefly so a tablet mid-download is not left with a dead URL.
   find "${GLANCE_OUT}" -maxdepth 1 -name 'glance-*.apk' -printf '%T@ %p\n' \
@@ -131,13 +191,16 @@ check_once() {
     return 0
   fi
 
-  publish "$version_code" "$version_name" "${work}/unsigned.apk"
+  # A failed publish deliberately leaves the state file alone, so the next poll retries instead of
+  # recording a version that was never served.
+  publish "$version_code" "$version_name" "${work}/unsigned.apk" || return 1
 }
 
 mkdir -p "${GLANCE_OUT}"
 [[ -r "${GLANCE_KEYSTORE}" ]] || { log "no keystore at ${GLANCE_KEYSTORE}"; exit 1; }
 [[ -r "${STORE_PASSWORD_FILE}" ]] || { log "no keystore password at ${STORE_PASSWORD_FILE}"; exit 1; }
 prepare_passwords
+verify_key
 
 log "serving ${GLANCE_OUT} on port ${GLANCE_PORT}"
 python3 -m http.server "${GLANCE_PORT}" --directory "${GLANCE_OUT}" --bind 0.0.0.0 &

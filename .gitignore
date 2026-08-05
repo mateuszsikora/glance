@@ -15,5 +15,9 @@
 *.keystore
 /keystore.properties
 
+# Updater secrets. docs/self-hosted-updates.md tells you to put the keystore, its password and a
+# GitHub token here; only the keystore matches a pattern above.
+/tools/updater/keys/
+
 # Misc
 *.log

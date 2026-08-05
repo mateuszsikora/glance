@@ -62,7 +62,7 @@ mkdir -p keys
 cp /path/to/glance-release.jks keys/
 printf '%s' 'your-keystore-password' > keys/keystore-password
 chmod 600 keys/*
-$EDITOR compose.yml          # set GLANCE_REPO and GLANCE_PUBLIC_URL
+$EDITOR compose.yml          # set GLANCE_REPO, GLANCE_PUBLIC_URL and the keystore settings
 docker compose up -d
 ```
 
@@ -70,8 +70,22 @@ No credentials are needed: release assets of a public repository are fetched ano
 run this against a fork you keep private, add a fine-grained read-only token with access to that
 one repository as `keys/github-token` and set `GLANCE_GITHUB_TOKEN_FILE` to point at it.
 
+`keys/` is gitignored in full. Set `GLANCE_KEYSTORE` and `GLANCE_KEY_ALIAS` to match the key you
+actually provisioned the tablets with — the image defaults, `glance-release.jks` and alias
+`glance`, assume a dedicated release key.
+
+Set `GLANCE_EXPECT_CERT_SHA256` to the certificate of the build already installed on the tablets.
+This is worth the one minute it takes. Signing with the wrong key is not a visible failure: the
+container signs happily, the manifest looks correct, and every tablet quietly declines the update,
+logging `Update is not signed by the installed certificate` where nobody is watching. With the
+fingerprint configured the container refuses to start instead. Read it off your signing key with:
+
+```sh
+keytool -list -v -keystore keys/glance-release.jks -alias glance | grep SHA256:
+```
+
 The container polls the newest release, verifies the published checksum, signs the APK with your
-key, verifies its own output, and writes:
+key, verifies its own output and its signing certificate, and writes:
 
 ```
 http://<host>:8080/glance-update.json
