@@ -66,9 +66,9 @@ $EDITOR compose.yml          # set GLANCE_REPO and GLANCE_PUBLIC_URL
 docker compose up -d
 ```
 
-While the repository is private, add a fine-grained read-only token with access to that one
-repository as `keys/github-token`. Once the repository is public, delete the token and the
-`GLANCE_GITHUB_TOKEN_FILE` line: release assets are then fetched unauthenticated.
+No credentials are needed: release assets of a public repository are fetched anonymously. If you
+run this against a fork you keep private, add a fine-grained read-only token with access to that
+one repository as `keys/github-token` and set `GLANCE_GITHUB_TOKEN_FILE` to point at it.
 
 The container polls the newest release, verifies the published checksum, signs the APK with your
 key, verifies its own output, and writes:

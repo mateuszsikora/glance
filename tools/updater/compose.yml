@@ -3,7 +3,6 @@
 # Expected layout next to this file:
 #   keys/glance-release.jks     the signing key that also signed the tablets' installed build
 #   keys/keystore-password      its password, single line
-#   keys/github-token           optional, only needed while the repository is private
 services:
   glance-updater:
     build: .
@@ -18,8 +17,9 @@ services:
       GLANCE_PUBLIC_URL: http://192.168.1.10:8080
       GLANCE_KEY_ALIAS: glance
       GLANCE_POLL_SECONDS: 300
-      # Drop this line once the repository is public; assets are then fetched unauthenticated.
-      GLANCE_GITHUB_TOKEN_FILE: /keys/github-token
+      # Release assets of a public repository are fetched without credentials. A fork kept private
+      # needs a fine-grained read-only token instead:
+      #   GLANCE_GITHUB_TOKEN_FILE: /keys/github-token
     ports:
       # Local network only. This port serves installable APKs and must not be exposed publicly.
       - "8080:8080"
