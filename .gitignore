@@ -18,6 +18,8 @@
 # Updater secrets. docs/self-hosted-updates.md tells you to put the keystore, its password and a
 # GitHub token here; only the keystore matches a pattern above.
 /tools/updater/keys/
+# Per-machine updater settings: addresses on your own network, and which key signs for it.
+/tools/updater/compose.override.yml
 
 # Misc
 *.log

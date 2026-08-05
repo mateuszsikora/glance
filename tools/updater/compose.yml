@@ -1,8 +1,11 @@
 # Self-hosted Glance updater. See docs/self-hosted-updates.md for the full procedure.
 #
 # Expected layout next to this file:
-#   keys/debug.keystore         the signing key that also signed the tablets' installed build
+#   keys/glance-release.jks     the signing key that also signed the tablets' installed build
 #   keys/keystore-password      its password, single line
+#
+# Machine-specific values belong in compose.override.yml, which is gitignored and merged
+# automatically. Keep this file describing the general case.
 services:
   glance-updater:
     build: .
@@ -14,16 +17,12 @@ services:
       GLANCE_REPO: mateuszsikora/glance
       # The address tablets use to reach this container. It ends up verbatim in the manifest, so
       # it must be resolvable from the tablet, not from this host.
-      GLANCE_PUBLIC_URL: http://192.168.21.18:8080
-      # The tablet was provisioned as Device Owner with the Android debug keystore, so that is the
-      # only key whose builds it will accept. The image defaults (glance-release.jks / glance) are
-      # for a deployment that was provisioned with a dedicated release key instead.
-      GLANCE_KEYSTORE: /keys/debug.keystore
-      GLANCE_KEY_ALIAS: androiddebugkey
-      # The certificate on the tablet's installed build. If signing ever produces anything else the
-      # container stops instead of publishing updates the tablet will silently refuse.
-      GLANCE_EXPECT_CERT_SHA256: 8c32727e4f094d3af5684b485e14d28ceae5dad2b339d52b2dce4744c6555340
+      GLANCE_PUBLIC_URL: http://192.168.1.10:8080
+      GLANCE_KEY_ALIAS: glance
       GLANCE_POLL_SECONDS: 300
+      # The certificate of the build already installed on the tablets. Signing with any other key
+      # produces updates they silently refuse, so setting this stops the container instead.
+      # GLANCE_EXPECT_CERT_SHA256: ""
       # Release assets of a public repository are fetched without credentials. A fork kept private
       # needs a fine-grained read-only token instead:
       #   GLANCE_GITHUB_TOKEN_FILE: /keys/github-token

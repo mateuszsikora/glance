@@ -70,9 +70,14 @@ No credentials are needed: release assets of a public repository are fetched ano
 run this against a fork you keep private, add a fine-grained read-only token with access to that
 one repository as `keys/github-token` and set `GLANCE_GITHUB_TOKEN_FILE` to point at it.
 
-`keys/` is gitignored in full. Set `GLANCE_KEYSTORE` and `GLANCE_KEY_ALIAS` to match the key you
-actually provisioned the tablets with — the image defaults, `glance-release.jks` and alias
-`glance`, assume a dedicated release key.
+`keys/` is gitignored in full, as is `compose.override.yml` — put anything specific to your own
+network or key material there rather than in `compose.yml`. Set `GLANCE_KEYSTORE` and
+`GLANCE_KEY_ALIAS` to match the key you actually provisioned the tablets with.
+
+Provision every tablet with a dedicated release key, generated once and kept backed up. A debug
+keystore will physically work, but it is generated per machine and regenerated whenever it is
+deleted, so it is easy to end up unable to reproduce the key that a tablet was provisioned with —
+and a Device Owner installation cannot be moved to a different certificate without a factory reset.
 
 Set `GLANCE_EXPECT_CERT_SHA256` to the certificate of the build already installed on the tablets.
 This is worth the one minute it takes. Signing with the wrong key is not a visible failure: the
