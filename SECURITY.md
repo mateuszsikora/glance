@@ -20,3 +20,5 @@ Remove real dashboard URLs, broker addresses, device identifiers, credentials, c
 ## Security boundaries
 
 Glance is a Device Owner-capable application and can lock or wake a managed Android device. Treat its APK signing key, settings PIN, dashboard session, and MQTT credentials as sensitive. The app is designed for trusted local networks; enabling plain HTTP or MQTT without TLS exposes traffic to that network.
+
+The signing key that matters is yours, not this project's. Releases carry an unsigned APK and no key held here would be accepted as an update by any installed device, so there is no project-held signing key to compromise. The trade-off falls on you: whoever holds the key you signed with can install code on the devices provisioned with it, silently and with Device Owner privileges. See [Self-hosted updates](docs/self-hosted-updates.md).
