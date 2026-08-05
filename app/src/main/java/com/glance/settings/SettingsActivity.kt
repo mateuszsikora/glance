@@ -31,6 +31,7 @@ import com.glance.kiosk.LockTaskHelper
 import com.glance.remote.RemoteConfigAddress
 import com.glance.screen.ScheduleManager
 import com.glance.update.UpdateChecker
+import com.glance.update.UpdateSummary
 import com.glance.watchdog.WatchdogService
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.chip.Chip
@@ -74,7 +75,9 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var switchRemoteConfig: SwitchCompat
     private lateinit var textRemoteConfigAddress: TextView
     private lateinit var editUpdateUrl: EditText
+    private lateinit var switchAutoUpdate: SwitchCompat
     private lateinit var textUpdateStatus: TextView
+    private lateinit var buttonInstallUpdate: MaterialButton
     private lateinit var editPin: EditText
     private lateinit var textDebugInfo: TextView
     private var awaitingExactAlarmAccess = false
@@ -223,10 +226,13 @@ class SettingsActivity : AppCompatActivity() {
         switchRemoteConfig = findViewById(R.id.switchRemoteConfig)
         textRemoteConfigAddress = findViewById(R.id.textRemoteConfigAddress)
         editUpdateUrl = findViewById(R.id.editUpdateUrl)
+        switchAutoUpdate = findViewById(R.id.switchAutoUpdate)
         textUpdateStatus = findViewById(R.id.textUpdateStatus)
+        buttonInstallUpdate = findViewById(R.id.btnInstallUpdate)
         findViewById<MaterialButton>(R.id.btnCheckForUpdate).setOnClickListener {
-            checkForUpdateNow()
+            requestUpdate(installNow = false)
         }
+        buttonInstallUpdate.setOnClickListener { requestUpdate(installNow = true) }
         editPin = findViewById(R.id.editPin)
         textDebugInfo = findViewById(R.id.textDebugInfo)
     }
@@ -274,6 +280,7 @@ class SettingsActivity : AppCompatActivity() {
             showRemoteConfigAddress(enabled)
         }
         editUpdateUrl.setText(config.updateUrl)
+        switchAutoUpdate.isChecked = config.autoUpdateEnabled
         showUpdateStatus()
         editPin.setText("")
     }
@@ -501,6 +508,7 @@ class SettingsActivity : AppCompatActivity() {
         config.mqttDiscoveryPrefix = discoveryPrefix
         config.remoteConfigEnabled = switchRemoteConfig.isChecked
         config.updateUrl = updateUrl
+        config.autoUpdateEnabled = switchAutoUpdate.isChecked
 
         if (newPin.isNotBlank()) {
             config.setSettingsPin(newPin)
@@ -720,6 +728,7 @@ class SettingsActivity : AppCompatActivity() {
 
         val info = buildString {
             appendLine("Package: ${packageName}")
+            appendLine("Version: ${UpdateSummary.of(config).installedVersion}")
             appendLine("Device Owner: $isDeviceOwner")
             appendLine("WebView: $webViewVersion")
             appendLine("Memory: ${usedMem}MB / ${totalMem}MB")
@@ -751,26 +760,45 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     /**
-     * Reads the stored URL rather than the text field: the check is a separate action from saving,
-     * so an unsaved edit must not silently decide where the tablet fetches an APK from.
+     * Reads the stored URL rather than the text field: contacting the server is a separate action
+     * from saving, so an unsaved edit must not silently decide where the tablet fetches an APK
+     * from. [installNow] overrides the automatic-update switch as well as the failure guards.
      */
-    private fun checkForUpdateNow() {
+    private fun requestUpdate(installNow: Boolean) {
         if (config.updateUrl.isBlank()) {
             Toast.makeText(this, R.string.update_check_needs_url, Toast.LENGTH_LONG).show()
             return
         }
-        Toast.makeText(this, R.string.update_check_started, Toast.LENGTH_LONG).show()
+        val message =
+            if (installNow) R.string.update_install_started else R.string.update_check_started
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
         Thread {
-            runCatching { UpdateChecker(applicationContext).checkNow(force = true) }
+            runCatching {
+                val checker = UpdateChecker(applicationContext)
+                if (installNow) checker.installNow() else checker.checkNow(force = true)
+            }
         }.start()
     }
 
     private fun showUpdateStatus() {
-        val status = config.updateStatus
-        textUpdateStatus.text = when {
-            config.updateUrl.isBlank() -> getString(R.string.update_status_disabled)
-            status.isBlank() -> getString(R.string.update_status_idle)
-            else -> getString(R.string.update_status_last, status)
+        val summary = UpdateSummary.of(config)
+        textUpdateStatus.text = buildString {
+            appendLine(getString(R.string.update_installed_version, summary.installedVersion))
+            if (summary.serverState == null) {
+                append(getString(R.string.update_status_disabled))
+            } else {
+                append(getString(R.string.update_server_state, summary.serverState))
+                summary.lastOutcome?.let {
+                    appendLine()
+                    append(getString(R.string.update_status_last, it))
+                }
+            }
+        }
+        // Only offered while automatic installation is off; with it on there is nothing waiting.
+        val pending = summary.pendingVersion
+        buttonInstallUpdate.visibility = if (pending == null) View.GONE else View.VISIBLE
+        if (pending != null) {
+            buttonInstallUpdate.text = getString(R.string.update_install_version, pending)
         }
     }
 

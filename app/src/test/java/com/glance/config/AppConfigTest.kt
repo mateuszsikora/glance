@@ -3,6 +3,7 @@ package com.glance.config
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.glance.content.ContentProfile
+import com.glance.update.UpdateCheckState
 import java.time.DayOfWeek
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -76,6 +77,29 @@ class AppConfigTest {
         config.requestedScreenOn = false
 
         assertFalse(AppConfig(context).requestedScreenOn)
+    }
+
+    @Test
+    fun automaticUpdatesDefaultToOnAndCanBeDisabled() {
+        assertTrue(AppConfig(context).autoUpdateEnabled)
+
+        AppConfig(context).autoUpdateEnabled = false
+
+        assertFalse(AppConfig(context).autoUpdateEnabled)
+    }
+
+    @Test
+    fun updateCheckStateSurvivesControllerRecreation() {
+        val state = UpdateCheckState(
+            checkedAt = 1_700_000_000_000L,
+            serverReachable = true,
+            availableVersionCode = 27,
+            availableVersionName = "1.5-27"
+        )
+
+        AppConfig(context).updateCheck = state
+
+        assertEquals(state, AppConfig(context).updateCheck)
     }
 
     @Test

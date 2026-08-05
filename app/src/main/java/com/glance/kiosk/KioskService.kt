@@ -248,12 +248,14 @@ class KioskService : Service() {
                     reloadConfig()
                 }
             },
-            onUpdateCheckRequested = {
+            onUpdateRequested = { installNow ->
                 // Off the HTTP worker: the check downloads and installs, which must not hold a
                 // request open or occupy one of the server's few threads.
                 updateCheckExecutor.execute {
-                    runCatching { UpdateChecker(applicationContext).checkNow(force = true) }
-                        .onFailure { Log.w(TAG, "Manual update check failed", it) }
+                    runCatching {
+                        val checker = UpdateChecker(applicationContext)
+                        if (installNow) checker.installNow() else checker.checkNow(force = true)
+                    }.onFailure { Log.w(TAG, "Manual update check failed", it) }
                 }
             }
         )

@@ -3,6 +3,7 @@ package com.glance.remote
 import com.glance.config.AppConfig
 import com.glance.content.ContentProfile
 import com.glance.settings.ConfigValidator
+import com.glance.update.UpdateSummary
 
 internal data class RemoteConfigSnapshot(
     val dashboardUrls: String,
@@ -30,7 +31,8 @@ internal data class RemoteConfigSnapshot(
     val mqttDiscoveryPrefix: String,
     val remoteConfigEnabled: Boolean,
     val updateUrl: String,
-    val updateStatus: String
+    val autoUpdateEnabled: Boolean,
+    val update: UpdateSummary
 )
 
 internal sealed class RemoteConfigUpdateResult {
@@ -69,7 +71,8 @@ internal class RemoteConfigUpdater(private val config: AppConfig) {
             mqttDiscoveryPrefix = config.mqttDiscoveryPrefix,
             remoteConfigEnabled = config.remoteConfigEnabled,
             updateUrl = config.updateUrl,
-            updateStatus = config.updateStatus
+            autoUpdateEnabled = config.autoUpdateEnabled,
+            update = UpdateSummary.of(config)
         )
     }
 
@@ -227,6 +230,7 @@ internal class RemoteConfigUpdater(private val config: AppConfig) {
         config.mqttDiscoveryPrefix = discoveryPrefix
         config.remoteConfigEnabled = parameters.hasCheckbox("remoteConfigEnabled")
         config.updateUrl = updateUrl
+        config.autoUpdateEnabled = parameters.hasCheckbox("autoUpdateEnabled")
 
         val pinChanged = newPin.isNotEmpty()
         if (pinChanged) config.setSettingsPin(newPin)

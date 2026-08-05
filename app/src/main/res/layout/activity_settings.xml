@@ -503,6 +503,14 @@
             android:textStyle="bold"
             android:layout_marginBottom="8dp" />
 
+        <TextView
+            android:id="@+id/textUpdateStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#FFB0B0B0"
+            android:textSize="13sp"
+            android:layout_marginBottom="12dp" />
+
         <EditText
             android:id="@+id/editUpdateUrl"
             android:layout_width="match_parent"
@@ -515,21 +523,36 @@
             android:padding="12dp"
             android:layout_marginBottom="8dp" />
 
-        <TextView
-            android:id="@+id/textUpdateStatus"
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/switchAutoUpdate"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textColor="#FFB0B0B0"
-            android:textSize="13sp"
+            android:text="@string/update_auto_label"
+            android:textColor="#FFFFFFFF"
             android:layout_marginBottom="8dp" />
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnCheckForUpdate"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-            android:layout_width="wrap_content"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/update_check_now"
-            android:layout_marginBottom="8dp" />
+            android:orientation="horizontal"
+            android:layout_marginBottom="8dp">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnCheckForUpdate"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:text="@string/update_check_now" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnInstallUpdate"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/update_install_now"
+                android:visibility="gone" />
+        </LinearLayout>
 
         <TextView
             android:layout_width="match_parent"
