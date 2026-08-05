@@ -27,8 +27,9 @@ RUN chmod +x /usr/local/bin/glance-updater
 ENV GLANCE_REPO=""
 ENV GLANCE_PUBLIC_URL=""
 ENV GLANCE_POLL_SECONDS=300
-ENV GLANCE_KEYSTORE=/keys/glance-release.jks
-ENV GLANCE_KEY_ALIAS=glance
+# Signing keys are not configured here: each is a directory under /keys, so adding a tablet with
+# its own key is a mount rather than another set of environment variables.
+ENV GLANCE_KEYS_DIR=/keys
 ENV GLANCE_OUT=/out
 ENV GLANCE_PORT=8080
 ENV GLANCE_KEEP=5

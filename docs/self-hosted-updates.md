@@ -56,13 +56,17 @@ it yourself in the next step.
 
 ## 2. Run the updater
 
+Each signing key is a directory under `keys/`, named however you like — the name becomes part of
+the URL the tablets fetch:
+
 ```sh
 cd tools/updater
-mkdir -p keys
-cp /path/to/glance-release.jks keys/
-printf '%s' 'your-keystore-password' > keys/keystore-password
-chmod 600 keys/*
-$EDITOR compose.yml          # set GLANCE_REPO and GLANCE_PUBLIC_URL
+mkdir -p keys/hallway
+cp /path/to/glance-release.jks keys/hallway/keystore
+printf '%s\n' 'glance'               > keys/hallway/alias
+printf '%s\n' 'your-key-password'    > keys/hallway/password
+chmod -R go-rwx keys
+$EDITOR compose.override.yml    # set GLANCE_PUBLIC_URL for your network
 docker compose up -d
 ```
 
@@ -70,24 +74,66 @@ No credentials are needed: release assets of a public repository are fetched ano
 run this against a fork you keep private, add a fine-grained read-only token with access to that
 one repository as `keys/github-token` and set `GLANCE_GITHUB_TOKEN_FILE` to point at it.
 
+`keys/` is gitignored in full, as is `compose.override.yml` — put anything specific to your own
+network or key material there rather than in `compose.yml`. If the keystore and the key have
+different passwords, add `keys/hallway/key-password`.
+
+Also write `keys/hallway/cert-sha256`, the certificate of the build already installed on that
+tablet. This is worth the one minute it takes. Signing with the wrong key is not a visible failure:
+the container signs happily, the manifest looks correct, and the tablet quietly declines the
+update, logging `Update is not signed by the installed certificate` where nobody is watching. With
+the fingerprint recorded, that key is refused at startup instead. Read it off your signing key
+with:
+
+```sh
+keytool -list -v -keystore keys/hallway/keystore -alias glance | grep SHA256:
+```
+
+Provision every tablet with a dedicated release key, generated once and kept backed up. A debug
+keystore will physically work, but it is generated per machine and regenerated whenever it is
+deleted, so it is easy to end up unable to reproduce the key a tablet was provisioned with — and a
+Device Owner installation cannot be moved to a different certificate without a factory reset.
+
 The container polls the newest release, verifies the published checksum, signs the APK with your
-key, verifies its own output, and writes:
+key, verifies its own output and its signing certificate, and writes:
 
 ```
-http://<host>:8080/glance-update.json
-http://<host>:8080/glance-<versionCode>.apk
+http://<host>:8080/<key>/glance-update.json
+http://<host>:8080/<key>/glance-<versionCode>.apk
 ```
 
 `glance-update.json` is written atomically and last, so a tablet never reads a manifest pointing at
 an APK that is still being copied. The five most recent APKs are kept so a tablet that is
 mid-download does not lose its URL.
 
-## 3. Point the tablets at it
+## Tablets with different keys
 
-In tablet settings, or in the remote configuration panel under **Self-hosted updates**, set:
+Android accepts an update only from the certificate already installed, so tablets provisioned with
+different keys need separately signed copies of the same build. Add a directory per key:
 
 ```
-http://<host>:8080/glance-update.json
+keys/hallway/     ->  http://<host>:8080/hallway/glance-update.json
+keys/kitchen/     ->  http://<host>:8080/kitchen/glance-update.json
+```
+
+The release is downloaded once and signed once per key, so another tablet costs a signature rather
+than another copy of the build. Point each tablet at its own manifest URL.
+
+Keys are independent. One that is misconfigured is reported at startup and skipped, and the others
+carry on being served; the same is true of a signing failure later, which is retried on the next
+poll. Correspondingly, a tablet whose key is broken silently stops receiving updates — so read the
+startup log after adding one, and set `cert-sha256` so a mixed-up key cannot go unnoticed.
+
+If you have not provisioned the tablets yet, give them all the same key instead. It is free to do
+now and impossible to change later without a factory reset.
+
+## 3. Point the tablets at it
+
+In tablet settings, or in the remote configuration panel under **Self-hosted updates**, set the
+manifest belonging to that tablet's key:
+
+```
+http://<host>:8080/<key>/glance-update.json
 ```
 
 Leave it blank to disable update checks entirely. Glance checks hourly and reports the last outcome
@@ -106,7 +152,7 @@ The updater generates this, but any tool that produces the same shape will do:
 {
   "versionCode": 412,
   "versionName": "1.4-412",
-  "url": "http://192.168.1.10:8080/glance-412.apk",
+  "url": "http://192.168.1.10:8080/hallway/glance-412.apk",
   "sha256": "5f2c…"
 }
 ```
