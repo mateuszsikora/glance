@@ -1,0 +1,28 @@
+# Self-hosted Glance updater. See docs/self-hosted-updates.md for the full procedure.
+#
+# Expected layout next to this file:
+#   keys/glance-release.jks     the signing key that also signed the tablets' installed build
+#   keys/keystore-password      its password, single line
+#   keys/github-token           optional, only needed while the repository is private
+services:
+  glance-updater:
+    build: .
+    restart: unless-stopped
+    volumes:
+      - ./keys:/keys:ro
+      - glance-out:/out
+    environment:
+      GLANCE_REPO: mateuszsikora/glance
+      # The address tablets use to reach this container. It ends up verbatim in the manifest, so
+      # it must be resolvable from the tablet, not from this host.
+      GLANCE_PUBLIC_URL: http://192.168.1.10:8080
+      GLANCE_KEY_ALIAS: glance
+      GLANCE_POLL_SECONDS: 300
+      # Drop this line once the repository is public; assets are then fetched unauthenticated.
+      GLANCE_GITHUB_TOKEN_FILE: /keys/github-token
+    ports:
+      # Local network only. This port serves installable APKs and must not be exposed publicly.
+      - "8080:8080"
+
+volumes:
+  glance-out:

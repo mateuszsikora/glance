@@ -18,6 +18,20 @@ val keystoreProperties = Properties().apply {
     }
 }
 
+// Baseline identity of a hand-built release. Self-hosted update builds override both values so
+// every published artifact carries a distinct, monotonically increasing versionCode; Android
+// refuses to install an update that does not increase it. See docs/self-hosted-updates.md.
+val baseVersionCode = 5
+val baseVersionName = "1.4"
+val releaseVersionCode = providers.gradleProperty("versionCode")
+    .map(String::toInt)
+    .getOrElse(baseVersionCode)
+// An overridden versionCode without an explicit name would otherwise publish every build under
+// the same versionName, leaving the tablet's settings screen unable to tell them apart.
+val releaseVersionName = providers.gradleProperty("versionName").getOrElse(
+    if (releaseVersionCode == baseVersionCode) baseVersionName else "$baseVersionName-$releaseVersionCode"
+)
+
 android {
     namespace = "com.glance"
     compileSdk = 37
@@ -26,8 +40,8 @@ android {
         applicationId = "com.glance"
         minSdk = 26
         targetSdk = 34
-        versionCode = 5
-        versionName = "1.4"
+        versionCode = releaseVersionCode
+        versionName = releaseVersionName
     }
 
     signingConfigs {

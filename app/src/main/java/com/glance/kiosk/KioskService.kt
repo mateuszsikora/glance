@@ -24,6 +24,8 @@ import com.glance.mqtt.MqttReportedState
 import com.glance.mqtt.MqttStateManager
 import com.glance.remote.RemoteConfigServer
 import com.glance.screen.ScheduleManager
+import com.glance.update.UpdateChecker
+import java.util.concurrent.Executors
 
 /**
  * Foreground owner of all control-plane work: MQTT, screen commands and scheduling.
@@ -34,6 +36,7 @@ import com.glance.screen.ScheduleManager
 class KioskService : Service() {
 
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val updateCheckExecutor = Executors.newSingleThreadExecutor()
 
     private lateinit var config: AppConfig
     private lateinit var powerManager: PowerManager
@@ -129,6 +132,8 @@ class KioskService : Service() {
         mqttStateManager = null
         remoteConfigServer?.stop()
         remoteConfigServer = null
+        // shutdown(), not shutdownNow(): an in-flight installation should be allowed to finish.
+        updateCheckExecutor.shutdown()
         releaseWakeLock()
         if (initialized) {
             unregisterReceiver(screenStateReceiver)
@@ -234,13 +239,24 @@ class KioskService : Service() {
         }
         if (remoteConfigServer != null) return
 
-        val server = RemoteConfigServer(config) {
-            mainHandler.post {
-                if (destroyed) return@post
-                sendBroadcast(Intent(MainActivity.ACTION_RELOAD_UI).setPackage(packageName))
-                reloadConfig()
+        val server = RemoteConfigServer(
+            config = config,
+            onConfigChanged = {
+                mainHandler.post {
+                    if (destroyed) return@post
+                    sendBroadcast(Intent(MainActivity.ACTION_RELOAD_UI).setPackage(packageName))
+                    reloadConfig()
+                }
+            },
+            onUpdateCheckRequested = {
+                // Off the HTTP worker: the check downloads and installs, which must not hold a
+                // request open or occupy one of the server's few threads.
+                updateCheckExecutor.execute {
+                    runCatching { UpdateChecker(applicationContext).checkNow(force = true) }
+                        .onFailure { Log.w(TAG, "Manual update check failed", it) }
+                }
             }
-        }
+        )
         try {
             server.start()
             remoteConfigServer = server

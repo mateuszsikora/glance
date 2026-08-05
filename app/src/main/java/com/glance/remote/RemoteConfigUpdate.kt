@@ -28,7 +28,9 @@ internal data class RemoteConfigSnapshot(
     val mqttPasswordUnreadable: Boolean,
     val mqttDeviceName: String,
     val mqttDiscoveryPrefix: String,
-    val remoteConfigEnabled: Boolean
+    val remoteConfigEnabled: Boolean,
+    val updateUrl: String,
+    val updateStatus: String
 )
 
 internal sealed class RemoteConfigUpdateResult {
@@ -65,7 +67,9 @@ internal class RemoteConfigUpdater(private val config: AppConfig) {
             mqttPasswordUnreadable = password.decryptionFailed,
             mqttDeviceName = config.mqttDeviceName,
             mqttDiscoveryPrefix = config.mqttDiscoveryPrefix,
-            remoteConfigEnabled = config.remoteConfigEnabled
+            remoteConfigEnabled = config.remoteConfigEnabled,
+            updateUrl = config.updateUrl,
+            updateStatus = config.updateStatus
         )
     }
 
@@ -164,6 +168,11 @@ internal class RemoteConfigUpdater(private val config: AppConfig) {
             return error("MQTT discovery prefix contains invalid characters.")
         }
 
+        val updateUrl = parameters["updateUrl"].orEmpty().trim()
+        if (!ConfigValidator.isValidUpdateUrl(updateUrl)) {
+            return error("Update manifest URL must use http:// or https://.")
+        }
+
         val newPin = parameters["newPin"].orEmpty().trim()
         val confirmPin = parameters["confirmPin"].orEmpty().trim()
         if (newPin.isNotEmpty() && !ConfigValidator.isValidSettingsPin(newPin)) {
@@ -217,6 +226,7 @@ internal class RemoteConfigUpdater(private val config: AppConfig) {
             .ifBlank { "Glance Tablet" }
         config.mqttDiscoveryPrefix = discoveryPrefix
         config.remoteConfigEnabled = parameters.hasCheckbox("remoteConfigEnabled")
+        config.updateUrl = updateUrl
 
         val pinChanged = newPin.isNotEmpty()
         if (pinChanged) config.setSettingsPin(newPin)

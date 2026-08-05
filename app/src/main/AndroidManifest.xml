@@ -71,6 +71,12 @@
             android:name=".screen.ScheduleReceiver"
             android:exported="false" />
 
+        <!-- Declared rather than registered at runtime: a self-update kills the process, so a
+             runtime receiver would be gone before PackageInstaller reported a failure. -->
+        <receiver
+            android:name=".update.UpdateInstallReceiver"
+            android:exported="false" />
+
         <service
             android:name=".kiosk.KioskService"
             android:exported="false"

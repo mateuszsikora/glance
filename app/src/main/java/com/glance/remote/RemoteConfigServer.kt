@@ -12,6 +12,7 @@ import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketException
+import java.net.SocketTimeoutException
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
@@ -26,9 +27,11 @@ import java.util.concurrent.atomic.AtomicInteger
 class RemoteConfigServer(
     private val config: AppConfig,
     private val port: Int = RemoteConfigAddress.PORT,
+    private val onUpdateCheckRequested: () -> Unit = {},
+    // Kept last so that a trailing lambda still binds to the reload callback.
     private val onConfigChanged: () -> Unit
 ) {
-    private val handler = RemoteConfigHttpHandler(config, onConfigChanged)
+    private val handler = RemoteConfigHttpHandler(config, onConfigChanged, onUpdateCheckRequested)
     private val workerNumber = AtomicInteger()
     private val workers = ThreadPoolExecutor(
         2,
@@ -124,6 +127,8 @@ class RemoteConfigServer(
                 )
                 runCatching { response.afterSend?.invoke() }
                     .onFailure { Log.w(TAG, "Remote configuration post-response action failed", it) }
+            } catch (_: RemoteHttpIdleException) {
+                Log.d(TAG, "Client connected without sending a request; closing quietly")
             } catch (e: RemoteHttpException) {
                 runCatching {
                     RemoteHttpCodec.writeResponse(
@@ -189,6 +194,7 @@ internal data class RemoteHttpResponse(
 internal class RemoteConfigHttpHandler(
     private val config: AppConfig,
     private val onConfigChanged: () -> Unit,
+    private val onUpdateCheckRequested: () -> Unit = {},
     private val now: () -> Long = System::currentTimeMillis
 ) {
     private data class Session(
@@ -216,6 +222,7 @@ internal class RemoteConfigHttpHandler(
             "GET" to "/" -> showHome(request)
             "POST" to "/login" -> login(request)
             "POST" to "/save" -> save(request)
+            "POST" to "/update-check" -> checkForUpdate(request)
             "POST" to "/logout" -> logout(request)
             else -> RemoteHttpResponse.html(404, page("Not found", "The requested page does not exist."))
         }
@@ -309,6 +316,30 @@ internal class RemoteConfigHttpHandler(
                 response.copy(afterSend = onConfigChanged)
             }
         }
+    }
+
+    /**
+     * Runs an update check immediately instead of waiting for the watchdog's hourly timer.
+     *
+     * The check runs on its own thread and the browser is answered at once: a download over a slow
+     * link would otherwise hold this request open well past the server's own socket timeouts. The
+     * outcome shows up in the status line on the next page load.
+     */
+    private fun checkForUpdate(request: RemoteHttpRequest): RemoteHttpResponse {
+        val session = sessionFor(request) ?: return RemoteHttpResponse.redirect("/")
+        val parameters = formParameters(request)
+        if (!constantTimeEquals(session.csrfToken, parameters["csrf"].orEmpty())) {
+            return RemoteHttpResponse.html(403, page("Request rejected", "Invalid form token."))
+        }
+
+        val notice = if (config.updateUrl.isBlank()) {
+            "Set an update manifest URL before checking."
+        } else {
+            onUpdateCheckRequested()
+            "Checking for updates. Reload this page in a moment for the result."
+        }
+        synchronized(sessionLock) { session.notice = notice }
+        return RemoteHttpResponse.redirect("/")
     }
 
     private fun logout(request: RemoteHttpRequest): RemoteHttpResponse {
@@ -473,6 +504,11 @@ internal class RemoteConfigHttpHandler(
             values.mqttPasswordConfigured -> "A password is stored. Leave blank to keep it."
             else -> "No password is stored."
         }
+        val updateStatusText = when {
+            values.updateUrl.isBlank() -> "Update checks are disabled."
+            values.updateStatus.isBlank() -> "Waiting for the first update check."
+            else -> "Last check: ${values.updateStatus}"
+        }
         return page(
             title = "Settings",
             message = message,
@@ -503,6 +539,7 @@ internal class RemoteConfigHttpHandler(
                       <a href="#brightness">Brightness</a>
                       <a href="#screen">Screen schedule</a>
                       <a href="#mqtt">Home Assistant MQTT</a>
+                      <a href="#updates">Self-hosted updates</a>
                       <a href="#access">Remote access &amp; PIN</a>
                       <div class="nav-note"><span aria-hidden="true">⌁</span><p>Connected directly to your tablet over the local network.</p></div>
                     </nav>
@@ -602,8 +639,22 @@ internal class RemoteConfigHttpHandler(
                         </div>
                       </section>
 
+                      <section id="updates" class="card settings-card">
+                        ${sectionHeading("06", "Self-hosted updates", "Point Glance at an update manifest you publish yourself.")}
+                        <div class="section-body">
+                          <div class="field"><label for="updateUrl">Update manifest URL <small>blank disables updates</small></label>
+                            <input id="updateUrl" name="updateUrl" value="${value("updateUrl", values.updateUrl)}" placeholder="http://192.168.1.10:8080/glance-update.json" spellcheck="false"></div>
+                          <p class="hint">${escapeHtml(updateStatusText)}</p>
+                          <p class="hint">Glance checks hourly on its own. Use the button below right after publishing a build; it also retries a version that was abandoned after repeated failures. Save the URL first — the check reads the stored value.</p>
+                          <div class="inline-warning"><span aria-hidden="true">!</span><p>Updates install silently and require Device Owner. Only an APK signed with the certificate of the installed build is accepted.</p></div>
+                          <!-- formaction retargets the surrounding settings form, so this needs no
+                               nested form (invalid HTML) and no script (blocked by the CSP). -->
+                          <button class="ghost" type="submit" formaction="/update-check">Check for updates now</button>
+                        </div>
+                      </section>
+
                       <section id="access" class="card settings-card">
-                        ${sectionHeading("06", "Remote access &amp; PIN", "Control access to this page and rotate its PIN.")}
+                        ${sectionHeading("07", "Remote access &amp; PIN", "Control access to this page and rotate its PIN.")}
                         <div class="section-body">
                           ${checkbox("remoteConfigEnabled", "Keep remote configuration enabled", checked("remoteConfigEnabled", values.remoteConfigEnabled))}
                           <div class="inline-warning"><span aria-hidden="true">!</span><p>Turning this off closes the panel after saving. It can only be re-enabled on the tablet.</p></div>
@@ -876,7 +927,15 @@ internal object RemoteHttpCodec {
         var matched = 0
         val delimiter = byteArrayOf(13, 10, 13, 10)
         while (matched < delimiter.size) {
-            val value = input.read()
+            val value = try {
+                input.read()
+            } catch (e: SocketTimeoutException) {
+                // Browsers routinely preconnect and then send nothing. Such a socket carries no
+                // request, so it gets no response: the browser may later take it from its pool for
+                // a real request and would read whatever was left on it as the answer to that.
+                if (headerBytes.size() == 0) throw RemoteHttpIdleException()
+                throw RemoteHttpException(408, "Request timed out")
+            }
             if (value == -1) throw RemoteHttpException(400, "Incomplete HTTP request")
             headerBytes.write(value)
             if (headerBytes.size() > MAX_HEADER_BYTES) {
@@ -972,6 +1031,9 @@ internal object RemoteHttpCodec {
 }
 
 internal class RemoteHttpException(val status: Int, override val message: String) : IOException(message)
+
+/** A client connected but never began a request, so there is nothing to answer. */
+internal class RemoteHttpIdleException : IOException()
 
 private fun constantTimeEquals(left: String, right: String): Boolean = MessageDigest.isEqual(
     left.toByteArray(StandardCharsets.UTF_8),

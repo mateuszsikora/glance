@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.util.Base64
 import com.glance.content.ContentProfile
+import com.glance.update.UpdateAttempts
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
@@ -251,6 +252,46 @@ class AppConfig(context: Context) {
         get() = prefs.getBoolean(KEY_REMOTE_CONFIG_ENABLED, false)
         set(value) = prefs.edit().putBoolean(KEY_REMOTE_CONFIG_ENABLED, value).apply()
 
+    // --- Self-hosted updates ---
+
+    /** Manifest URL published by a self-hosted updater. Blank disables update checks entirely. */
+    var updateUrl: String
+        get() = prefs.getString(KEY_UPDATE_URL, "").orEmpty()
+        set(value) = prefs.edit().putString(KEY_UPDATE_URL, value.trim()).apply()
+
+    /** Last outcome, shown in settings because a wall-mounted tablet has no other feedback path. */
+    var updateStatus: String
+        get() = prefs.getString(KEY_UPDATE_STATUS, "").orEmpty()
+        set(value) = prefs.edit().putString(KEY_UPDATE_STATUS, value).apply()
+
+    /**
+     * Attempts are written before a session is committed, because a successful self-update kills
+     * the process before any result can be recorded. [clearSettledUpdateAttempts] resolves that on
+     * the next start.
+     */
+    var updateAttempts: UpdateAttempts
+        get() = UpdateAttempts(
+            versionCode = prefs.getInt(KEY_UPDATE_ATTEMPT_VERSION, 0),
+            count = prefs.getInt(KEY_UPDATE_ATTEMPT_COUNT, 0)
+        )
+        set(value) {
+            // commit() so a counted attempt survives the process death that installation causes.
+            prefs.edit()
+                .putInt(KEY_UPDATE_ATTEMPT_VERSION, value.versionCode)
+                .putInt(KEY_UPDATE_ATTEMPT_COUNT, value.count)
+                .commit()
+        }
+
+    /** Clears attempt bookkeeping once the running build is at or beyond the attempted version. */
+    fun clearSettledUpdateAttempts(installedVersionCode: Int) {
+        if (updateAttempts.versionCode in 1..installedVersionCode) {
+            prefs.edit()
+                .remove(KEY_UPDATE_ATTEMPT_VERSION)
+                .remove(KEY_UPDATE_ATTEMPT_COUNT)
+                .apply()
+        }
+    }
+
     // --- Kiosk lifecycle ---
 
     var isKioskSuspended: Boolean
@@ -392,6 +433,10 @@ class AppConfig(context: Context) {
         private const val KEY_RELOAD_INTERVAL = "reload_interval_hours"
         private const val KEY_HEALTH_CHECK_INTERVAL = "health_check_interval_seconds"
         private const val KEY_REMOTE_CONFIG_ENABLED = "remote_config_enabled"
+        private const val KEY_UPDATE_URL = "update_url"
+        private const val KEY_UPDATE_STATUS = "update_status"
+        private const val KEY_UPDATE_ATTEMPT_VERSION = "update_attempt_version"
+        private const val KEY_UPDATE_ATTEMPT_COUNT = "update_attempt_count"
         private const val KEY_SETTINGS_PIN = "settings_pin"
         private const val KEY_SETTINGS_PIN_HASH = "settings_pin_hash"
         private const val KEY_SETTINGS_PIN_SALT = "settings_pin_salt"

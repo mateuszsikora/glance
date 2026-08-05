@@ -30,6 +30,7 @@ import com.glance.kiosk.KioskService
 import com.glance.kiosk.LockTaskHelper
 import com.glance.remote.RemoteConfigAddress
 import com.glance.screen.ScheduleManager
+import com.glance.update.UpdateChecker
 import com.glance.watchdog.WatchdogService
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.chip.Chip
@@ -72,6 +73,8 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var editMqttDiscoveryPrefix: EditText
     private lateinit var switchRemoteConfig: SwitchCompat
     private lateinit var textRemoteConfigAddress: TextView
+    private lateinit var editUpdateUrl: EditText
+    private lateinit var textUpdateStatus: TextView
     private lateinit var editPin: EditText
     private lateinit var textDebugInfo: TextView
     private var awaitingExactAlarmAccess = false
@@ -219,6 +222,11 @@ class SettingsActivity : AppCompatActivity() {
         editMqttDiscoveryPrefix = findViewById(R.id.editMqttDiscoveryPrefix)
         switchRemoteConfig = findViewById(R.id.switchRemoteConfig)
         textRemoteConfigAddress = findViewById(R.id.textRemoteConfigAddress)
+        editUpdateUrl = findViewById(R.id.editUpdateUrl)
+        textUpdateStatus = findViewById(R.id.textUpdateStatus)
+        findViewById<MaterialButton>(R.id.btnCheckForUpdate).setOnClickListener {
+            checkForUpdateNow()
+        }
         editPin = findViewById(R.id.editPin)
         textDebugInfo = findViewById(R.id.textDebugInfo)
     }
@@ -265,6 +273,8 @@ class SettingsActivity : AppCompatActivity() {
         switchRemoteConfig.setOnCheckedChangeListener { _, enabled ->
             showRemoteConfigAddress(enabled)
         }
+        editUpdateUrl.setText(config.updateUrl)
+        showUpdateStatus()
         editPin.setText("")
     }
 
@@ -414,6 +424,12 @@ class SettingsActivity : AppCompatActivity() {
             return
         }
 
+        val updateUrl = editUpdateUrl.text.toString().trim()
+        if (!ConfigValidator.isValidUpdateUrl(updateUrl)) {
+            Toast.makeText(this, R.string.update_url_invalid, Toast.LENGTH_LONG).show()
+            return
+        }
+
         val newPin = editPin.text.toString().trim()
         if (newPin.isNotEmpty() && !ConfigValidator.isValidSettingsPin(newPin)) {
             Toast.makeText(
@@ -484,6 +500,7 @@ class SettingsActivity : AppCompatActivity() {
         config.mqttDeviceName = editMqttDeviceName.text.toString().trim().ifBlank { "Glance Tablet" }
         config.mqttDiscoveryPrefix = discoveryPrefix
         config.remoteConfigEnabled = switchRemoteConfig.isChecked
+        config.updateUrl = updateUrl
 
         if (newPin.isNotBlank()) {
             config.setSettingsPin(newPin)
@@ -730,6 +747,30 @@ class SettingsActivity : AppCompatActivity() {
                 getString(R.string.remote_config_no_address_help)
             !enabled -> getString(R.string.remote_config_ready_help, urls.joinToString("\n"))
             else -> urls.joinToString("\n")
+        }
+    }
+
+    /**
+     * Reads the stored URL rather than the text field: the check is a separate action from saving,
+     * so an unsaved edit must not silently decide where the tablet fetches an APK from.
+     */
+    private fun checkForUpdateNow() {
+        if (config.updateUrl.isBlank()) {
+            Toast.makeText(this, R.string.update_check_needs_url, Toast.LENGTH_LONG).show()
+            return
+        }
+        Toast.makeText(this, R.string.update_check_started, Toast.LENGTH_LONG).show()
+        Thread {
+            runCatching { UpdateChecker(applicationContext).checkNow(force = true) }
+        }.start()
+    }
+
+    private fun showUpdateStatus() {
+        val status = config.updateStatus
+        textUpdateStatus.text = when {
+            config.updateUrl.isBlank() -> getString(R.string.update_status_disabled)
+            status.isBlank() -> getString(R.string.update_status_idle)
+            else -> getString(R.string.update_status_last, status)
         }
     }
 
