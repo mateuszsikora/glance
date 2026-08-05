@@ -43,6 +43,8 @@ Glance is a single-module native Android application written in Kotlin. It suppo
 
 Device Owner provisioning gives Glance powerful kiosk controls and may require a factory reset. Updates must retain both the Android application ID and signing certificate. Forks should choose their own application ID and signing strategy before provisioning the first device.
 
+That constraint decides how the project publishes. Releases carry an **unsigned** APK and always will: because an installed Device Owner accepts an update only from the certificate it was provisioned with, a signed release would bind every installation to one key held by this project, and losing or rotating that key would require a factory reset on every device using it. Each operator therefore signs with their own key, which also means the project holds no key whose compromise would reach an installed device. [Self-hosted updates](self-hosted-updates.md) describes the signing and distribution path built on this.
+
 Vendor battery management can still interfere with long-running services. Deployment testing should cover boot, screen transitions, network loss and recovery, WebView updates, clock changes, and application updates on the target hardware.
 
 ## Verification
