@@ -1,8 +1,12 @@
 # Self-hosted Glance updater. See docs/self-hosted-updates.md for the full procedure.
 #
-# Expected layout next to this file:
-#   keys/glance-release.jks     the signing key that also signed the tablets' installed build
-#   keys/keystore-password      its password, single line
+# One directory per tablet signing key, next to this file:
+#   keys/<name>/keystore        the key that also signed that tablet's installed build
+#   keys/<name>/alias           the key alias inside it
+#   keys/<name>/password        the keystore password, single line
+#   keys/<name>/cert-sha256     optional, the certificate that tablet expects
+#
+# Each key publishes its own manifest at <GLANCE_PUBLIC_URL>/<name>/glance-update.json.
 #
 # Machine-specific values belong in compose.override.yml, which is gitignored and merged
 # automatically. Keep this file describing the general case.
@@ -15,14 +19,10 @@ services:
       - glance-out:/out
     environment:
       GLANCE_REPO: mateuszsikora/glance
-      # The address tablets use to reach this container. It ends up verbatim in the manifest, so
-      # it must be resolvable from the tablet, not from this host.
+      # The address tablets use to reach this container. It ends up verbatim in the manifests, so
+      # it must be resolvable from the tablets, not from this host.
       GLANCE_PUBLIC_URL: http://192.168.1.10:8080
-      GLANCE_KEY_ALIAS: glance
       GLANCE_POLL_SECONDS: 300
-      # The certificate of the build already installed on the tablets. Signing with any other key
-      # produces updates they silently refuse, so setting this stops the container instead.
-      # GLANCE_EXPECT_CERT_SHA256: ""
       # Release assets of a public repository are fetched without credentials. A fork kept private
       # needs a fine-grained read-only token instead:
       #   GLANCE_GITHUB_TOKEN_FILE: /keys/github-token
