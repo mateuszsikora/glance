@@ -22,7 +22,7 @@ val keystoreProperties = Properties().apply {
 // every published artifact carries a distinct, monotonically increasing versionCode; Android
 // refuses to install an update that does not increase it. See docs/self-hosted-updates.md.
 val baseVersionCode = 5
-val baseVersionName = "1.4"
+val baseVersionName = "1.5"
 val releaseVersionCode = providers.gradleProperty("versionCode")
     .map(String::toInt)
     .getOrElse(baseVersionCode)
