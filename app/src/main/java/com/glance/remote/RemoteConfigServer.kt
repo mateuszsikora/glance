@@ -27,11 +27,11 @@ import java.util.concurrent.atomic.AtomicInteger
 class RemoteConfigServer(
     private val config: AppConfig,
     private val port: Int = RemoteConfigAddress.PORT,
-    private val onUpdateCheckRequested: () -> Unit = {},
+    private val onUpdateRequested: (installNow: Boolean) -> Unit = {},
     // Kept last so that a trailing lambda still binds to the reload callback.
     private val onConfigChanged: () -> Unit
 ) {
-    private val handler = RemoteConfigHttpHandler(config, onConfigChanged, onUpdateCheckRequested)
+    private val handler = RemoteConfigHttpHandler(config, onConfigChanged, onUpdateRequested)
     private val workerNumber = AtomicInteger()
     private val workers = ThreadPoolExecutor(
         2,
@@ -194,7 +194,7 @@ internal data class RemoteHttpResponse(
 internal class RemoteConfigHttpHandler(
     private val config: AppConfig,
     private val onConfigChanged: () -> Unit,
-    private val onUpdateCheckRequested: () -> Unit = {},
+    private val onUpdateRequested: (installNow: Boolean) -> Unit = {},
     private val now: () -> Long = System::currentTimeMillis
 ) {
     private data class Session(
@@ -222,7 +222,8 @@ internal class RemoteConfigHttpHandler(
             "GET" to "/" -> showHome(request)
             "POST" to "/login" -> login(request)
             "POST" to "/save" -> save(request)
-            "POST" to "/update-check" -> checkForUpdate(request)
+            "POST" to "/update-check" -> requestUpdate(request, installNow = false)
+            "POST" to "/update-install" -> requestUpdate(request, installNow = true)
             "POST" to "/logout" -> logout(request)
             else -> RemoteHttpResponse.html(404, page("Not found", "The requested page does not exist."))
         }
@@ -319,13 +320,17 @@ internal class RemoteConfigHttpHandler(
     }
 
     /**
-     * Runs an update check immediately instead of waiting for the watchdog's hourly timer.
+     * Contacts the update server immediately instead of waiting for the watchdog's hourly timer,
+     * either to refresh what is reported ([installNow] false) or to install what is on offer.
      *
-     * The check runs on its own thread and the browser is answered at once: a download over a slow
+     * The work runs on its own thread and the browser is answered at once: a download over a slow
      * link would otherwise hold this request open well past the server's own socket timeouts. The
-     * outcome shows up in the status line on the next page load.
+     * outcome shows up in the status lines on the next page load.
      */
-    private fun checkForUpdate(request: RemoteHttpRequest): RemoteHttpResponse {
+    private fun requestUpdate(
+        request: RemoteHttpRequest,
+        installNow: Boolean
+    ): RemoteHttpResponse {
         val session = sessionFor(request) ?: return RemoteHttpResponse.redirect("/")
         val parameters = formParameters(request)
         if (!constantTimeEquals(session.csrfToken, parameters["csrf"].orEmpty())) {
@@ -335,8 +340,12 @@ internal class RemoteConfigHttpHandler(
         val notice = if (config.updateUrl.isBlank()) {
             "Set an update manifest URL before checking."
         } else {
-            onUpdateCheckRequested()
-            "Checking for updates. Reload this page in a moment for the result."
+            onUpdateRequested(installNow)
+            if (installNow) {
+                "Installing. The tablet restarts into the new build if it is accepted."
+            } else {
+                "Checking for updates. Reload this page in a moment for the result."
+            }
         }
         synchronized(sessionLock) { session.notice = notice }
         return RemoteHttpResponse.redirect("/")
@@ -504,10 +513,11 @@ internal class RemoteConfigHttpHandler(
             values.mqttPasswordConfigured -> "A password is stored. Leave blank to keep it."
             else -> "No password is stored."
         }
-        val updateStatusText = when {
-            values.updateUrl.isBlank() -> "Update checks are disabled."
-            values.updateStatus.isBlank() -> "Waiting for the first update check."
-            else -> "Last check: ${values.updateStatus}"
+        val updateStatus = buildString {
+            append(statusRow("Installed version", values.update.installedVersion))
+            values.update.serverState?.let { append(statusRow("Update server", it)) }
+                ?: append(statusRow("Update checks", "Disabled"))
+            values.update.lastOutcome?.let { append(statusRow("Last check", it)) }
         }
         return page(
             title = "Settings",
@@ -531,6 +541,10 @@ internal class RemoteConfigHttpHandler(
                 </div>
                 <form id="remote-settings-form" method="post" action="/save" accept-charset="UTF-8">
                   <input type="hidden" name="csrf" value="${escapeHtml(session.csrfToken)}">
+                  <!-- Pressing Enter in a field submits the form's first submit button. Without
+                       this one that would be an update button further down, so a stray Enter would
+                       contact the update server instead of saving. -->
+                  <button type="submit" class="default-submit" tabindex="-1" aria-hidden="true"></button>
                   <div class="settings-layout">
                     <nav class="section-nav card" aria-label="Settings sections">
                       <p class="nav-title">On this page</p>
@@ -642,14 +656,23 @@ internal class RemoteConfigHttpHandler(
                       <section id="updates" class="card settings-card">
                         ${sectionHeading("06", "Self-hosted updates", "Point Glance at an update manifest you publish yourself.")}
                         <div class="section-body">
+                          <dl class="status-list">$updateStatus</dl>
                           <div class="field"><label for="updateUrl">Update manifest URL <small>blank disables updates</small></label>
                             <input id="updateUrl" name="updateUrl" value="${value("updateUrl", values.updateUrl)}" placeholder="http://192.168.1.10:8080/glance-update.json" spellcheck="false"></div>
-                          <p class="hint">${escapeHtml(updateStatusText)}</p>
-                          <p class="hint">Glance checks hourly on its own. Use the button below right after publishing a build; it also retries a version that was abandoned after repeated failures. Save the URL first — the check reads the stored value.</p>
+                          ${checkbox("autoUpdateEnabled", "Install newer builds automatically", checked("autoUpdateEnabled", values.autoUpdateEnabled))}
+                          <p class="hint">Glance contacts the server hourly either way. With this off it only reports what is on offer and waits for the install button below.</p>
+                          <p class="hint">Use the buttons right after publishing a build; they also retry a version that was abandoned after repeated failures. Save the URL first — both read the stored value, not the field above.</p>
                           <div class="inline-warning"><span aria-hidden="true">!</span><p>Updates install silently and require Device Owner. Only an APK signed with the certificate of the installed build is accepted.</p></div>
-                          <!-- formaction retargets the surrounding settings form, so this needs no
+                          <!-- formaction retargets the surrounding settings form, so these need no
                                nested form (invalid HTML) and no script (blocked by the CSP). -->
-                          <button class="ghost" type="submit" formaction="/update-check">Check for updates now</button>
+                          <div class="button-row">
+                            <button class="ghost" type="submit" formaction="/update-check">Check for updates now</button>${
+        values.update.pendingVersion?.let {
+            "\n                            <button class=\"primary\" type=\"submit\" formaction=\"/update-install\">" +
+                "Install ${escapeHtml(it)}</button>"
+        }.orEmpty()
+    }
+                          </div>
                         </div>
                       </section>
 
@@ -707,6 +730,10 @@ internal class RemoteConfigHttpHandler(
             "</textarea>" +
             "</div>"
     }
+
+    /** One read-only fact inside a `.status-list`. */
+    private fun statusRow(label: String, value: String): String =
+        "<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>"
 
     private fun sectionHeading(number: String, title: String, description: String): String = """
         <div class="section-heading">
@@ -848,6 +875,10 @@ internal class RemoteConfigHttpHandler(
                 .toggle-row input:checked + .toggle-track::after { left:20px; background:white; }
                 .toggle-row input:focus-visible + .toggle-track { outline:2px solid var(--blue); outline-offset:3px; }
                 .toggle-label { color:#e1e8ed; font-size:.88rem; font-weight:650; }
+                .status-list { display:grid; gap:1px; margin:0 0 20px; border:1px solid var(--border); border-radius:12px; background:var(--border); overflow:hidden; }
+                .status-list > div { display:flex; flex-wrap:wrap; align-items:baseline; justify-content:space-between; gap:10px; padding:11px 14px; background:var(--surface-raised); }
+                .status-list dt { color:var(--muted); font-size:.78rem; font-weight:650; }
+                .status-list dd { margin:0; font-size:.84rem; font-weight:650; }
                 .inline-warning { display:flex; align-items:flex-start; gap:10px; margin:14px 0 20px; color:#e8c66a; }
                 .inline-warning span,.security-note > span { display:grid; place-items:center; flex:0 0 22px; height:22px; border:1px solid rgba(251,191,36,.35); border-radius:50%; font-size:.72rem; font-weight:800; }
                 .inline-warning p { margin:1px 0 0; font-size:.78rem; line-height:1.5; }
@@ -859,6 +890,8 @@ internal class RemoteConfigHttpHandler(
                 .ghost { color:#c8d2da; background:var(--surface); border:1px solid var(--border); }
                 .ghost:hover { color:white; border-color:var(--border-strong); background:var(--surface-raised); }
                 .small-button { min-height:34px; padding:6px 11px; font-size:.78rem; }
+                .button-row { display:flex; flex-wrap:wrap; gap:10px; }
+                .default-submit { position:absolute; width:1px; height:1px; padding:0; opacity:0; pointer-events:none; }
                 .wide { width:100%; margin-top:4px; }
                 .save-bar { position:sticky; bottom:16px; z-index:4; display:flex; align-items:center; justify-content:space-between; gap:18px; margin:8px 0 24px 242px; padding:14px 16px 14px 18px; border:1px solid #34503e; border-radius:15px; background:rgba(16,27,21,.94); box-shadow:0 15px 45px rgba(0,0,0,.35); backdrop-filter:blur(14px); }
                 .save-bar div { display:flex; flex-direction:column; }

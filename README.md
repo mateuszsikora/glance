@@ -221,8 +221,10 @@ docker compose up -d
 Then set `Update manifest URL` in settings, on the tablet or through the remote configuration
 panel, to `http://<host>:8080/glance-update.json`. Glance checks hourly and installs a build only
 when its `versionCode` is higher, its checksum matches, and it is signed by the certificate that
-signed the running installation. `Check for updates now` skips the wait after you publish a build.
-The image runs on both x86 and a Raspberry Pi.
+signed the running installation. Turn automatic installation off to keep checking and report an
+available build without installing it; the settings pages then offer a separate install button.
+`Check for updates now` skips the hourly wait after you publish a build. The image runs on both x86
+and a Raspberry Pi.
 
 Android cannot downgrade a package, so a bad build is recovered by publishing a higher
 `versionCode`, not by rolling back. See [the full procedure](docs/self-hosted-updates.md) for the

@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import android.util.Base64
 import com.glance.content.ContentProfile
 import com.glance.update.UpdateAttempts
+import com.glance.update.UpdateCheckState
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
@@ -259,10 +260,39 @@ class AppConfig(context: Context) {
         get() = prefs.getString(KEY_UPDATE_URL, "").orEmpty()
         set(value) = prefs.edit().putString(KEY_UPDATE_URL, value.trim()).apply()
 
+    /**
+     * Whether a newer build installs itself. Off still checks on the same schedule — the tablet
+     * keeps reporting what is available and whether the server answers — but waits for someone to
+     * press the install button rather than replacing a working kiosk unattended.
+     *
+     * Defaults to on: unattended updates are the reason the updater exists, and a tablet on a wall
+     * is exactly the device nobody walks up to.
+     */
+    var autoUpdateEnabled: Boolean
+        get() = prefs.getBoolean(KEY_AUTO_UPDATE_ENABLED, true)
+        set(value) = prefs.edit().putBoolean(KEY_AUTO_UPDATE_ENABLED, value).apply()
+
     /** Last outcome, shown in settings because a wall-mounted tablet has no other feedback path. */
     var updateStatus: String
         get() = prefs.getString(KEY_UPDATE_STATUS, "").orEmpty()
         set(value) = prefs.edit().putString(KEY_UPDATE_STATUS, value).apply()
+
+    /** Structured result of the last check: when it ran, whether the server answered, what it offers. */
+    var updateCheck: UpdateCheckState
+        get() = UpdateCheckState(
+            checkedAt = prefs.getLong(KEY_UPDATE_CHECKED_AT, 0L),
+            serverReachable = prefs.getBoolean(KEY_UPDATE_SERVER_REACHABLE, false),
+            availableVersionCode = prefs.getInt(KEY_UPDATE_AVAILABLE_VERSION_CODE, 0),
+            availableVersionName = prefs.getString(KEY_UPDATE_AVAILABLE_VERSION_NAME, "").orEmpty()
+        )
+        set(value) {
+            prefs.edit()
+                .putLong(KEY_UPDATE_CHECKED_AT, value.checkedAt)
+                .putBoolean(KEY_UPDATE_SERVER_REACHABLE, value.serverReachable)
+                .putInt(KEY_UPDATE_AVAILABLE_VERSION_CODE, value.availableVersionCode)
+                .putString(KEY_UPDATE_AVAILABLE_VERSION_NAME, value.availableVersionName)
+                .apply()
+        }
 
     /**
      * Attempts are written before a session is committed, because a successful self-update kills
@@ -434,7 +464,12 @@ class AppConfig(context: Context) {
         private const val KEY_HEALTH_CHECK_INTERVAL = "health_check_interval_seconds"
         private const val KEY_REMOTE_CONFIG_ENABLED = "remote_config_enabled"
         private const val KEY_UPDATE_URL = "update_url"
+        private const val KEY_AUTO_UPDATE_ENABLED = "auto_update_enabled"
         private const val KEY_UPDATE_STATUS = "update_status"
+        private const val KEY_UPDATE_CHECKED_AT = "update_checked_at"
+        private const val KEY_UPDATE_SERVER_REACHABLE = "update_server_reachable"
+        private const val KEY_UPDATE_AVAILABLE_VERSION_CODE = "update_available_version_code"
+        private const val KEY_UPDATE_AVAILABLE_VERSION_NAME = "update_available_version_name"
         private const val KEY_UPDATE_ATTEMPT_VERSION = "update_attempt_version"
         private const val KEY_UPDATE_ATTEMPT_COUNT = "update_attempt_count"
         private const val KEY_SETTINGS_PIN = "settings_pin"

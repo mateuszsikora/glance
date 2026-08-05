@@ -2,8 +2,10 @@ package com.glance.remote
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import com.glance.BuildConfig
 import com.glance.config.AppConfig
 import com.glance.content.ContentProfile
+import com.glance.update.UpdateCheckState
 import java.io.BufferedOutputStream
 import java.io.ByteArrayOutputStream
 import java.net.URLEncoder
@@ -499,6 +501,95 @@ class RemoteConfigHttpHandlerTest {
             "data-name=\"urls\"",
             "data-name=\"day.MONDAY\""
         ).forEach { hook -> assertTrue(hook, page.contains(hook)) }
+    }
+
+    @Test
+    fun reportsTheInstalledVersionAndWhetherTheUpdateServerAnswered() {
+        config.updateUrl = "http://192.168.1.10:8080/glance-update.json"
+        config.updateCheck = UpdateCheckState(
+            checkedAt = System.currentTimeMillis(),
+            serverReachable = false
+        )
+        val handler = handler()
+        val cookie = login(handler)
+
+        val page = handler.handle(get("/", cookie)).text()
+
+        assertTrue(page.contains("<dt>Installed version</dt>"))
+        assertTrue(
+            page.contains("<dd>${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})</dd>")
+        )
+        assertTrue(page.contains("<dd>Unreachable, last tried just now</dd>"))
+    }
+
+    @Test
+    fun offersAManualInstallOnlyWhileAutomaticUpdatesAreOff() {
+        config.updateUrl = "http://192.168.1.10:8080/glance-update.json"
+        config.updateCheck = UpdateCheckState(
+            checkedAt = System.currentTimeMillis(),
+            serverReachable = true,
+            availableVersionCode = BuildConfig.VERSION_CODE + 1,
+            availableVersionName = "9.9"
+        )
+        val handler = handler()
+        val cookie = login(handler)
+
+        config.autoUpdateEnabled = true
+        assertFalse(handler.handle(get("/", cookie)).text().contains("/update-install"))
+
+        config.autoUpdateEnabled = false
+        val manual = handler.handle(get("/", cookie)).text()
+        assertTrue(manual.contains("formaction=\"/update-install\""))
+        assertTrue(manual.contains("Install 9.9 (build ${BuildConfig.VERSION_CODE + 1})"))
+    }
+
+    @Test
+    fun separatesCheckingFromInstalling() {
+        config.updateUrl = "http://192.168.1.10:8080/glance-update.json"
+        val requests = mutableListOf<Boolean>()
+        val handler = RemoteConfigHttpHandler(config, { changes++ }, { requests += it })
+        val cookie = login(handler)
+        val csrf = csrf(handler, cookie)
+
+        assertEquals(
+            303,
+            handler.handle(post("/update-check", mapOf("csrf" to csrf), cookie)).status
+        )
+        assertEquals(
+            303,
+            handler.handle(post("/update-install", mapOf("csrf" to csrf), cookie)).status
+        )
+
+        assertEquals(listOf(false, true), requests)
+    }
+
+    @Test
+    fun installingRequiresTheFormToken() {
+        config.updateUrl = "http://192.168.1.10:8080/glance-update.json"
+        val requests = mutableListOf<Boolean>()
+        val handler = RemoteConfigHttpHandler(config, { changes++ }, { requests += it })
+        val cookie = login(handler)
+
+        val response = handler.handle(post("/update-install", mapOf("csrf" to "wrong"), cookie))
+
+        assertEquals(403, response.status)
+        assertTrue(requests.isEmpty())
+    }
+
+    @Test
+    fun theAutomaticUpdateSwitchRoundTrips() {
+        val handler = handler()
+        val cookie = login(handler)
+        config.autoUpdateEnabled = false
+
+        val enabled = validSettings(csrf(handler, cookie)) + mapOf("autoUpdateEnabled" to "on")
+        assertEquals(303, handler.handle(post("/save", enabled, cookie)).status)
+        assertTrue(config.autoUpdateEnabled)
+
+        // An unchecked box posts nothing at all, which is how the panel turns the switch off.
+        val disabled = validSettings(csrf(handler, cookie))
+        assertEquals(303, handler.handle(post("/save", disabled, cookie)).status)
+        assertFalse(config.autoUpdateEnabled)
     }
 
     private fun handler() = RemoteConfigHttpHandler(config, { changes++ })

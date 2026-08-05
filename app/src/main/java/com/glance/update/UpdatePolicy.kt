@@ -15,6 +15,12 @@ sealed class UpdateDecision {
 
     /** The same versionCode failed to install repeatedly; stop retrying until a newer one appears. */
     object Abandoned : UpdateDecision()
+
+    /**
+     * A newer build exists but this check may not install it, because automatic updates are off.
+     * It is recorded and offered in settings so an operator can install it deliberately.
+     */
+    object Available : UpdateDecision()
 }
 
 /** State persisted between update checks, so failures survive a restart. */
@@ -32,19 +38,25 @@ object UpdatePolicy {
     const val MIN_UPTIME_MS = 15 * 60 * 1000L
 
     /**
-     * [force] marks a check an operator asked for explicitly. Both remaining guards exist to stop
-     * an unattended tablet from churning on its own, so a human standing at the settings page
-     * overrides them: the crash-loop guard has nothing to protect against when someone is watching,
-     * and an abandoned version is exactly what a manual retry is for.
+     * [install] is the automatic-update switch: false turns this into a check that only reports
+     * what is on offer. It is decided before [force], so pressing "check for updates" with the
+     * switch off stays a check — installing is a separate button.
+     *
+     * [force] marks an installation an operator asked for explicitly. Both remaining guards exist
+     * to stop an unattended tablet from churning on its own, so a human standing at the settings
+     * page overrides them: the crash-loop guard has nothing to protect against when someone is
+     * watching, and an abandoned version is exactly what a manual retry is for.
      */
     fun decide(
         manifest: UpdateManifest,
         installedVersionCode: Int,
         attempts: UpdateAttempts,
         uptimeMs: Long,
+        install: Boolean = true,
         force: Boolean = false
     ): UpdateDecision {
         if (manifest.versionCode <= installedVersionCode) return UpdateDecision.UpToDate
+        if (!install) return UpdateDecision.Available
         if (force) return UpdateDecision.Install
         if (attempts.versionCode == manifest.versionCode && attempts.count >= MAX_ATTEMPTS) {
             return UpdateDecision.Abandoned

@@ -87,11 +87,35 @@ class UpdatePolicyTest {
         assertEquals(UpdateAttempts(11, 1), other)
     }
 
+    @Test
+    fun reportsANewerBuildWithoutInstallingItWhenAutomaticUpdatesAreOff() {
+        assertEquals(
+            UpdateDecision.Available,
+            decide(offered = 10, installed = 9, install = false)
+        )
+    }
+
+    @Test
+    fun switchingAutomaticUpdatesOffOutranksAnOperatorRequestedCheck() {
+        // "Check for updates now" stays a check with the switch off; installing is its own button,
+        // which passes install = true instead.
+        assertEquals(
+            UpdateDecision.Available,
+            decide(offered = 10, installed = 9, uptimeMs = 0, install = false, force = true)
+        )
+    }
+
+    @Test
+    fun nothingIsAvailableWhenTheOfferedBuildIsNotNewer() {
+        assertEquals(UpdateDecision.UpToDate, decide(offered = 9, installed = 9, install = false))
+    }
+
     private fun decide(
         offered: Int,
         installed: Int,
         attempts: UpdateAttempts = UpdateAttempts(0, 0),
         uptimeMs: Long = UpdatePolicy.MIN_UPTIME_MS,
+        install: Boolean = true,
         force: Boolean = false
     ): UpdateDecision {
         return UpdatePolicy.decide(
@@ -99,6 +123,7 @@ class UpdatePolicyTest {
             installedVersionCode = installed,
             attempts = attempts,
             uptimeMs = uptimeMs,
+            install = install,
             force = force
         )
     }

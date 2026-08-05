@@ -99,6 +99,10 @@ class WatchdogService : Service() {
      * screen-aware timers. The first check is deliberately later than
      * [com.glance.update.UpdatePolicy.MIN_UPTIME_MS] so a build that cannot stay up never reaches
      * the point of installing its successor.
+     *
+     * The loop runs on a configured URL alone, not on the automatic-update switch: with automatic
+     * installation off these checks are what keeps the settings pages reporting whether the server
+     * answers and which build it offers.
      */
     private fun startUpdateCheckLoop() {
         handler.postDelayed(object : Runnable {
