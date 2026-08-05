@@ -22,21 +22,22 @@ token() {
   fi
 }
 
-# Public repositories serve release assets over a stable unauthenticated URL. Private ones only
-# expose them through the API, which needs a read-only token.
+# Always the newest release, so publishing a tag is all it takes to roll the tablets forward.
+# Public repositories resolve /releases/latest/download/ without credentials; private ones expose
+# assets only through the API, which needs a read-only token.
 fetch_asset() {
   local name="$1" destination="$2" auth
   auth="$(token)"
 
   if [[ -z "$auth" ]]; then
     curl -fsSL -o "$destination" \
-      "https://github.com/${GLANCE_REPO}/releases/download/${GLANCE_RELEASE_TAG}/${name}"
+      "https://github.com/${GLANCE_REPO}/releases/latest/download/${name}"
     return
   fi
 
   local release asset_id
   release="$(curl -fsSL -H "Authorization: Bearer ${auth}" \
-    "https://api.github.com/repos/${GLANCE_REPO}/releases/tags/${GLANCE_RELEASE_TAG}")"
+    "https://api.github.com/repos/${GLANCE_REPO}/releases/latest")"
   asset_id="$(jq -r --arg n "$name" '.assets[] | select(.name == $n) | .id' <<<"$release")"
   [[ -n "$asset_id" && "$asset_id" != "null" ]] || { log "asset $name not found"; return 1; }
 
@@ -142,7 +143,7 @@ log "serving ${GLANCE_OUT} on port ${GLANCE_PORT}"
 python3 -m http.server "${GLANCE_PORT}" --directory "${GLANCE_OUT}" --bind 0.0.0.0 &
 trap 'kill 0' TERM INT
 
-log "watching ${GLANCE_REPO}@${GLANCE_RELEASE_TAG} every ${GLANCE_POLL_SECONDS}s"
+log "watching ${GLANCE_REPO} releases every ${GLANCE_POLL_SECONDS}s"
 while true; do
   check_once || log "update check failed"
   sleep "${GLANCE_POLL_SECONDS}"

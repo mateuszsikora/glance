@@ -35,7 +35,7 @@ Glance is intended for people who want to reuse an older Android tablet as a ded
 - are comfortable using ADB once for installation and Device Owner provisioning;
 - prefer a local application with no analytics, advertising, or project-operated cloud service.
 
-Glance is currently distributed as source code. There is no official prebuilt APK release, so you must build and sign the application yourself. Continuous integration publishes an *unsigned* build artifact for each `master` commit, which Android cannot install as-is; it exists so that self-hosted updaters can sign it with their own key. See [Self-hosted updates](#self-hosted-updates).
+Glance is distributed as source code and as *unsigned* release artifacts, so you must sign the application yourself. Releases will never contain a signed APK: an installed Device Owner can only be updated by an APK carrying the certificate it was provisioned with, so a signed release would bind every installation to the maintainer's key for good. Building from source and signing the published artifact are equally supported paths. See [Self-hosted updates](#self-hosted-updates).
 
 ## Configure the tablet from your computer
 

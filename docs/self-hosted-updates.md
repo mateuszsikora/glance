@@ -31,15 +31,28 @@ dependency, and the key never leaves it.
   rather than discovering it at install time.
 - The tablet can reach the machine serving the updates.
 
-## 1. Publish unsigned builds
+## 1. Publish a release
 
-Every push to `master` builds an unsigned, zip-aligned APK and attaches it, together with a
-`build.json` describing it, to a rolling prerelease tagged `nightly`. `versionCode` is derived from
-the commit count, so it increases on every commit — Android will not install an update whose
-`versionCode` did not grow.
+Pushing a `v*` tag builds an unsigned, zip-aligned APK and publishes it, together with a
+`build.json` describing it, as a GitHub release:
 
-An unsigned APK cannot be installed by Android at all. It is a half-product, not a release, and
-publishing it does not distribute an application to anyone.
+```sh
+git tag v1.5 && git push origin v1.5
+```
+
+Releasing is deliberate rather than automatic on every merge. A tablet on a wall has no ADB and
+cannot be downgraded, so an unreviewed commit is a poor thing to install on it unattended.
+
+`versionName` comes from the tag. `versionCode` comes from the commit count, because Android
+compares it numerically and refuses an update that does not increase it — tag names are not
+reliably ordered that way.
+
+**The published APK is unsigned, and always will be.** This project does not hold a signing key on
+anyone's behalf. A Device Owner installation can only be updated by an APK carrying the same
+certificate it was provisioned with, so publishing a signed build would permanently tie every
+installation to the maintainer's key, and losing or rotating that key would mean a factory reset on
+every device. The artifact is therefore a half-product: Android will not install it, and you sign
+it yourself in the next step.
 
 ## 2. Run the updater
 
@@ -57,8 +70,8 @@ While the repository is private, add a fine-grained read-only token with access 
 repository as `keys/github-token`. Once the repository is public, delete the token and the
 `GLANCE_GITHUB_TOKEN_FILE` line: release assets are then fetched unauthenticated.
 
-The container polls the release, verifies the published checksum, signs the APK with your key,
-verifies its own output, and writes:
+The container polls the newest release, verifies the published checksum, signs the APK with your
+key, verifies its own output, and writes:
 
 ```
 http://<host>:8080/glance-update.json

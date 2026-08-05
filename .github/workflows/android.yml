@@ -4,6 +4,7 @@ on:
   pull_request:
   push:
     branches: [master]
+    tags: ["v*"]
 
 permissions:
   contents: read
@@ -21,11 +22,11 @@ jobs:
       - name: Test, lint and build
         run: ./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease
 
-  # Publishes an unsigned build artifact for self-hosted updaters. Signing deliberately happens on
-  # the operator's own machine: no signing key is available to, or needed by, this workflow. An
-  # unsigned APK cannot be installed by Android, so it is a half-product rather than a release.
+  # Publishes a release for an explicitly pushed v* tag. The artifact is unsigned, always: this
+  # project does not hold a signing key on anyone's behalf, and an operator signs the build with
+  # their own key before it reaches a tablet. See docs/self-hosted-updates.md.
   publish:
-    if: github.ref == 'refs/heads/master'
+    if: startsWith(github.ref, 'refs/tags/v')
     needs: verify
     runs-on: ubuntu-latest
     permissions:
@@ -45,12 +46,17 @@ jobs:
         id: build
         run: |
           set -euo pipefail
+          VERSION_NAME="${GITHUB_REF_NAME#v}"
+          # Commit count rather than the tag: Android compares versionCode numerically and refuses
+          # an update that does not increase it, and tag names are not reliably ordered that way.
           VERSION_CODE="$(git rev-list --count HEAD)"
-          ./gradlew assembleRelease "-PversionCode=${VERSION_CODE}"
+          ./gradlew assembleRelease \
+            "-PversionCode=${VERSION_CODE}" \
+            "-PversionName=${VERSION_NAME}"
           echo "version_code=${VERSION_CODE}" >> "$GITHUB_OUTPUT"
+          echo "version_name=${VERSION_NAME}" >> "$GITHUB_OUTPUT"
 
       - name: Align and describe the artifact
-        id: artifact
         run: |
           set -euo pipefail
           # zipalign runs here, where the x86_64 Android build tools exist. Google ships no
@@ -60,13 +66,13 @@ jobs:
             app/build/outputs/apk/release/app-release-unsigned.apk \
             glance-unsigned.apk
 
-          VERSION_CODE="${{ steps.build.outputs.version_code }}"
+          # Computed before the heredoc: a command substitution that fails inside one would not
+          # trip `set -e`, and the manifest would silently carry an empty digest.
           SHA256="$(sha256sum glance-unsigned.apk | cut -d' ' -f1)"
-          BASE_NAME="$(sed -n 's/^val baseVersionName = "\(.*\)"$/\1/p' app/build.gradle.kts)"
           cat > build.json <<EOF
           {
-            "versionCode": ${VERSION_CODE},
-            "versionName": "${BASE_NAME}-${VERSION_CODE}",
+            "versionCode": ${{ steps.build.outputs.version_code }},
+            "versionName": "${{ steps.build.outputs.version_name }}",
             "commit": "${GITHUB_SHA}",
             "asset": "glance-unsigned.apk",
             "sha256": "${SHA256}"
@@ -74,14 +80,24 @@ jobs:
           EOF
           cat build.json
 
-      - name: Publish to the rolling nightly release
+      - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # A single fixed tag keeps the download URL stable and avoids a tag per commit.
-          gh release view nightly >/dev/null 2>&1 || gh release create nightly \
-            --prerelease \
-            --title "Rolling development build" \
-            --notes "Unsigned build artifact of the latest master commit. Android cannot install it as-is: sign it with your own key. See docs/self-hosted-updates.md."
-          gh release upload nightly glance-unsigned.apk build.json --clobber
+          gh release create "${GITHUB_REF_NAME}" glance-unsigned.apk build.json \
+            --verify-tag \
+            --title "Glance ${{ steps.build.outputs.version_name }}" \
+            --notes "$(cat <<'NOTES'
+          `glance-unsigned.apk` is an **unsigned** build artifact. Android cannot install it as it
+          stands, and that is deliberate: this project never publishes a signed APK, because doing
+          so would tie every installation to a key held by the maintainer. Device Owner
+          installations can only be updated by an APK carrying the same certificate as the one they
+          were provisioned with, so that key has to be yours.
+
+          Sign this artifact with your own key and serve it to your tablets. `tools/updater`
+          automates both steps; the procedure is in `docs/self-hosted-updates.md`.
+
+          `build.json` describes the artifact for automated updaters.
+          NOTES
+          )"
