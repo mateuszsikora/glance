@@ -25,7 +25,6 @@ COPY entrypoint.sh /usr/local/bin/glance-updater
 RUN chmod +x /usr/local/bin/glance-updater
 
 ENV GLANCE_REPO=""
-ENV GLANCE_RELEASE_TAG=nightly
 ENV GLANCE_PUBLIC_URL=""
 ENV GLANCE_POLL_SECONDS=300
 ENV GLANCE_KEYSTORE=/keys/glance-release.jks
