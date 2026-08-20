@@ -21,8 +21,8 @@ val keystoreProperties = Properties().apply {
 // Baseline identity of a hand-built release. Self-hosted update builds override both values so
 // every published artifact carries a distinct, monotonically increasing versionCode; Android
 // refuses to install an update that does not increase it. See docs/self-hosted-updates.md.
-val baseVersionCode = 5
-val baseVersionName = "1.5"
+val baseVersionCode = 6
+val baseVersionName = "1.6"
 val releaseVersionCode = providers.gradleProperty("versionCode")
     .map(String::toInt)
     .getOrElse(baseVersionCode)
