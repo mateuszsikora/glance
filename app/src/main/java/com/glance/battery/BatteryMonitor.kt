@@ -7,7 +7,7 @@ import android.content.IntentFilter
 import android.os.BatteryManager
 import android.util.Log
 
-/** Charge level and power source of the tablet, as reported to Home Assistant. */
+/** Charge level of the tablet and whether that charge is currently rising. */
 data class BatteryStatus(
     val levelPercent: Int,
     val charging: Boolean
@@ -18,8 +18,8 @@ data class BatteryStatus(
  * charge window instead of holding it at 100% for years.
  *
  * `ACTION_BATTERY_CHANGED` cannot be declared in the manifest and fires far more often than the
- * charge level changes, so this monitor lives with the foreground kiosk service and only reports
- * transitions that Home Assistant would actually see.
+ * charge level or charging state changes, so this monitor lives with the foreground kiosk service
+ * and only reports transitions that Home Assistant would actually see.
  */
 class BatteryMonitor(
     private val context: Context,
@@ -69,8 +69,7 @@ class BatteryMonitor(
             status = intent.getIntExtra(
                 BatteryManager.EXTRA_STATUS,
                 BatteryManager.BATTERY_STATUS_UNKNOWN
-            ),
-            plugged = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0)
+            )
         ) ?: return
 
         if (reading == status) return
@@ -86,13 +85,15 @@ class BatteryMonitor(
 /** Pure translation of the platform's battery extras, kept separate so it can be unit tested. */
 object BatteryReading {
 
-    fun from(level: Int, scale: Int, status: Int, plugged: Int): BatteryStatus? {
+    fun from(level: Int, scale: Int, status: Int): BatteryStatus? {
         if (level < 0 || scale <= 0) return null
         return BatteryStatus(
             levelPercent = (level * 100 / scale).coerceIn(0, 100),
-            // "Charging" here means the tablet is running on external power: a charge controller
-            // needs to know whether its plug is delivering, and a full battery still is.
-            charging = plugged != 0 && status != BatteryManager.BATTERY_STATUS_DISCHARGING
+            // Home Assistant's battery_charging class means the charge is actually progressing,
+            // so only the platform's charging status qualifies. A connected charger that has been
+            // paused by temperature or a vendor charge limit reports NOT_CHARGING, and reporting
+            // that as charging would hide exactly the situation worth seeing.
+            charging = status == BatteryManager.BATTERY_STATUS_CHARGING
         )
     }
 }

@@ -11,7 +11,7 @@ Glance is a single-module native Android application written in Kotlin. It suppo
 - `WatchdogService` performs health checks, periodic reloads, and memory-pressure recovery while avoiding unnecessary WebView work when the screen is off. `DashboardReachabilityProbe` and `StaleDashboardPolicy` additionally recover pages that stayed loaded while their live connection died.
 - `ScheduleManager` and `ScheduleReceiver` calculate and deliver daily screen transitions. `BootReceiver` restores the kiosk and reschedules work after boot, package replacement, clock, time-zone, and exact-alarm permission changes.
 - `ScreenController` implements screen state changes. Device Owner mode can use `lockNow()`; regular-app mode uses a reversible black overlay and window brightness. `PowerWakePolicy` decides whether a display wake that followed a charger event has to be undone.
-- `BatteryMonitor` and `BatteryReading` translate the platform's battery broadcast into the charge level and power source published over MQTT, filtering the many events that do not change either.
+- `BatteryMonitor` and `BatteryReading` translate the platform's battery broadcast into the charge level and charging state published over MQTT, filtering the many events that change neither.
 - `BrightnessController` maps ambient-light readings or remote brightness commands to the Android window.
 - `AppConfig` stores configuration and lifecycle state in private `SharedPreferences`. `SecretStore` encrypts the MQTT password using AES-GCM with a non-exportable Android Keystore key.
 - `SettingsActivity` validates and applies user configuration behind a salted PBKDF2 PIN verifier with retry lockout.

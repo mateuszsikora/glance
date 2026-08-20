@@ -202,7 +202,7 @@ The optional schedule defines a daytime or overnight ON window. A manual MQTT co
 
 ### Keeping the battery healthy
 
-A tablet held at 100% on a permanent charger ages its battery quickly. The `Battery` sensor reports the charge level as a percentage and `Charging` reports whether the tablet is drawing external power, which is what a Home Assistant automation needs to switch a smart plug and keep the charge inside a window such as 40–80%. Both are published retained on every level or power-source change, so Home Assistant has a value immediately after a restart.
+A tablet held at 100% on a permanent charger ages its battery quickly. The `Battery` sensor reports the charge level as a percentage, which is what a Home Assistant automation needs to switch a smart plug and keep the charge inside a window such as 40–80%. `Charging` reports whether the charge is actually rising, so a charger that a vendor charge limit or a high temperature has paused is visible rather than hidden. Both are published retained on every change, so Home Assistant has a value immediately after a restart.
 
 Because the charger is then switched while the tablet is in use, Glance also protects the screen schedule from it. Android lights the display up when power is connected or disconnected, and the kiosk's stay-awake-while-charging policy would otherwise keep it lit until the next scheduled transition. During a scheduled OFF window Glance disables that policy and turns the display back off after a charger event, so an overnight charge cycle does not light up the room.
 

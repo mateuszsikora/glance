@@ -57,6 +57,7 @@ class KioskService : Service() {
     @Volatile private var reportedScreenOn = true
     @Volatile private var reportedBrightness = 5
     @Volatile private var reportedBattery: BatteryStatus? = null
+    private var remainingPowerWakeChecks = 0
 
     private val screenStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -396,16 +397,38 @@ class KioskService : Service() {
         if (config.requestedScreenOn) return
         // The display may not have woken yet, so the decision waits for the platform to settle.
         mainHandler.removeCallbacks(restoreScreenOffRunnable)
+        remainingPowerWakeChecks = POWER_EVENT_CHECKS
         mainHandler.postDelayed(restoreScreenOffRunnable, POWER_EVENT_SETTLE_MS)
     }
 
-    private val restoreScreenOffRunnable = Runnable {
-        if (destroyed) return@Runnable
-        if (!PowerWakePolicy.shouldRestoreScreenOff(config.requestedScreenOn, reportedScreenOn)) {
-            return@Runnable
+    private val restoreScreenOffRunnable = object : Runnable {
+        override fun run() {
+            if (destroyed) return
+            remainingPowerWakeChecks--
+            if (PowerWakePolicy.shouldRestoreScreenOff(config.requestedScreenOn, displayIsOn())) {
+                Log.i(TAG, "Display woke on a power event while the schedule asks for OFF")
+                handleLightCommand(MqttLightCommand(screenOn = false, brightness = null))
+                return
+            }
+            // Android promises neither the timing nor the order of the wake it performs around a
+            // power event, so a single look at the display can be too early.
+            if (!config.requestedScreenOn && remainingPowerWakeChecks > 0) {
+                mainHandler.postDelayed(this, POWER_EVENT_RECHECK_MS)
+            }
         }
-        Log.i(TAG, "Display woke on a power event while the schedule asks for OFF")
-        handleLightCommand(MqttLightCommand(screenOn = false, brightness = null))
+    }
+
+    /**
+     * Whether the display is lit. As Device Owner the hardware answers directly; the soft-off
+     * fallback leaves the display interactive behind a black overlay, so there the Activity's
+     * report is the only truthful source.
+     */
+    private fun displayIsOn(): Boolean {
+        return if (devicePolicyManager.isDeviceOwnerApp(packageName)) {
+            powerManager.isInteractive
+        } else {
+            reportedScreenOn
+        }
     }
 
     private fun applyStayAwakePolicy(screenOn: Boolean) {
@@ -494,8 +517,11 @@ class KioskService : Service() {
         private const val WAKE_LOCK_RELEASE_DELAY_MS = 3_000L
         private const val ACTIVITY_CONTROL_RETRY_MS = 750L
         // Long enough for Android to finish its own charger handling, short enough that the room
-        // does not stay lit.
+        // does not stay lit. The wake can also arrive later than the power broadcast, so the
+        // display is examined a few times before the event is given up on.
         private const val POWER_EVENT_SETTLE_MS = 2_000L
+        private const val POWER_EVENT_RECHECK_MS = 3_000L
+        private const val POWER_EVENT_CHECKS = 3
         private const val REMOTE_SERVER_RELOAD_DELAY_MS = 750L
 
         const val ACTION_RELOAD_CONFIG = "com.glance.action.RELOAD_CONFIG"

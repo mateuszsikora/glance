@@ -108,7 +108,7 @@ object MqttContract {
         }.toString()
     }
 
-    /** Companion of the battery sensor: whether the tablet is currently drawing external power. */
+    /** Companion of the battery sensor: whether the charge is currently rising. */
     fun chargingDiscoveryPayload(
         topics: MqttTopics,
         rawDeviceId: String,
