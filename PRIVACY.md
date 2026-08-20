@@ -10,7 +10,7 @@ Android backups are disabled for the application. Removing the application or re
 
 ## Network communication
 
-Glance connects only to dashboard URLs and MQTT broker endpoints configured by the user. Dashboard providers, Home Assistant integrations, brokers, DNS services, and the local network may process connection metadata or page content under their own policies. When the optional remote configuration panel is enabled, the tablet also accepts direct HTTP connections from the local network; configuration is exchanged between that browser and the tablet, not a Glance-operated service.
+Glance connects only to dashboard URLs and MQTT broker endpoints configured by the user. When the MQTT integration is enabled, it publishes the device model, application version, screen and brightness state, and the tablet's battery level and charging state to the configured broker. Dashboard providers, Home Assistant integrations, brokers, DNS services, and the local network may process connection metadata or page content under their own policies. When the optional remote configuration panel is enabled, the tablet also accepts direct HTTP connections from the local network; configuration is exchanged between that browser and the tablet, not a Glance-operated service.
 
 The application supports plain HTTP, including its remote configuration panel, and MQTT for local installations. Those protocols can expose content, settings PINs, and credentials to the network. Prefer HTTPS dashboards and MQTT over TLS, enable remote settings only when needed, and use trusted networks.
 

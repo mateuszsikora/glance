@@ -6,6 +6,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import com.glance.BuildConfig
+import com.glance.battery.BatteryStatus
 import com.glance.config.AppConfig
 import org.eclipse.paho.client.mqttv3.IMqttActionListener
 import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken
@@ -16,11 +17,14 @@ import org.eclipse.paho.client.mqttv3.MqttConnectOptions
 import org.eclipse.paho.client.mqttv3.MqttException
 import org.eclipse.paho.client.mqttv3.MqttMessage
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 data class MqttReportedState(
     val screenOn: Boolean,
-    val brightness: Int
+    val brightness: Int,
+    val battery: BatteryStatus? = null
 )
 
 /**
@@ -125,7 +129,7 @@ class MqttStateManager(
     }
 
     /**
-     * Removes the retained discovery entry before switching prefix/device configuration.
+     * Removes every retained discovery entry before switching prefix/device configuration.
      */
     fun removeDiscovery(onComplete: () -> Unit = {}) {
         val cleanupServerUri = runCatching { serverUri }.getOrNull()
@@ -134,63 +138,77 @@ class MqttStateManager(
             return
         }
 
+        val discoveryTopics = topics.discoveryTopics
         val mqttClient = client
         if (mqttClient?.isConnected != true) {
-            config.queueDiscoveryCleanup(cleanupServerUri, topics.discovery)
+            discoveryTopics.forEach { config.queueDiscoveryCleanup(cleanupServerUri, it) }
             Log.w(TAG, "Discovery cleanup queued until broker reconnects")
             mainHandler.post(onComplete)
             return
         }
 
+        val removed = ConcurrentHashMap.newKeySet<String>()
+        val settled = AtomicInteger(0)
         val completed = AtomicBoolean(false)
         lateinit var timeout: Runnable
 
-        fun finish(delivered: Boolean) {
+        fun finish() {
             if (!completed.compareAndSet(false, true)) return
             mainHandler.removeCallbacks(timeout)
-            if (delivered) {
-                config.markDiscoveryCleanupComplete(cleanupServerUri, topics.discovery)
+            val outstanding = discoveryTopics.filterNot(removed::contains)
+            if (outstanding.isEmpty()) {
                 Log.i(TAG, "MQTT discovery removal confirmed")
             } else {
-                config.queueDiscoveryCleanup(cleanupServerUri, topics.discovery)
-                Log.w(TAG, "Discovery cleanup timed out; queued for retry")
+                outstanding.forEach { config.queueDiscoveryCleanup(cleanupServerUri, it) }
+                Log.w(TAG, "${outstanding.size} discovery entries queued for retry")
             }
             mainHandler.post(onComplete)
         }
 
-        timeout = Runnable { finish(delivered = false) }
+        fun settle(topic: String, delivered: Boolean) {
+            if (delivered) {
+                removed.add(topic)
+                config.markDiscoveryCleanupComplete(cleanupServerUri, topic)
+            }
+            if (settled.incrementAndGet() == discoveryTopics.size) finish()
+        }
+
+        timeout = Runnable { finish() }
         mainHandler.postDelayed(timeout, DISCOVERY_CLEANUP_TIMEOUT_MS)
 
-        try {
-            mqttClient.publish(
-                topics.discovery,
-                message("", retained = true),
-                null,
-                object : IMqttActionListener {
-                    override fun onSuccess(asyncActionToken: IMqttToken?) {
-                        finish(delivered = true)
-                    }
+        discoveryTopics.forEach { topic ->
+            try {
+                mqttClient.publish(
+                    topic,
+                    message("", retained = true),
+                    null,
+                    object : IMqttActionListener {
+                        override fun onSuccess(asyncActionToken: IMqttToken?) {
+                            settle(topic, delivered = true)
+                        }
 
-                    override fun onFailure(
-                        asyncActionToken: IMqttToken?,
-                        exception: Throwable?
-                    ) {
-                        Log.w(
-                            TAG,
-                            "MQTT discovery removal failed (${failureKind(exception)})"
-                        )
-                        finish(delivered = false)
+                        override fun onFailure(
+                            asyncActionToken: IMqttToken?,
+                            exception: Throwable?
+                        ) {
+                            Log.w(
+                                TAG,
+                                "MQTT discovery removal failed (${failureKind(exception)})"
+                            )
+                            settle(topic, delivered = false)
+                        }
                     }
-                }
-            )
-        } catch (e: MqttException) {
-            Log.w(TAG, "Unable to publish MQTT discovery removal (${failureKind(e)})")
-            finish(delivered = false)
+                )
+            } catch (e: MqttException) {
+                Log.w(TAG, "Unable to publish MQTT discovery removal (${failureKind(e)})")
+                settle(topic, delivered = false)
+            }
         }
     }
 
     fun publishCurrentState() {
         publishState()
+        publishBatteryState()
     }
 
     private fun connectWithInitialRetry() {
@@ -281,7 +299,7 @@ class MqttStateManager(
                 }
                 publishDiscovery()
                 publish(topics.availability, "online", retained = true)
-                publishState()
+                publishCurrentState()
             } catch (e: MqttException) {
                 Log.e(TAG, "Failed to initialize MQTT subscriptions (${failureKind(e)})")
             }
@@ -302,7 +320,7 @@ class MqttStateManager(
                 topics.homeAssistantStatus -> {
                     if (payload.equals("online", ignoreCase = true)) {
                         publishDiscovery()
-                        publishState()
+                        publishCurrentState()
                     }
                 }
             }
@@ -325,14 +343,24 @@ class MqttStateManager(
     }
 
     private fun publishDiscovery() {
-        val payload = MqttContract.discoveryPayload(
-            topics = topics,
-            rawDeviceId = deviceId,
-            deviceName = config.mqttDeviceName,
-            model = Build.MODEL,
-            appVersion = BuildConfig.VERSION_NAME
+        val deviceName = config.mqttDeviceName
+        val model = Build.MODEL
+        val appVersion = BuildConfig.VERSION_NAME
+        publish(
+            topics.discovery,
+            MqttContract.discoveryPayload(topics, deviceId, deviceName, model, appVersion),
+            retained = true
         )
-        publish(topics.discovery, payload, retained = true)
+        publish(
+            topics.batteryDiscovery,
+            MqttContract.batteryDiscoveryPayload(topics, deviceId, deviceName, model, appVersion),
+            retained = true
+        )
+        publish(
+            topics.chargingDiscovery,
+            MqttContract.chargingDiscoveryPayload(topics, deviceId, deviceName, model, appVersion),
+            retained = true
+        )
         Log.i(TAG, "MQTT discovery published")
     }
 
@@ -350,6 +378,16 @@ class MqttStateManager(
         publish(
             topics.state,
             MqttContract.statePayload(state.screenOn, state.brightness),
+            retained = true
+        )
+    }
+
+    /** No-op until the first battery reading arrives; the entity stays unknown rather than wrong. */
+    fun publishBatteryState() {
+        val battery = stateProvider().battery ?: return
+        publish(
+            topics.batteryState,
+            MqttContract.batteryStatePayload(battery.levelPercent, battery.charging),
             retained = true
         )
     }

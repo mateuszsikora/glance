@@ -18,7 +18,7 @@ The project targets Android 14 (API 34) and supports Android 8.0 (API 26) and ne
 - Device Owner LockTask mode and boot recovery;
 - ambient-light and MQTT-controlled brightness;
 - scheduled screen on/off, including overnight windows;
-- Home Assistant MQTT discovery with retained state and availability;
+- Home Assistant MQTT discovery with retained state and availability, including battery level and charging state for smart-plug charge control;
 - watchdog health checks, memory-pressure recovery, and an automatic reload once a dashboard comes back after a server restart or network outage;
 - PIN-protected remote configuration from any browser on the same LAN;
 - optional self-hosted over-the-air updates, signed with your own key;
@@ -174,7 +174,7 @@ Android System WebView performs TLS validation and stores the dashboard's browse
 
 ## Home Assistant MQTT discovery
 
-Glance exposes the tablet screen as a brightness-capable MQTT light. It publishes a retained Home Assistant discovery payload, state, and availability/LWT. No helper entities, template YAML, or Home Assistant access token are required.
+Glance exposes the tablet screen as a brightness-capable MQTT light, plus a battery percentage and a charging sensor. It publishes retained Home Assistant discovery payloads, state, and availability/LWT. No helper entities, template YAML, or Home Assistant access token are required.
 
 MQTT and the daily screen schedule run in the foreground kiosk service, independently from the dashboard Activity. Initial broker failures use exponential backoff, while established sessions use Paho automatic reconnect. Keep-alive pings are driven by wakeup alarms rather than a plain timer, so the broker session survives the tablet suspending with the screen off instead of dropping to the last will and marking the entity unavailable.
 
@@ -184,18 +184,27 @@ MQTT and the daily screen schedule run in the foreground kiosk service, independ
 4. Enable MQTT and enter the broker endpoint, username, and password.
 5. Save. Glance applies the new configuration without an application restart.
 
-Home Assistant discovers a `Glance Tablet` device with a `Screen` light entity. It supports ON/OFF, brightness `0..255`, and availability. Topics use a stable, randomly generated Glance device ID:
+Home Assistant discovers a `Glance Tablet` device with a `Screen` light entity, a `Battery` sensor, and a `Charging` binary sensor. The light supports ON/OFF, brightness `0..255`, and availability. Topics use a stable, randomly generated Glance device ID:
 
 ```text
 homeassistant/light/glance_<device-id>/config
+homeassistant/sensor/glance_<device-id>/battery/config
+homeassistant/binary_sensor/glance_<device-id>/charging/config
 glance/<device-id>/light/set
 glance/<device-id>/light/state
+glance/<device-id>/battery/state
 glance/<device-id>/availability
 ```
 
 Without Device Owner privileges, OFF uses a reversible soft-off (black overlay and window brightness zero); tapping the black screen or sending ON wakes it. As Device Owner, Glance uses `DevicePolicyManager.lockNow()` for hardware screen-off.
 
 The optional schedule defines a daytime or overnight ON window. A manual MQTT command overrides the current state until the next scheduled transition. On Android 12 and newer, Glance requests exact-alarm access; when approximate alarms are selected, Android may deliver a transition later than its configured minute. Time, time-zone, package-update, and reboot events reschedule both alarms.
+
+### Keeping the battery healthy
+
+A tablet held at 100% on a permanent charger ages its battery quickly. The `Battery` sensor reports the charge level as a percentage, which is what a Home Assistant automation needs to switch a smart plug and keep the charge inside a window such as 40–80%. `Charging` reports whether the charge is actually rising, so a charger that a vendor charge limit or a high temperature has paused is visible rather than hidden. Both are published retained on every change, so Home Assistant has a value immediately after a restart.
+
+Because the charger is then switched while the tablet is in use, Glance also protects the screen schedule from it. Android lights the display up when power is connected or disconnected, and the kiosk's stay-awake-while-charging policy would otherwise keep it lit until the next scheduled transition. During a scheduled OFF window Glance disables that policy and turns the display back off after a charger event, so an overnight charge cycle does not light up the room.
 
 MQTT passwords are encrypted at rest with an Android Keystore AES-GCM key. Encryption at rest does not protect plain MQTT traffic in transit.
 
