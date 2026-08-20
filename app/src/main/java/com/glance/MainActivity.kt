@@ -206,7 +206,12 @@ class MainActivity : AppCompatActivity() {
     private fun setupKioskMode() {
         if (LockTaskHelper.isDeviceOwner(this)) {
             LockTaskHelper.setLockTaskPackages(this)
-            LockTaskHelper.configureKioskPolicies(this)
+            // Recreating the Activity during a scheduled OFF window must not re-enable the
+            // stay-awake policy, or the next charger event would light the tablet up for good.
+            LockTaskHelper.configureKioskPolicies(
+                this,
+                stayAwakeWhilePlugged = GlanceApp.instance.appConfig.requestedScreenOn
+            )
 
             try {
                 startLockTask()

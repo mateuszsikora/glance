@@ -35,7 +35,7 @@ object LockTaskHelper {
         }
     }
 
-    fun configureKioskPolicies(context: Context) {
+    fun configureKioskPolicies(context: Context, stayAwakeWhilePlugged: Boolean = true) {
         if (!isDeviceOwner(context)) return
 
         val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
@@ -43,7 +43,11 @@ object LockTaskHelper {
 
         try {
             rememberStayAwakeSetting(context)
-            dpm.setGlobalSetting(admin, Settings.Global.STAY_ON_WHILE_PLUGGED_IN, "3")
+            dpm.setGlobalSetting(
+                admin,
+                Settings.Global.STAY_ON_WHILE_PLUGGED_IN,
+                stayAwakeValue(stayAwakeWhilePlugged)
+            )
             val keyguardDisabled = dpm.setKeyguardDisabled(admin, true)
             val statusBarDisabled = dpm.setStatusBarDisabled(admin, true)
             if (!keyguardDisabled || !statusBarDisabled) {
@@ -56,6 +60,27 @@ object LockTaskHelper {
             Log.i(TAG, "Kiosk policies configured")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to configure kiosk policies", e)
+        }
+    }
+
+    /**
+     * Keeping the tablet awake while charging is what an always-on dashboard wants during the
+     * day. Overnight it is the opposite: it would hold the display on after any wake the platform
+     * performs on its own, so the policy follows the requested screen state.
+     */
+    fun setStayAwakeWhilePlugged(context: Context, enabled: Boolean) {
+        if (!isDeviceOwner(context)) return
+
+        val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+        try {
+            rememberStayAwakeSetting(context)
+            dpm.setGlobalSetting(
+                AdminReceiver.getComponentName(context),
+                Settings.Global.STAY_ON_WHILE_PLUGGED_IN,
+                stayAwakeValue(enabled)
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to update the stay-awake-while-plugged policy", e)
         }
     }
 
@@ -82,6 +107,10 @@ object LockTaskHelper {
         }
     }
 
+    private fun stayAwakeValue(enabled: Boolean): String {
+        return if (enabled) STAY_AWAKE_ANY_CHARGER else STAY_AWAKE_NEVER
+    }
+
     private fun rememberStayAwakeSetting(context: Context) {
         val prefs = context.getSharedPreferences(POLICY_PREFS, Context.MODE_PRIVATE)
         if (prefs.contains(KEY_PREVIOUS_STAY_AWAKE)) return
@@ -93,10 +122,13 @@ object LockTaskHelper {
         )
         // Existing Glance installations already set this value to 3 before this bookkeeping
         // existed. Their most conservative restore target is Android's default value, 0.
-        val previous = if (current == 3) 0 else current
+        val previous = if (current == STAY_AWAKE_ANY_CHARGER.toInt()) 0 else current
         prefs.edit().putInt(KEY_PREVIOUS_STAY_AWAKE, previous).apply()
     }
 
     private const val POLICY_PREFS = "glance_kiosk_policy_state"
     private const val KEY_PREVIOUS_STAY_AWAKE = "previous_stay_on_while_plugged_in"
+    /** Android's plug-type bit mask: AC and USB, the two a wall-mounted tablet is powered by. */
+    private const val STAY_AWAKE_ANY_CHARGER = "3"
+    private const val STAY_AWAKE_NEVER = "0"
 }

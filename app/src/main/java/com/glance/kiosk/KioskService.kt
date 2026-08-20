@@ -18,11 +18,14 @@ import androidx.core.app.NotificationCompat
 import com.glance.GlanceApp
 import com.glance.MainActivity
 import com.glance.R
+import com.glance.battery.BatteryMonitor
+import com.glance.battery.BatteryStatus
 import com.glance.config.AppConfig
 import com.glance.mqtt.MqttLightCommand
 import com.glance.mqtt.MqttReportedState
 import com.glance.mqtt.MqttStateManager
 import com.glance.remote.RemoteConfigServer
+import com.glance.screen.PowerWakePolicy
 import com.glance.screen.ScheduleManager
 import com.glance.update.UpdateChecker
 import java.util.concurrent.Executors
@@ -42,6 +45,7 @@ class KioskService : Service() {
     private lateinit var powerManager: PowerManager
     private lateinit var devicePolicyManager: DevicePolicyManager
     private var mqttStateManager: MqttStateManager? = null
+    private var batteryMonitor: BatteryMonitor? = null
     private var scheduleManager: ScheduleManager? = null
     private var remoteConfigServer: RemoteConfigServer? = null
     private var wakeLock: PowerManager.WakeLock? = null
@@ -52,12 +56,22 @@ class KioskService : Service() {
 
     @Volatile private var reportedScreenOn = true
     @Volatile private var reportedBrightness = 5
+    @Volatile private var reportedBattery: BatteryStatus? = null
 
     private val screenStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
-                Intent.ACTION_SCREEN_ON -> updateScreenState(true)
-                Intent.ACTION_SCREEN_OFF -> updateScreenState(false)
+                Intent.ACTION_SCREEN_ON -> reportScreenState(true)
+                Intent.ACTION_SCREEN_OFF -> reportScreenState(false)
+            }
+        }
+    }
+
+    private val powerStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                Intent.ACTION_POWER_CONNECTED,
+                Intent.ACTION_POWER_DISCONNECTED -> restoreScreenOffAfterPowerEvent()
             }
         }
     }
@@ -128,6 +142,8 @@ class KioskService : Service() {
     override fun onDestroy() {
         destroyed = true
         mainHandler.removeCallbacksAndMessages(null)
+        batteryMonitor?.stop()
+        batteryMonitor = null
         mqttStateManager?.stop()
         mqttStateManager = null
         remoteConfigServer?.stop()
@@ -137,6 +153,7 @@ class KioskService : Service() {
         releaseWakeLock()
         if (initialized) {
             unregisterReceiver(screenStateReceiver)
+            unregisterReceiver(powerStateReceiver)
             unregisterReceiver(activityStateReceiver)
         }
         initialized = false
@@ -158,6 +175,15 @@ class KioskService : Service() {
         )
         ContextCompat.registerReceiver(
             this,
+            powerStateReceiver,
+            IntentFilter().apply {
+                addAction(Intent.ACTION_POWER_CONNECTED)
+                addAction(Intent.ACTION_POWER_DISCONNECTED)
+            },
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        ContextCompat.registerReceiver(
+            this,
             activityStateReceiver,
             IntentFilter().apply {
                 addAction(ACTION_REPORT_SCREEN_STATE)
@@ -167,6 +193,7 @@ class KioskService : Service() {
         )
 
         startMqtt()
+        startBatteryMonitor()
         scheduleManager = ScheduleManager(this, config).also { it.start() }
         reconcileRemoteConfigServer()
     }
@@ -178,11 +205,22 @@ class KioskService : Service() {
             stateProvider = {
                 MqttReportedState(
                     screenOn = reportedScreenOn,
-                    brightness = reportedBrightness
+                    brightness = reportedBrightness,
+                    battery = reportedBattery
                 )
             },
             commandHandler = ::handleLightCommand
         ).also { it.start() }
+    }
+
+    private fun startBatteryMonitor() {
+        batteryMonitor = BatteryMonitor(this) { status ->
+            reportedBattery = status
+            mqttStateManager?.publishBatteryState()
+        }.also {
+            it.start()
+            reportedBattery = it.status
+        }
     }
 
     private fun reloadConfig() {
@@ -284,7 +322,9 @@ class KioskService : Service() {
             return
         }
 
+        mainHandler.removeCallbacks(restoreScreenOffRunnable)
         config.requestedScreenOn = targetScreenOn
+        applyStayAwakePolicy(targetScreenOn)
         val wasScreenOn = reportedScreenOn
         reportedScreenOn = targetScreenOn
         mqttStateManager?.publishCurrentState()
@@ -326,12 +366,52 @@ class KioskService : Service() {
         }
     }
 
+    /** A deliberate state change inside Glance also redefines what the kiosk is asking for. */
     private fun updateScreenState(isOn: Boolean) {
-        config.requestedScreenOn = isOn
+        if (config.requestedScreenOn != isOn) {
+            config.requestedScreenOn = isOn
+            applyStayAwakePolicy(isOn)
+        }
+        reportScreenState(isOn)
+    }
+
+    /**
+     * A hardware transition only describes what the display is doing. Android wakes the display
+     * for reasons of its own — a charger connecting is the common one on a wall-mounted tablet —
+     * and such a wake must not be mistaken for a request to abandon the screen schedule.
+     */
+    private fun reportScreenState(isOn: Boolean) {
         if (reportedScreenOn == isOn) return
         reportedScreenOn = isOn
         mqttStateManager?.publishCurrentState()
         Log.i(TAG, "Reported hardware screen state: $isOn")
+    }
+
+    /**
+     * Undoes a display wake caused by the charger. Many devices light up whenever power is
+     * connected or removed, which turns a smart plug that maintains the battery overnight into a
+     * light in the room. The platform behaviour cannot be disabled, so it is reverted instead.
+     */
+    private fun restoreScreenOffAfterPowerEvent() {
+        if (config.requestedScreenOn) return
+        // The display may not have woken yet, so the decision waits for the platform to settle.
+        mainHandler.removeCallbacks(restoreScreenOffRunnable)
+        mainHandler.postDelayed(restoreScreenOffRunnable, POWER_EVENT_SETTLE_MS)
+    }
+
+    private val restoreScreenOffRunnable = Runnable {
+        if (destroyed) return@Runnable
+        if (!PowerWakePolicy.shouldRestoreScreenOff(config.requestedScreenOn, reportedScreenOn)) {
+            return@Runnable
+        }
+        Log.i(TAG, "Display woke on a power event while the schedule asks for OFF")
+        handleLightCommand(MqttLightCommand(screenOn = false, brightness = null))
+    }
+
+    private fun applyStayAwakePolicy(screenOn: Boolean) {
+        // The kiosk keeps the tablet awake while it is plugged in, which is exactly wrong once the
+        // screen is meant to be off: any stray wake would then last until the next ON transition.
+        LockTaskHelper.setStayAwakeWhilePlugged(this, screenOn)
     }
 
     private fun updateBrightness(brightness: Int, publish: Boolean = true) {
@@ -413,6 +493,9 @@ class KioskService : Service() {
         private const val WAKE_LOCK_TIMEOUT_MS = 10_000L
         private const val WAKE_LOCK_RELEASE_DELAY_MS = 3_000L
         private const val ACTIVITY_CONTROL_RETRY_MS = 750L
+        // Long enough for Android to finish its own charger handling, short enough that the room
+        // does not stay lit.
+        private const val POWER_EVENT_SETTLE_MS = 2_000L
         private const val REMOTE_SERVER_RELOAD_DELAY_MS = 750L
 
         const val ACTION_RELOAD_CONFIG = "com.glance.action.RELOAD_CONFIG"
