@@ -135,7 +135,7 @@ class ScheduleManager(
 
     private fun getPendingIntent(action: String): PendingIntent {
         val requestCode = if (action == ACTION_SCREEN_ON) REQUEST_CODE_ON else REQUEST_CODE_OFF
-        val intent = Intent(context, ScheduleReceiver::class.java).setAction(action)
+        val intent = Intent(action).setClass(context, ScheduleReceiver::class.java)
         return PendingIntent.getBroadcast(
             context,
             requestCode,
