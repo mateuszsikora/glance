@@ -89,7 +89,7 @@ dependencies {
     implementation("androidx.viewpager2:viewpager2:1.0.0")
 
     // JSON
-    implementation("org.json:json:20231013")
+    implementation("org.json:json:20260814")
 
     // MQTT (pure Java client; no Android background service dependency)
     implementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5")
