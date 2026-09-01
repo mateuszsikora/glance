@@ -86,7 +86,7 @@ dependencies {
     implementation("androidx.core:core-ktx:1.19.0")
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("com.google.android.material:material:1.14.0")
-    implementation("androidx.viewpager2:viewpager2:1.0.0")
+    implementation("androidx.viewpager2:viewpager2:1.1.0")
 
     // JSON
     implementation("org.json:json:20231013")
