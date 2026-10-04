@@ -16,9 +16,7 @@ import androidx.core.app.NotificationCompat
 import com.glance.GlanceApp
 import com.glance.MainActivity
 import com.glance.R
-import com.glance.content.ContentSchedulePolicy
 import com.glance.update.UpdateChecker
-import java.time.LocalDateTime
 import java.util.concurrent.Executors
 
 /**
@@ -33,8 +31,6 @@ class WatchdogService : Service() {
     private var reloadPendingUntilScreenOn = false
     private var destroyed = false
     private val stalePolicy = StaleDashboardPolicy()
-    private val probeExecutor = Executors.newSingleThreadExecutor()
-    private var probeInFlight = false
     private val powerManager by lazy {
         getSystemService(POWER_SERVICE) as PowerManager
     }
@@ -152,42 +148,7 @@ class WatchdogService : Service() {
                     "heap=${memoryInfo.heapUsedPercent}%"
             )
         }
-        probeDashboardReachability()
         sendBroadcast(Intent(ACTION_HEALTH_CHECK).setPackage(packageName))
-    }
-
-    /**
-     * The in-page health check cannot see a dashboard whose live connection died while the
-     * page itself stayed loaded, so the host is probed out of band instead.
-     */
-    private fun probeDashboardReachability() {
-        if (probeInFlight || destroyed) return
-        val url = activeDashboardUrl() ?: return
-        probeInFlight = true
-        probeExecutor.execute {
-            val reachable = DashboardReachabilityProbe.isReachable(url)
-            handler.post {
-                probeInFlight = false
-                if (destroyed) return@post
-                if (!stalePolicy.onProbeResult(SystemClock.elapsedRealtime(), reachable)) return@post
-                if (powerManager.isInteractive) {
-                    Log.i(TAG, "Dashboard host answered again, reloading the stale page")
-                    triggerWebViewReload()
-                } else {
-                    reloadPendingUntilScreenOn = true
-                }
-            }
-        }
-    }
-
-    private fun activeDashboardUrl(): String? {
-        val config = GlanceApp.instance.appConfig
-        return ContentSchedulePolicy.activeUrls(
-            now = LocalDateTime.now(),
-            defaultUrls = config.dashboardUrls,
-            scheduleEnabled = config.contentScheduleEnabled,
-            profiles = config.contentProfiles
-        ).firstOrNull()?.takeIf(String::isNotBlank)
     }
 
     private fun triggerWebViewReload() {
@@ -261,7 +222,6 @@ class WatchdogService : Service() {
     override fun onDestroy() {
         destroyed = true
         handler.removeCallbacksAndMessages(null)
-        probeExecutor.shutdownNow()
         updateExecutor.shutdown()
         loopsStarted = false
         super.onDestroy()
