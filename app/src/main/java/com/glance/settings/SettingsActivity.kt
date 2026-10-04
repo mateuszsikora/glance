@@ -9,7 +9,6 @@ import android.os.Bundle
 import android.provider.Settings as AndroidSettings
 import android.text.InputType
 import android.text.format.DateFormat
-import android.webkit.WebView
 import android.view.View
 import android.view.WindowManager
 import android.widget.EditText
@@ -713,39 +712,7 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun showDebugInfo() {
-        val runtime = Runtime.getRuntime()
-        val usedMem = (runtime.totalMemory() - runtime.freeMemory()) / 1024 / 1024
-        val totalMem = runtime.maxMemory() / 1024 / 1024
-
-        val webViewPackage = WebView.getCurrentWebViewPackage()
-        val webViewVersion = webViewPackage?.versionName ?: "unknown"
-
-        val uptimeMs = android.os.SystemClock.elapsedRealtime()
-        val uptimeHours = uptimeMs / 1000 / 3600
-        val uptimeMinutes = (uptimeMs / 1000 / 60) % 60
-
-        val isDeviceOwner = LockTaskHelper.isDeviceOwner(this)
-
-        val info = buildString {
-            appendLine("Package: ${packageName}")
-            appendLine("Version: ${UpdateSummary.of(config).installedVersion}")
-            appendLine("Device Owner: $isDeviceOwner")
-            appendLine("WebView: $webViewVersion")
-            appendLine("Memory: ${usedMem}MB / ${totalMem}MB")
-            appendLine("Uptime: ${uptimeHours}h ${uptimeMinutes}m")
-            appendLine("Dashboard URLs: ${config.dashboardUrls.size}")
-            appendLine("Content profiles: ${if (config.contentScheduleEnabled) config.contentProfiles.size else "disabled"}")
-            appendLine("Idle screen: ${if (config.idleScreenEnabled) "${config.idleTimeoutMinutes} min" else "disabled"}")
-            appendLine("Allowed login origins: ${config.dashboardAllowedOrigins.size}")
-            appendLine("Schedule: ${if (config.scheduleEnabled) "${config.screenOnTime}-${config.screenOffTime}" else "disabled"}")
-            appendLine("Exact alarms: ${canScheduleExactAlarms()}")
-            appendLine("Auto brightness: ${config.autoBrightnessEnabled}")
-            appendLine("MQTT: ${if (config.mqttEnabled) "${config.mqttBrokerHost}:${config.mqttBrokerPort}" else "disabled"}")
-            appendLine("MQTT discovery: ${config.mqttDiscoveryPrefix}")
-            appendLine("Remote configuration: ${if (config.remoteConfigEnabled) "enabled" else "disabled"}")
-        }
-
-        textDebugInfo.text = info
+        textDebugInfo.text = DebugInfoProvider(this, config).snapshot().asText()
     }
 
     private fun showRemoteConfigAddress(enabled: Boolean = switchRemoteConfig.isChecked) {

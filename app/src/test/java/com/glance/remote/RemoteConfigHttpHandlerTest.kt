@@ -1,15 +1,24 @@
 package com.glance.remote
 
 import android.content.Context
+import android.os.Looper
+import android.view.ViewGroup
+import android.widget.EditText
+import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
 import androidx.test.core.app.ApplicationProvider
 import com.glance.BuildConfig
+import com.glance.R
 import com.glance.config.AppConfig
 import com.glance.content.ContentProfile
+import com.glance.settings.DebugInfoProvider
+import com.glance.settings.DebugInfoSnapshot
+import com.glance.settings.SettingsActivity
 import com.glance.update.UpdateCheckState
 import java.io.BufferedOutputStream
 import java.io.ByteArrayOutputStream
-import java.net.URLEncoder
 import java.net.Socket
+import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.time.DayOfWeek
@@ -21,8 +30,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowDialog
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [26])
@@ -590,6 +602,115 @@ class RemoteConfigHttpHandlerTest {
         val disabled = validSettings(csrf(handler, cookie))
         assertEquals(303, handler.handle(post("/save", disabled, cookie)).status)
         assertFalse(config.autoUpdateEnabled)
+    }
+
+    @Test
+    fun tabletAndRemoteViewsRenderTheSameSharedDiagnostics() {
+        val controller = Robolectric.buildActivity(SettingsActivity::class.java).setup()
+        try {
+            val dialog = ShadowDialog.getLatestDialog() as AlertDialog
+            val custom = dialog.findViewById<ViewGroup>(androidx.appcompat.R.id.custom)!!
+            (custom.getChildAt(0) as EditText).setText(PIN)
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+            shadowOf(Looper.getMainLooper()).idle()
+            val tablet = controller.get().findViewById<TextView>(R.id.textDebugInfo).text.toString()
+            val handler = handler()
+            val page = handler.handle(get("/", login(handler))).text()
+            val remote = page.substringAfter("<pre class=\"debug-summary\">").substringBefore("</pre>")
+            // Runtime measurements are sampled independently for each view.
+            fun stableLines(text: String) = text.lines().filterNot {
+                it.startsWith("App Java heap used:") || it.startsWith("Device RAM available:") ||
+                    it.startsWith("App data volume available:")
+            }
+            assertEquals(stableLines(tablet), stableLines(remote))
+            assertTrue(tablet.contains("App Java heap used: "))
+            assertTrue(remote.contains("App Java heap used: "))
+        } finally {
+            controller.pause().stop().destroy()
+        }
+    }
+
+    @Test
+    fun diagnosticsAreSampledOnlyForAuthenticatedSettingsPages() {
+        var samples = 0
+        var now = 1_000L
+        val handler = RemoteConfigHttpHandler(config, { changes++ }, now = { now }, debugInfo = {
+            samples++
+            DebugInfoSnapshot(listOf("Private diagnostic marker" to "sample $samples"))
+        })
+        fun assertHidden(request: RemoteHttpRequest) {
+            assertFalse(handler.handle(request).text().contains("Private diagnostic marker"))
+        }
+        assertHidden(get("/"))
+        assertHidden(get("/", "glance_session=invalid"))
+        assertHidden(get("/debug-info"))
+        assertHidden(post("/login", mapOf("pin" to "0000")))
+        assertEquals(0, samples)
+
+        val cookie = login(handler)
+        assertEquals(0, samples)
+        assertTrue(handler.handle(get("/", cookie)).text().contains("sample 1"))
+        assertEquals(1, samples)
+        now += 31 * 60_000
+        assertHidden(get("/", cookie))
+        val renewedCookie = login(handler)
+        config.setSettingsPin("987654")
+        assertHidden(get("/", renewedCookie))
+        assertEquals(1, samples)
+
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().clear().commit()
+        assertHidden(get("/", renewedCookie))
+        assertEquals(1, samples)
+    }
+
+    @Test
+    fun reloadSamplesFreshDiagnosticsWithoutSavingOrRunningCallbacks() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        var uptime = 60_000L
+        var used = 10L * 1024 * 1024
+        val provider = DebugInfoProvider(context, config,
+            heapBytes = { used to 256L * 1024 * 1024 }, elapsedRealtime = { uptime })
+        var updates = 0
+        val handler = RemoteConfigHttpHandler(config, { changes++ }, { updates++ },
+            debugInfo = provider::snapshot)
+        val cookie = login(handler)
+        val before = prefs.all.toMap()
+        val first = handler.handle(get("/", cookie))
+        uptime += 60_000
+        used *= 2
+        val second = handler.handle(get("/", cookie))
+        assertTrue(first.text().contains("App Java heap used: 10 MiB"))
+        assertTrue(first.text().contains("Device uptime (including sleep): 0h 1m"))
+        assertTrue(second.text().contains("App Java heap used: 20 MiB"))
+        assertTrue(second.text().contains("Device uptime (including sleep): 0h 2m"))
+        assertEquals(null, first.afterSend)
+        assertEquals(null, second.afterSend)
+        assertEquals(0, changes)
+        assertEquals(0, updates)
+        assertEquals(before, prefs.all)
+        val wire = ByteArrayOutputStream()
+        RemoteHttpCodec.writeResponse(BufferedOutputStream(wire), second)
+        assertTrue(wire.toString("UTF-8").contains("Cache-Control: no-store"))
+    }
+
+    @Test
+    fun rendersSharedSummaryWithHtmlEscapingAndUnavailableValues() {
+        val provider = DebugInfoProvider(ApplicationProvider.getApplicationContext(), config,
+            webViewVersion = { "<script>example & \"version\"</script>" },
+            deviceOwner = { null }, exactAlarms = { null })
+        val handler = RemoteConfigHttpHandler(config, { changes++ }, debugInfo = provider::snapshot)
+        val page = handler.handle(get("/", login(handler))).text()
+        val section = page.substringAfter("<section id=\"debug-info\"").substringBefore("</section>")
+        assertTrue(page.contains("href=\"#debug-info\""))
+        assertTrue(section.contains("&lt;script&gt;example &amp; &quot;version&quot;&lt;/script&gt;"))
+        assertFalse(section.contains("<script>"))
+        assertFalse(section.contains("<input"))
+        assertFalse(section.contains("<button"))
+        assertTrue(section.contains("Device Owner: Unavailable"))
+        assertTrue(section.contains("Exact-alarm capability: Unavailable"))
+        assertTrue(page.contains("white-space:pre-wrap; overflow-wrap:anywhere"))
     }
 
     private fun handler() = RemoteConfigHttpHandler(config, { changes++ })
