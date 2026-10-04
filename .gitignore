@@ -24,3 +24,7 @@
 
 # Misc
 *.log
+
+# Locally imported recovery artifacts and Python tooling cache
+tools/updater/recovery/
+__pycache__/

@@ -713,6 +713,59 @@ class RemoteConfigHttpHandlerTest {
         assertTrue(page.contains("white-space:pre-wrap; overflow-wrap:anywhere"))
     }
 
+    @Test
+    fun recoveryRequiresAuthenticationCsrfAndExactConfirmation() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.getSharedPreferences("glance_restore", 0).edit().clear().commit()
+        val state = com.glance.update.RestoreState(context)
+        val digest = "a".repeat(64)
+        state.offer("""{"versionCode":1000201,"codeIdentity":"code30","dataContract":"${"b".repeat(64)}","kind":"restore","url":"https://host/a.apk","sha256":"$digest"}""")
+        config.updateUrl = "https://host/glance-update.json"
+        val calls = mutableListOf<String>()
+        val handler = RemoteConfigHttpHandler(config, {}, recoveryState = state,
+            onRecoveryRequested = { action, _, _ -> calls += action })
+        for (path in listOf("/restore-check", "/restore-install", "/restore-resume", "/restore-cancel")) {
+            assertEquals(401, handler.handle(post(path, emptyMap())).status)
+        }
+        val cookie = login(handler)
+        for (path in listOf("/restore-check", "/restore-install", "/restore-resume", "/restore-cancel")) {
+            assertEquals(403, handler.handle(post(path, mapOf("csrf" to "wrong"), cookie)).status)
+            assertEquals(404, handler.handle(get(path, cookie)).status)
+        }
+        assertTrue(calls.isEmpty())
+        val csrf = csrf(handler, cookie)
+        val params = mapOf("csrf" to csrf, "restoreVersion" to "1000201", "restoreHash" to digest, "confirmRestore" to "yes")
+        assertEquals(409, handler.handle(post("/restore-install", params + ("restoreHash" to "stale"), cookie)).status)
+        assertEquals(409, handler.handle(post("/restore-install", params - "confirmRestore", cookie)).status)
+        assertEquals(303, handler.handle(post("/restore-install", params, cookie)).status)
+        assertEquals(303, handler.handle(post("/restore-resume", mapOf("csrf" to csrf), cookie)).status)
+        assertEquals(listOf("restore", "resume"), calls)
+        val html = handler.handle(get("/", cookie)).text()
+        assertTrue(html.contains("code30 / installation 1000201"))
+        assertTrue(html.contains("Android installation number"))
+    }
+
+    @Test
+    fun pendingInstallationCanBeCancelledWithoutUpdateUrlAndOnlyForPreviewedSession() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.getSharedPreferences("glance_restore", 0).edit().clear().commit()
+        val state = com.glance.update.RestoreState(context)
+        state.begin(com.glance.update.UpdateManifest(1000201, "target", "https://host/a.apk", "a".repeat(64)),
+            "current", sessionId = 123)
+        val calls = mutableListOf<Triple<String, Int, String>>()
+        val handler = RemoteConfigHttpHandler(config, {}, recoveryState = state,
+            onRecoveryRequested = { action, version, session -> calls += Triple(action, version, session) })
+        val cookie = login(handler)
+        val params = mapOf("csrf" to csrf(handler, cookie), "pendingVersion" to "1000201", "pendingSession" to "123")
+        assertTrue(handler.handle(get("/", cookie)).text().contains("Cancel pending installation"))
+        assertEquals(401, handler.handle(post("/restore-cancel", params)).status)
+        assertEquals(403, handler.handle(post("/restore-cancel", params - "csrf", cookie)).status)
+        assertEquals(409, handler.handle(post("/restore-cancel", params + ("pendingSession" to "122"), cookie)).status)
+        assertTrue(calls.isEmpty())
+        assertEquals(303, handler.handle(post("/restore-cancel", params, cookie)).status)
+        assertEquals(listOf(Triple("cancel", 1000201, "123")), calls)
+    }
+
     private fun handler() = RemoteConfigHttpHandler(config, { changes++ })
 
     private fun csrf(handler: RemoteConfigHttpHandler, cookie: String): String {

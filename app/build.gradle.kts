@@ -1,4 +1,5 @@
 import java.util.Properties
+import java.security.MessageDigest
 
 plugins {
     id("com.android.application")
@@ -32,6 +33,18 @@ val releaseVersionName = providers.gradleProperty("versionName").getOrElse(
     if (releaseVersionCode == baseVersionCode) baseVersionName else "$baseVersionName-$releaseVersionCode"
 )
 
+// Source identity is independent of Android's monotonically increasing installation number.
+val codeIdentity = providers.gradleProperty("codeIdentity").getOrElse("local")
+require(Regex("[A-Za-z0-9._-]{1,80}").matches(codeIdentity))
+val updateKind = providers.gradleProperty("updateKind").getOrElse("normal")
+require(updateKind in listOf("normal", "restore"))
+require(releaseVersionCode in 1..2100000000)
+// Exact reader/writer compatibility: unknown migrations fail closed, including credential format.
+val dataFiles = listOf("config/AppConfig.kt", "config/SecretStore.kt", "content/ContentProfile.kt", "kiosk/LockTaskHelper.kt")
+val dataDigest = MessageDigest.getInstance("SHA-256")
+dataFiles.forEach { dataDigest.update(file("src/main/java/com/glance/$it").readBytes()) }
+val dataContract = dataDigest.digest().joinToString("") { "%02x".format(it) }
+
 android {
     namespace = "com.glance"
     compileSdk = 37
@@ -42,6 +55,11 @@ android {
         targetSdk = 34
         versionCode = releaseVersionCode
         versionName = releaseVersionName
+        buildConfigField("String", "CODE_IDENTITY", "\"$codeIdentity\"")
+        buildConfigField("String", "DATA_CONTRACT", "\"$dataContract\"")
+        manifestPlaceholders["codeIdentity"] = codeIdentity
+        manifestPlaceholders["dataContract"] = dataContract
+        manifestPlaceholders["updateKind"] = updateKind
     }
 
     signingConfigs {

@@ -201,6 +201,20 @@ internal class RemoteConfigHttpHandler(
     private val now: () -> Long = System::currentTimeMillis,
     private val debugInfo: () -> DebugInfoSnapshot = {
         DebugInfoProvider(GlanceApp.instance, config).snapshot()
+    },
+    private val recoveryState: com.glance.update.RestoreState = com.glance.update.RestoreState(com.glance.GlanceApp.instance),
+    private val onRecoveryRequested: (String, Int, String) -> Unit = { action, version, hash ->
+        Thread({
+            runCatching {
+                val checker = com.glance.update.UpdateChecker(com.glance.GlanceApp.instance)
+                when (action) {
+                    "check" -> checker.checkRestore()
+                    "restore" -> checker.restoreNow(version, hash)
+                    "resume" -> checker.resumeUpdates()
+                    "cancel" -> checker.cancelPending(version, hash.toIntOrNull() ?: -1)
+                }
+            }.onFailure { recoveryState.record("Recovery operation failed: ${it.message}") }
+        }, "glance-recovery").start()
     }
 ) {
     private data class Session(
@@ -230,6 +244,10 @@ internal class RemoteConfigHttpHandler(
             "POST" to "/save" -> save(request)
             "POST" to "/update-check" -> requestUpdate(request, installNow = false)
             "POST" to "/update-install" -> requestUpdate(request, installNow = true)
+            "POST" to "/restore-check" -> requestRecovery(request, "check")
+            "POST" to "/restore-install" -> requestRecovery(request, "restore")
+            "POST" to "/restore-cancel" -> requestRecovery(request, "cancel")
+            "POST" to "/restore-resume" -> requestRecovery(request, "resume")
             "POST" to "/logout" -> logout(request)
             else -> RemoteHttpResponse.html(404, page("Not found", "The requested page does not exist."))
         }
@@ -354,6 +372,35 @@ internal class RemoteConfigHttpHandler(
             }
         }
         synchronized(sessionLock) { session.notice = notice }
+        return RemoteHttpResponse.redirect("/")
+    }
+
+    private fun requestRecovery(request: RemoteHttpRequest, action: String): RemoteHttpResponse {
+        val session = sessionFor(request) ?: return RemoteHttpResponse.html(401, page("Sign in", "Authentication required."))
+        val parameters = formParameters(request)
+        if (!constantTimeEquals(session.csrfToken, parameters["csrf"].orEmpty())) {
+            return RemoteHttpResponse.html(403, page("Request rejected", "Invalid form token."))
+        }
+        val target = recoveryState.candidate
+        if (action == "restore" && (target == null ||
+                parameters["restoreVersion"] != target.versionCode.toString() ||
+                parameters["restoreHash"] != target.sha256 || parameters["confirmRestore"] != "yes")) {
+            return RemoteHttpResponse.html(409, page("Request rejected", "Reload and confirm the recovery target."))
+        }
+        if (action == "cancel" && (recoveryState.pending == 0 ||
+                parameters["pendingVersion"] != recoveryState.pending.toString() ||
+                parameters["pendingSession"] != recoveryState.sessionId.toString())) {
+            return RemoteHttpResponse.html(409, page("Request rejected", "Reload before cancelling the pending installation."))
+        }
+        if (action in setOf("check", "restore") && config.updateUrl.isBlank()) {
+            return RemoteHttpResponse.html(409, page("Request rejected", "Configure the update URL first."))
+        }
+        if (action == "cancel") {
+            onRecoveryRequested(action, parameters.getValue("pendingVersion").toInt(), parameters.getValue("pendingSession"))
+        } else {
+            onRecoveryRequested(action, target?.versionCode ?: 0, target?.sha256.orEmpty())
+        }
+        synchronized(sessionLock) { session.notice = "Recovery operation requested. Reload this page for the result." }
         return RemoteHttpResponse.redirect("/")
     }
 
@@ -521,6 +568,10 @@ internal class RemoteConfigHttpHandler(
         }
         val updateStatus = buildString {
             append(statusRow("Installed version", values.update.installedVersion))
+            append(statusRow("Code identity", com.glance.BuildConfig.CODE_IDENTITY))
+            append(statusRow("Android installation number", com.glance.BuildConfig.VERSION_CODE.toString()))
+            append(statusRow("Recovery / OTA", if (recoveryState.paused) "Paused. Resume explicitly below." else "Normal update policy"))
+            if (recoveryState.outcome.isNotBlank()) append(statusRow("Operation result", recoveryState.outcome))
             values.update.serverState?.let { append(statusRow("Update server", it)) }
                 ?: append(statusRow("Update checks", "Disabled"))
             values.update.lastOutcome?.let { append(statusRow("Last check", it)) }
@@ -666,6 +717,21 @@ internal class RemoteConfigHttpHandler(
                           <dl class="status-list">$updateStatus</dl>
                           <div class="field"><label for="updateUrl">Update manifest URL <small>blank disables updates</small></label>
                             <input id="updateUrl" name="updateUrl" value="${value("updateUrl", values.updateUrl)}" placeholder="http://192.168.1.10:8080/glance-update.json" spellcheck="false"></div>
+                          <p>Restore older code using a newly built package with a higher Android installation number. Configuration and PIN remain in place. Automatic updates stay paused until you resume them.</p>
+                          <button class="ghost" type="submit" formaction="/restore-check">Find recovery build</button>
+                          ${recoveryState.candidate?.let { target ->
+                              "<p>Recovery target: code ${escapeHtml(target.codeIdentity)} / installation ${target.versionCode}</p>" +
+                              "<input type=\"hidden\" name=\"restoreVersion\" value=\"${target.versionCode}\">" +
+                              "<input type=\"hidden\" name=\"restoreHash\" value=\"${escapeHtml(target.sha256)}\">" +
+                              "<button class=\"ghost\" type=\"submit\" name=\"confirmRestore\" value=\"yes\" formaction=\"/restore-install\">Confirm restore to ${escapeHtml(target.codeIdentity)}</button>"
+                          }.orEmpty()}
+                          ${if (recoveryState.pending != 0) {
+                              "<p>Pending installation: ${recoveryState.pending}. Cancel only if you want to stop this installation. Updates will remain paused.</p>" +
+                              "<input type=\"hidden\" name=\"pendingVersion\" value=\"${recoveryState.pending}\">" +
+                              "<input type=\"hidden\" name=\"pendingSession\" value=\"${recoveryState.sessionId}\">" +
+                              "<button class=\"ghost\" type=\"submit\" formaction=\"/restore-cancel\">Cancel pending installation</button>"
+                          } else ""}
+                          ${if (recoveryState.paused) "<button class=\"ghost\" type=\"submit\" formaction=\"/restore-resume\">Resume normal updates</button>" else ""}
                           ${checkbox("autoUpdateEnabled", "Install newer builds automatically", checked("autoUpdateEnabled", values.autoUpdateEnabled))}
                           <p class="hint">Glance contacts the server hourly either way. With this off it only reports what is on offer and waits for the install button below.</p>
                           <p class="hint">Use the buttons right after publishing a build; they also retry a version that was abandoned after repeated failures. Save the URL first — both read the stored value, not the field above.</p>

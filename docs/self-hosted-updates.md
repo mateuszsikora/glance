@@ -27,8 +27,7 @@ dependency, and the key never leaves it.
   installation confirmation dialog; without it there is no way to install from a LockTask kiosk,
   and Glance skips the update instead of showing a prompt nobody can reach.
 - You have the signing key that produced the build currently installed on the tablet. Android
-  refuses an update signed by any other certificate, and Glance checks this before downloading
-  rather than discovering it at install time.
+  refuses an update signed by any other certificate, and Glance checks the downloaded archive before opening an installation session.
 - The tablet can reach the machine serving the updates.
 
 ## 1. Publish a release
@@ -43,9 +42,19 @@ git tag v1.5 && git push origin v1.5
 Releasing is deliberate rather than automatic on every merge. A tablet on a wall has no ADB and
 cannot be downgraded, so an unreviewed commit is a poor thing to install on it unattended.
 
-`versionName` comes from the tag. `versionCode` comes from the commit count, because Android
-compares it numerically and refuses an update that does not increase it — tag names are not
-reliably ordered that way.
+`versionName` comes from the tag. `codeIdentity` identifies the source commit, independently of
+Android's installation counter. All release and recovery artifacts use the **same Android workflow**
+sequence: `versionCode = 1000000 + GITHUB_RUN_NUMBER * 100 + GITHUB_RUN_ATTEMPT` (attempts 1–99).
+Commit count no longer determines installation order. Gradle generates the manifest and
+`BuildConfig.VERSION_CODE` together; APKs are never patched after compilation.
+
+The million offset migrates existing builds such as 30/31. Each new workflow run reserves 100
+numbers, including reruns. A rerun of an old workflow run may be older than an already published
+artifact and is correctly ignored: start a new run instead. Keep this workflow's identity and
+sequence across releases; when moving to another repository/workflow or if devices already have
+higher custom numbers, choose a new shared offset above **all** installed/published numbers before
+building anything. Do not mix independently numbered local releases into this feed. The Gradle
+build rejects numbers outside Android's supported positive range up to 2100000000.
 
 **The published APK is unsigned, and always will be.** This project does not hold a signing key on
 anyone's behalf. A Device Owner installation can only be updated by an APK carrying the same
@@ -103,8 +112,8 @@ http://<host>:8080/<key>/glance-<versionCode>.apk
 ```
 
 `glance-update.json` is written atomically and last, so a tablet never reads a manifest pointing at
-an APK that is still being copied. The five most recent APKs are kept so a tablet that is
-mid-download does not lose its URL.
+an APK that is still being copied. APKs are retained so a tablet mid-download or awaiting
+recovery confirmation does not lose its URL.
 
 ## Tablets with different keys
 
@@ -172,7 +181,7 @@ Use HTTPS if your setup allows it. It costs nothing and removes the nuisance cas
 
 ## Failure behaviour
 
-Android cannot downgrade a package, so a broken build cannot be rolled back automatically. Two
+Recovery requires an explicit operator decision. Two
 guards limit the damage:
 
 - Glance will not install a replacement until the running build has been up for 15 minutes. A build
@@ -184,7 +193,7 @@ Both guards are bypassed by an explicit install from the settings page. A manual
 them when automatic installation is enabled, because in that mode checking and installing are one
 action. With automatic installation disabled, checking alone never installs anything.
 
-The way out of a bad build is a **higher** `versionCode` containing the fix. Keep the signing key
+The way out of a bad build is a **higher** `versionCode` containing a fix or a reviewed rebuild of older code (below). Keep the signing key
 backed up: without it no tablet provisioned with it can ever be updated again, and Device Owner
 apps cannot be replaced by a differently-signed APK without a factory reset.
 
@@ -193,3 +202,144 @@ apps cannot be replaced by a differently-signed APK without a factory reset.
 Update checks contact only the host you configure. That host learns the tablet's IP address and the
 time of each check. Glance has no default update URL, so an installation that is not configured for
 updates makes no such request at all.
+
+
+## Restore older code (Android 8 and later)
+
+This is **not an Android versionCode downgrade**. Android prevents installation of a lower
+`versionCode` ([Android versioning](https://developer.android.com/studio/publish/versioning)).
+Device Owner removes the installation confirmation dialog
+([PackageInstaller](https://developer.android.com/reference/android/content/pm/PackageInstaller));
+it does not grant a downgrade exemption. In
+[Android 8 PackageManagerService](https://android.googlesource.com/platform/frameworks/base/+/android-8.0.0_r1/services/core/java/com/android/server/pm/PackageManagerService.java#15625),
+the downgrade flag requires a debuggable platform or debuggable installed package. It is not a
+supported production Device Owner recovery mechanism. Android 10 introduced the system rollback
+service; [RollbackManager](https://android.googlesource.com/platform/frameworks/base/+/android-10.0.0_r1/core/java/android/content/rollback/RollbackManager.java)
+is a system API protected by MANAGE_ROLLBACKS / TEST_MANAGE_ROLLBACKS. An ordinary Device Owner
+on Android 8 has neither that API nor its privileges. No hidden APIs, root, uninstall or data reset
+are used here.
+
+### Migration from build 31 and preparation of build 30
+
+1. First deploy a normal release containing this recovery implementation, signed with the tablet's
+   existing key. Build 31 cannot expose a recovery panel it does not contain. Its legacy OTA client
+   can install this bridge because the installation number increases and the four original JSON
+   fields remain present.
+2. Run the **Android** workflow manually on the reviewed current branch, with `restore_ref` set to
+   the older source commit/tag. For historical build 30 in this repository that commit is
+   `ecf8b56c3e4ac6d4a7219f6989f5f8e640291551`; build 31 is `32889b9f13d49c9f266e432e5afc4f2a22722b26`.
+   Verify source refs for your own release history; commit counts alone are not unique identities.
+   This run builds/tests/lints the recovery variant and produces an **unsigned artifact only**.
+   It does not publish a GitHub release or install anything.
+3. Download the `recovery-unsigned-<number>` artifact. After review, put its `build.json` and
+   `glance-unsigned.apk` in `tools/updater/recovery/` on the signing host (mounted read-only as
+   `/recovery`). Copy the APK first and JSON last. Start/update the updater container with the new
+   code. It checks the unsigned hash and actual APK identity, signs with each existing key, and
+   exposes `<key>/glance-restore.json`. The ordinary `glance-update.json` remains on its own channel.
+   The two channels share a persistent per-key installation high-water mark (`.last-signed`). An
+   import older than a published artifact is refused; request a new workflow run instead. A failing
+   key does not block the remaining keys: each poll attempts every eligible target, then reports
+   whether any failed. Successful targets retain their publication state; failed ones retry.
+4. Log in to the tablet's remote panel with its PIN. Under Self-hosted updates, use **Find recovery
+   build**, inspect the current code/installation number and the recovery target, then click
+   **Confirm restore**. These are authenticated POSTs with the session's CSRF token. Confirmation
+   is bound to the previewed installation number and SHA-256, not whatever the server publishes later.
+5. Reload after the restart. **Operation result** reports completion or the Android failure.
+   A commit to PackageInstaller is only pending, never reported as successful installation. Success
+   is reconciled against the running installation number on startup. A pending request below the
+   running number is cleared as superseded, so returning through a legacy build which cannot
+   consume recovery bookkeeping does not unexpectedly pause later updates. A failed/missing Android
+   session is reported and can be retried explicitly. The installer persists Android's boot counter:
+   after a device reboot, a sealed but inactive session from an earlier boot is abandoned too
+   (Android 8 does not restore its queued commit or result callback). A process restart within the
+   same boot does not abandon a sealed commit. Actively processed sessions are also retained.
+   If boot identity is unavailable or a session otherwise remains stuck, use **Cancel pending
+   installation** in the authenticated panel. Cancellation requires CSRF and the displayed session
+   identity, works even with the update URL cleared, and keeps OTA paused until explicit resume.
+6. OTA stays persistently **paused after recovery**, including across crashes, restarts and settings
+   saves. Even forced ordinary installation cannot bypass this pause. Use **Resume normal updates**
+   in the authenticated panel to remove it. The existing automatic-update switch still applies;
+   resume does not turn that switch on. The next normal release uses a later workflow number and
+   installs normally, even if its source commit count is below the recovery installation number.
+
+Example sequence (illustrative numbers): code31 / installation31 → bridge / installation1000101
+→ code30 / installation1000201 → code32 / installation1000301. Each arrow is an ordinary Android
+package replacement. Package name, signing certificate, app UID, preferences, PIN hashes,
+Android Keystore secrets and Device Owner registration stay in place.
+
+`prepare-source.py` exports the older source and backports the current update package, remote panel,
+application startup reconciliation, diagnostic providers needed by the current remote panel,
+manifest and build tooling. Current update tests accompany the backport; archived UI tests remain
+with the older tablet UI, and the main checkout tests the current HTTP handler and its recovery
+authorization. It preserves the
+older application behavior while retaining the recovery controls and future update support. This is
+a deliberately identified hybrid rebuild, **not a byte-for-byte copy of the old release**. The
+`codeIdentity` is its base source commit; the CI run identifies the current recovery infrastructure.
+For local review only, without publishing:
+
+```sh
+python3 tools/updater/prepare-source.py ecf8b56 .context/recovery-review
+# Supply an installation number reserved by your common release sequence when preparing a deployable build.
+cd .context/recovery-review
+./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease \
+  -PversionCode=1000201 -PversionName=restore-30 \
+  -PcodeIdentity=ecf8b56c3e4ac6d4a7219f6989f5f8e640291551 -PupdateKind=restore
+```
+
+### Data compatibility and security boundary
+
+Glance currently keeps configuration in SharedPreferences, PINs as salted derived hashes, credentials
+in Android Keystore-backed encrypted preferences, and policy bookkeeping in a separate preferences
+file. There is no application SQL database migration to reverse. The preparation tool requires exact
+matching source for `AppConfig.kt`, `SecretStore.kt`, `ContentProfile.kt` and `LockTaskHelper.kt`.
+These cover configuration readers/writers, credential migration and encryption alias/AAD, content
+serialization and persistent Device Owner policy bookkeeping. Builds 30 and 31 match these modules.
+WebView data is left intact and continues to be read by the tablet's system WebView.
+
+A SHA-256 compatibility contract over those modules is generated by Gradle into both BuildConfig
+and signed APK metadata. The installed app persists its current contract. Recovery requires an
+exact match, including the actual signed APK metadata; an HTTP manifest cannot declare incompatible
+code safe. Unknown/changed serializers or migrations are rejected, even if the change might be
+harmless. For a future data format change, review and backport compatible readers/migrations into
+an explicit recovery source branch, test against representative current data, and extend the
+contract coverage if new persisted stores are introduced. Do not simply edit the advertised hash.
+There is no automatic lossy reverse migration or restoration of stale settings backups.
+
+Before committing, Glance verifies SHA-256, package name, signer certificate set, actual APK
+installation number, operation kind, source identity and data contract. Android verifies the
+package signature again. Keys and keystore passwords remain on the signing host; neither the
+remote panel nor the tablet receives them. The panel has no build/signing endpoint. A private
+GitHub read token also stays on the updater host.
+
+Legacy normal manifests (`versionCode`, `versionName`, `url`, `sha256`) remain accepted as ordinary
+updates. Recovery requires the additional `kind: "restore"`, `codeIdentity` and `dataContract` fields
+and signed APK metadata. Never point a legacy client's ordinary update URL at a recovery channel:
+first install the bridge. New clients reject recovery APKs through the ordinary update path even
+if someone changes the manifest's kind.
+
+Normal and recovery APKs are retained so neither a previewed recovery nor an in-flight download
+loses its URL. `GLANCE_KEEP` is no longer used; prune only artifacts no longer referenced by either
+manifest or an outstanding operator confirmation. Back up `/out` (including `.last-signed`) together
+with the signing keys. Restore publication state before resuming after a host migration.
+
+Validation: `./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease`, then
+`python3 -m unittest discover -s tools/updater -p 'test_*.py' -v` and
+`bash -n tools/updater/entrypoint.sh`. Unit/Robolectric tests cover restore→later update, pause/resume,
+PIN/config preservation, stale confirmation, authentication/CSRF, mismatched identity/signature/hash
+and incompatible data. They do not substitute for a separately authorized device acceptance test.
+
+The container integration test uses disposable keys, with networking disabled and no tablet access:
+
+```sh
+docker build -t glance-updater-test tools/updater
+docker run --rm --network none --entrypoint bash -v "$PWD:/repo:ro" \
+  -e INITIAL_APK=/repo/.context/initial.apk \
+  -e RECOVERY_APK=/repo/.context/recovery.apk \
+  -e NEXT_APK=/repo/.context/next.apk \
+  glance-updater-test /repo/tools/updater/test-publish.sh
+```
+
+Supply three already built unsigned APKs in increasing installation order (normal, recovery, normal).
+The test signs and verifies real APKs, checks isolated channels and persistent numbering, and rejects
+corrupt input and a mismatched certificate. All output and disposable keys stay in the container's
+`/tmp`; no HTTP server is started.
