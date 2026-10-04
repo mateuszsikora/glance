@@ -601,6 +601,7 @@
 
         <TextView
             android:id="@+id/textDebugInfo"
+            android:textIsSelectable="true"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:textColor="#FFB0B0B0"

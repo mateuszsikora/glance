@@ -1,9 +1,12 @@
 package com.glance.remote
 
 import android.util.Log
+import com.glance.GlanceApp
 import com.glance.config.AppConfig
 import com.glance.content.WeekDays
 import com.glance.settings.ContentProfileDraft
+import com.glance.settings.DebugInfoProvider
+import com.glance.settings.DebugInfoSnapshot
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.ByteArrayOutputStream
@@ -195,7 +198,10 @@ internal class RemoteConfigHttpHandler(
     private val config: AppConfig,
     private val onConfigChanged: () -> Unit,
     private val onUpdateRequested: (installNow: Boolean) -> Unit = {},
-    private val now: () -> Long = System::currentTimeMillis
+    private val now: () -> Long = System::currentTimeMillis,
+    private val debugInfo: () -> DebugInfoSnapshot = {
+        DebugInfoProvider(GlanceApp.instance, config).snapshot()
+    }
 ) {
     private data class Session(
         val token: String,
@@ -555,6 +561,7 @@ internal class RemoteConfigHttpHandler(
                       <a href="#mqtt">Home Assistant MQTT</a>
                       <a href="#updates">Self-hosted updates</a>
                       <a href="#access">Remote access &amp; PIN</a>
+                      <a href="#debug-info">Debug Info</a>
                       <div class="nav-note"><span aria-hidden="true">⌁</span><p>Connected directly to your tablet over the local network.</p></div>
                     </nav>
 
@@ -687,6 +694,15 @@ internal class RemoteConfigHttpHandler(
                             <div class="field"><label for="confirmPin">Confirm new PIN</label>
                               <input id="confirmPin" name="confirmPin" type="password" inputmode="numeric" minlength="4" maxlength="12" pattern="[0-9]{4,12}" autocomplete="new-password"></div>
                           </div>
+                        </div>
+                      </section>
+
+                      <section id="debug-info" class="card settings-card">
+                        ${sectionHeading("08", "Debug Info", "Read-only diagnostics from the saved configuration and current runtime.")}
+                        <div class="section-body">
+                          <p class="hint">Reload this page for a fresh sample. Reloading discards unsaved edits and does not change the tablet's display.</p>
+                          <pre class="debug-summary">${escapeHtml(debugInfo().asText())}</pre>
+                          <p class="hint">Select and copy this summary into an issue. It omits private addresses and credentials. MQTT shows whether it is enabled, not its connection state.</p>
                         </div>
                       </section>
                     </div>
@@ -875,6 +891,7 @@ internal class RemoteConfigHttpHandler(
                 .toggle-row input:checked + .toggle-track::after { left:20px; background:white; }
                 .toggle-row input:focus-visible + .toggle-track { outline:2px solid var(--blue); outline-offset:3px; }
                 .toggle-label { color:#e1e8ed; font-size:.88rem; font-weight:650; }
+                .debug-summary { white-space:pre-wrap; overflow-wrap:anywhere; font:.85rem/1.7 ui-monospace,SFMono-Regular,Menlo,monospace; }
                 .status-list { display:grid; gap:1px; margin:0 0 20px; border:1px solid var(--border); border-radius:12px; background:var(--border); overflow:hidden; }
                 .status-list > div { display:flex; flex-wrap:wrap; align-items:baseline; justify-content:space-between; gap:10px; padding:11px 14px; background:var(--surface-raised); }
                 .status-list dt { color:var(--muted); font-size:.78rem; font-weight:650; }

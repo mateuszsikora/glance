@@ -55,6 +55,13 @@ Open that address from a computer or phone, sign in with the tablet's settings P
 - Home Assistant MQTT connection and discovery;
 - remote access and the settings PIN itself.
 
+The read-only **Debug Info** section shows the same diagnostic summary as on-device settings,
+including tablet model, Android version/security patch, CPU architecture, display resolution and
+refresh rate, RAM, available data storage, battery level/temperature, power saving, WebView version,
+app Java heap usage/limit, device uptime, and configuration status.
+Reload the page for a fresh sample without interrupting the tablet display. The summary can be
+copied into an issue and omits private addresses and credentials.
+
 Changes are validated and applied immediately without restarting the application. The browser talks
 directly to the tablet—there is no Glance cloud service, account, or separate desktop application.
 Remote configuration is disabled by default and the tablet shows the correct URL when it is enabled.
