@@ -23,6 +23,9 @@ class WebViewFragment : Fragment() {
     private val binding get() = _binding!!
 
     private var url: String = ""
+    val configuredUrl: String get() = url
+    var contentGeneration: Long = 0L
+        private set
     private var allowedNavigationOrigins: List<String> = emptyList()
     private var isLoaded = false
     private var mainFrameError = false
@@ -192,6 +195,7 @@ class WebViewFragment : Fragment() {
             return
         }
         url = newUrl
+        contentGeneration++
         isLoaded = false
         _binding?.webview?.loadUrl(url)
     }
@@ -202,6 +206,7 @@ class WebViewFragment : Fragment() {
             return
         }
         val currentBinding = _binding ?: return
+        contentGeneration++
         isLoaded = false
         currentBinding.webview.reload()
     }

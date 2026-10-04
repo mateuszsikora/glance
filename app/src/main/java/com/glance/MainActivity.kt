@@ -31,6 +31,7 @@ import com.glance.screen.ScreenController
 import com.glance.settings.SettingsActivity
 import com.glance.watchdog.WatchdogService
 import com.glance.watchdog.WebViewHealthChecker
+import com.glance.watchdog.WebViewReachabilityChecker
 import java.time.LocalDateTime
 
 class MainActivity : AppCompatActivity() {
@@ -46,6 +47,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var screenController: ScreenController
     private var controlReceiverRegistered = false
     private val webViewHealthChecker = WebViewHealthChecker()
+    private val webViewReachabilityChecker = WebViewReachabilityChecker(
+        fragments = { supportFragmentManager.fragments.filterIsInstance<WebViewFragment>() },
+        // Settings can cover a still-loaded dashboard; keep observing its host until destroyed.
+        canCheck = { powerManager.isInteractive },
+        shouldCheck = { isReloadableWebView(it) },
+        canReload = { dashboardResumed && screenController.isScreenOn }
+    )
 
     private var settingsTapCount = 0
     private var lastSettingsTapTime = 0L
@@ -99,6 +107,7 @@ class MainActivity : AppCompatActivity() {
                 Log.i(TAG, "Reload broadcast received — reloading all WebViews")
                 reloadAllWebViews()
             } else if (intent?.action == WatchdogService.ACTION_HEALTH_CHECK) {
+                webViewReachabilityChecker.check()
                 webViewHealthChecker.check(currentWebViewFragment())
             }
         }
@@ -509,14 +518,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun reloadAllWebViews() {
-        for (fragment in supportFragmentManager.fragments) {
-            if (fragment is WebViewFragment &&
-                (fragment !== idleScreenFragment() || idleScreenActive)
-            ) {
-                fragment.reload()
-            }
-        }
+        reloadableWebViewFragments().forEach { it.reload() }
     }
+
+    private fun reloadableWebViewFragments(): List<WebViewFragment> {
+        return supportFragmentManager.fragments.filterIsInstance<WebViewFragment>()
+            .filter(::isReloadableWebView)
+    }
+
+    private fun isReloadableWebView(fragment: WebViewFragment): Boolean =
+        fragment !== idleScreenFragment() || idleScreenActive
 
     private fun setupWebViewHealthChecker() {
         webViewHealthChecker.onReloadNeeded = {
@@ -567,6 +578,7 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
         webViewHealthChecker.reset()
+        webViewReachabilityChecker.destroy()
         unregisterReceiver(reloadReceiver)
         if (controlReceiverRegistered) {
             unregisterReceiver(controlReceiver)
