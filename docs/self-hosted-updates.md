@@ -230,7 +230,9 @@ are used here.
    `ecf8b56c3e4ac6d4a7219f6989f5f8e640291551`; build 31 is `32889b9f13d49c9f266e432e5afc4f2a22722b26`.
    Verify source refs for your own release history; commit counts alone are not unique identities.
    This run builds/tests/lints the recovery variant and produces an **unsigned artifact only**.
-   It does not publish a GitHub release or install anything.
+   It does not publish a GitHub release or install anything. Build jobs have read-only repository
+   permissions and do not persist checkout credentials. Only the separate tag-release publication
+   job can write repository contents; it downloads the unsigned artifact without executing build code.
 3. Download the `recovery-unsigned-<number>` artifact. After review, put its `build.json` and
    `glance-unsigned.apk` in `tools/updater/recovery/` on the signing host (mounted read-only as
    `/recovery`). Copy the APK first and JSON last. Start/update the updater container with the new
@@ -240,6 +242,9 @@ are used here.
    import older than a published artifact is refused; request a new workflow run instead. A failing
    key does not block the remaining keys: each poll attempts every eligible target, then reports
    whether any failed. Successful targets retain their publication state; failed ones retry.
+   Restrict host-side write access to this import directory to trusted signing operators: an import
+   can be signed for every mounted key group. Hash/metadata checks establish consistency, not source
+   provenance or operator approval; review the workflow run and source before copying the bundle.
 4. Log in to the tablet's remote panel with its PIN. Under Self-hosted updates, use **Find recovery
    build**, inspect the current code/installation number and the recovery target, then click
    **Confirm restore**. These are authenticated POSTs with the session's CSRF token. Confirmation

@@ -573,6 +573,9 @@ class RemoteConfigHttpHandlerTest {
         )
 
         assertEquals(listOf(false, true), requests)
+        val notice = handler.handle(get("/", cookie)).text()
+        assertTrue(notice.contains("Install request received."))
+        assertFalse(notice.contains("Installing. The tablet restarts"))
     }
 
     @Test

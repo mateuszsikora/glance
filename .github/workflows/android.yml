@@ -22,6 +22,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
@@ -33,20 +34,23 @@ jobs:
           python3 -m unittest discover -s tools/updater -p 'test_*.py' -v
           bash -n tools/updater/entrypoint.sh
 
-  # Publishes a release for an explicitly pushed v* tag. The artifact is unsigned, always: this
-  # project does not hold a signing key on anyone's behalf, and an operator signs the build with
-  # their own key before it reaches a tablet. See docs/self-hosted-updates.md.
-  publish:
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+  # Both paths execute source-controlled build tooling with read-only repository access.
+  # Only a separate tag-publication job receives write authority. Neither path holds signing keys.
+  build:
+    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || github.event_name == 'workflow_dispatch'
     needs: verify
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
+    outputs:
+      version_code: ${{ steps.build.outputs.version_code }}
+      version_name: ${{ steps.build.outputs.version_name }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Full history is needed to resolve a recovery source commit.
           fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
@@ -102,22 +106,33 @@ jobs:
           python3 tools/updater/apk_metadata.py glance-unsigned.apk build.json
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: github.event_name == 'workflow_dispatch'
         with:
-          name: recovery-unsigned-${{ steps.build.outputs.version_code }}
+          name: ${{ github.event_name == 'workflow_dispatch' && 'recovery' || 'release' }}-unsigned-${{ steps.build.outputs.version_code }}
           path: |
             glance-unsigned.apk
             build.json
 
+  publish:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      # No checkout or build tooling runs with this token. Download only this run's artifact.
       - name: Create the release
-        if: github.event_name != 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ARTIFACT_NAME: release-unsigned-${{ needs.build.outputs.version_code }}
+          VERSION_NAME: ${{ needs.build.outputs.version_name }}
         run: |
           set -euo pipefail
+          gh run download "$GITHUB_RUN_ID" --name "$ARTIFACT_NAME"
           gh release create "${GITHUB_REF_NAME}" glance-unsigned.apk build.json \
             --verify-tag \
-            --title "Glance ${{ steps.build.outputs.version_name }}" \
+            --title "Glance $VERSION_NAME" \
             --notes "$(cat <<'NOTES'
           `glance-unsigned.apk` is an **unsigned** build artifact. Android cannot install it as it
           stands, and that is deliberate: this project never publishes a signed APK, because doing

@@ -116,6 +116,62 @@ class RecoveryTest {
         assertTrue(state.paused)
     }
 
+    @Test fun callbackCannotClearReplacementSessionOrItsStagedApk() {
+        val state = RestoreState(context)
+        state.begin(restore, "code31", sessionId = 123)
+        val callbackEntered = java.util.concurrent.CountDownLatch(1)
+        val finishCallback = java.util.concurrent.CountDownLatch(1)
+        val replacementStarted = java.util.concurrent.CountDownLatch(1)
+        val replacementFinished = java.util.concurrent.CountDownLatch(1)
+        val receiverContext = object : android.content.ContextWrapper(context) {
+            override fun getPackageManager(): android.content.pm.PackageManager {
+                // Stop a real callback after it has validated session 123, before clearing state.
+                callbackEntered.countDown()
+                check(finishCallback.await(5, java.util.concurrent.TimeUnit.SECONDS))
+                return super.getPackageManager()
+            }
+        }
+        val intent = android.content.Intent(UpdateInstallReceiver.ACTION_INSTALL_STATUS)
+            .putExtra(android.content.pm.PackageInstaller.EXTRA_SESSION_ID, 123)
+            .putExtra(android.content.pm.PackageInstaller.EXTRA_STATUS,
+                android.content.pm.PackageInstaller.STATUS_PENDING_USER_ACTION)
+        val executor = java.util.concurrent.Executors.newFixedThreadPool(2)
+        val staged = UpdateStorage.stagedApk(context)
+        try {
+            val callback = executor.submit { UpdateInstallReceiver().onReceive(receiverContext, intent) }
+            assertTrue(callbackEntered.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            val replacement = executor.submit {
+                synchronized(UpdateChecker.operationLock) {
+                    replacementStarted.countDown()
+                    // The operator's replacement must wait for the old terminal transition.
+                    state.begin(restore.copy(versionCode = 1000301), "code31", sessionId = 124)
+                    staged.parentFile!!.mkdirs()
+                    staged.writeText("replacement APK")
+                    replacementFinished.countDown()
+                }
+            }
+            assertTrue(replacementStarted.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            assertFalse(replacementFinished.await(100, java.util.concurrent.TimeUnit.MILLISECONDS))
+            finishCallback.countDown()
+            callback.get(5, java.util.concurrent.TimeUnit.SECONDS)
+            replacement.get(5, java.util.concurrent.TimeUnit.SECONDS)
+            assertEquals(1000301, state.pending)
+            assertEquals(124, state.sessionId)
+            assertEquals("replacement APK", staged.readText())
+            // A delayed duplicate callback must also leave the replacement untouched.
+            UpdateInstallReceiver().onReceive(context, intent)
+            assertEquals(1000301, state.pending)
+            assertEquals(124, state.sessionId)
+            assertEquals("replacement APK", staged.readText())
+            assertThrows(IllegalStateException::class.java) { state.resume() }
+        } finally {
+            finishCallback.countDown()
+            executor.shutdownNow()
+            executor.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS)
+            UpdateStorage.clearStagedApk(context)
+        }
+    }
+
     @Test fun crashBeforeCommitDoesNotPermanentlyBlockFutureUpdates() {
         val installer = context.packageManager.packageInstaller
         val id = installer.createSession(android.content.pm.PackageInstaller.SessionParams(

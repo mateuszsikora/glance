@@ -366,7 +366,7 @@ internal class RemoteConfigHttpHandler(
         } else {
             onUpdateRequested(installNow)
             if (installNow) {
-                "Installing. The tablet restarts into the new build if it is accepted."
+                "Install request received. Reload this page in a moment for the result."
             } else {
                 "Checking for updates. Reload this page in a moment for the result."
             }

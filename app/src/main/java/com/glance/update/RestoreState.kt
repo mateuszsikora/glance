@@ -14,19 +14,19 @@ class RestoreState(private val context: Context) {
     val candidate: UpdateManifest? get() = UpdateManifestParser.parse(prefs.getString("candidate", "").orEmpty())
     val dataContract: String get() = prefs.getString("dataContract", BuildConfig.DATA_CONTRACT).orEmpty()
 
-    fun offer(raw: String) { check(prefs.edit().putString("candidate", raw).commit()) }
-    fun record(message: String) { check(prefs.edit().putString("outcome", message).commit()) }
-    fun begin(manifest: UpdateManifest, current: String, sessionId: Int = -1) {
+    fun offer(raw: String) = synchronized(stateLock) { check(prefs.edit().putString("candidate", raw).commit()) }
+    fun record(message: String) = synchronized(stateLock) { check(prefs.edit().putString("outcome", message).commit()) }
+    fun begin(manifest: UpdateManifest, current: String, sessionId: Int = -1) = synchronized(stateLock) {
         check(prefs.edit().putInt("pending", manifest.versionCode).putInt("session", sessionId)
             .putInt("bootCount", bootCount())
             .putBoolean("paused", paused || manifest.kind == "restore")
             .putString("outcome", "Installing $current → ${manifest.codeIdentity.ifBlank { manifest.versionName }} / installation ${manifest.versionCode}")
             .commit())
     }
-    fun failed(message: String) {
+    fun failed(message: String) = synchronized(stateLock) {
         check(prefs.edit().remove("pending").remove("session").remove("bootCount").putString("outcome", "Installation failed: $message").commit())
     }
-    fun reconcile(installed: Int = BuildConfig.VERSION_CODE) {
+    fun reconcile(installed: Int = BuildConfig.VERSION_CODE) = synchronized(stateLock) {
         val attempted = pending
         if (attempted in 1..installed) {
             // An intermediate legacy build cannot reconcile our bookkeeping. Once a newer
@@ -47,8 +47,8 @@ class RestoreState(private val context: Context) {
 
     /** A sealed session is not proof of progress: Android 8 restores it after reboot without
      * re-enqueuing commit or restoring its result observer. Leave same-boot commits alone. */
-    fun recoverInterruptedSession() {
-        if (pending == 0) return
+    fun recoverInterruptedSession() = synchronized(stateLock) {
+        if (pending == 0) return@synchronized
         val session = context.packageManager.packageInstaller.getSessionInfo(sessionId)
         val previousBoot = prefs.getInt("bootCount", -1)
         val currentBoot = bootCount()
@@ -63,7 +63,7 @@ class RestoreState(private val context: Context) {
     }
 
     /** Also available explicitly to an authenticated operator when boot identity is unavailable. */
-    internal fun abandonPending(message: String) {
+    internal fun abandonPending(message: String) = synchronized(stateLock) {
         check(pending != 0) { "No installation is pending" }
         val installer = context.packageManager.packageInstaller
         if (installer.getSessionInfo(sessionId) != null) installer.abandonSession(sessionId)
@@ -71,8 +71,18 @@ class RestoreState(private val context: Context) {
             .putBoolean("paused", true).putString("outcome", message).commit())
     }
 
-    fun resume() {
+    fun resume() = synchronized(stateLock) {
         check(pending == 0) { "Installation is still pending" }
         check(prefs.edit().putBoolean("paused", false).putString("outcome", "Normal updates resumed").commit())
+    }
+
+    /** Keep callback validation, its terminal state change and staging cleanup indivisible with
+     * cancellation and replacement. This lock is never held during network downloads. */
+    internal fun forSession(reportedSession: Int, action: () -> Unit) = synchronized(stateLock) {
+        if (pending != 0 && reportedSession == sessionId) action()
+    }
+
+    private companion object {
+        val stateLock = Any()
     }
 }
