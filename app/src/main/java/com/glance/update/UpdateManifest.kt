@@ -17,7 +17,10 @@ data class UpdateManifest(
     val versionCode: Int,
     val versionName: String,
     val url: String,
-    val sha256: String
+    val sha256: String,
+    val codeIdentity: String = "",
+    val dataContract: String = "",
+    val kind: String = "normal"
 )
 
 object UpdateManifestParser {
@@ -39,11 +42,19 @@ object UpdateManifestParser {
 
         val versionName = json.optString(FIELD_VERSION_NAME).trim()
 
+        val kind = json.optString("kind", "normal")
+        if (kind !in setOf("normal", "restore")) return null
+        if (kind == "restore" && (json.optString("codeIdentity").isBlank() ||
+                !SHA256_REGEX.matches(json.optString("dataContract")))) return null
+
         return UpdateManifest(
             versionCode = versionCode,
             versionName = versionName.ifBlank { versionCode.toString() },
             url = url,
-            sha256 = sha256
+            sha256 = sha256,
+            codeIdentity = json.optString("codeIdentity"),
+            dataContract = json.optString("dataContract"),
+            kind = kind
         )
     }
 

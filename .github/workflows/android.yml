@@ -1,6 +1,12 @@
 name: Android
 
 on:
+  workflow_dispatch:
+    inputs:
+      restore_ref:
+        description: 'Reviewed older commit/tag to rebuild (artifact only; does not publish)'
+        required: true
+        type: string
   pull_request:
   push:
     branches: [master]
@@ -14,80 +20,119 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: "17"
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
       - name: Test, lint and build
-        run: ./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease
+        run: |
+          ./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease
+          python3 -m unittest discover -s tools/updater -p 'test_*.py' -v
+          bash -n tools/updater/entrypoint.sh
 
-  # Publishes a release for an explicitly pushed v* tag. The artifact is unsigned, always: this
-  # project does not hold a signing key on anyone's behalf, and an operator signs the build with
-  # their own key before it reaches a tablet. See docs/self-hosted-updates.md.
-  publish:
-    if: startsWith(github.ref, 'refs/tags/v')
+  # Both paths execute source-controlled build tooling with read-only repository access.
+  # Only a separate tag-publication job receives write authority. Neither path holds signing keys.
+  build:
+    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || github.event_name == 'workflow_dispatch'
     needs: verify
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
+    outputs:
+      version_code: ${{ steps.build.outputs.version_code }}
+      version_name: ${{ steps.build.outputs.version_name }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # versionCode is derived from the commit count, so the full history is required.
+          # Full history is needed to resolve a recovery source commit.
           fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: "17"
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
 
+      - name: Prepare recovery source
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          RESTORE_REF: ${{ inputs.restore_ref }}
+        run: python3 tools/updater/prepare-source.py "$RESTORE_REF" "$RUNNER_TEMP/glance-recovery"
+
       - name: Build unsigned release
         id: build
+        env:
+          RECOVERY: ${{ github.event_name == 'workflow_dispatch' }}
         run: |
           set -euo pipefail
+          # Shared sequence for normal and recovery builds, including reruns. Commit count is
+          # source provenance only. Reserve 100 attempts per run; never reuse a published slot.
+          test "$GITHUB_RUN_ATTEMPT" -lt 100
+          VERSION_CODE=$((1000000 + GITHUB_RUN_NUMBER * 100 + GITHUB_RUN_ATTEMPT))
+          CODE_IDENTITY="$GITHUB_SHA"
+          KIND=normal
           VERSION_NAME="${GITHUB_REF_NAME#v}"
-          # Commit count rather than the tag: Android compares versionCode numerically and refuses
-          # an update that does not increase it, and tag names are not reliably ordered that way.
-          VERSION_CODE="$(git rev-list --count HEAD)"
-          ./gradlew assembleRelease \
-            "-PversionCode=${VERSION_CODE}" \
-            "-PversionName=${VERSION_NAME}"
-          echo "version_code=${VERSION_CODE}" >> "$GITHUB_OUTPUT"
-          echo "version_name=${VERSION_NAME}" >> "$GITHUB_OUTPUT"
+          BUILD_ROOT="$GITHUB_WORKSPACE"
+          if [ "$RECOVERY" = true ]; then
+            BUILD_ROOT="$RUNNER_TEMP/glance-recovery"
+            CODE_IDENTITY="$(jq -r .codeIdentity "$BUILD_ROOT/recovery-source.json")"
+            KIND=restore
+            VERSION_NAME="restore-${CODE_IDENTITY:0:12}"
+          fi
+          (cd "$BUILD_ROOT" && ./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease \
+            "-PversionCode=$VERSION_CODE" "-PversionName=$VERSION_NAME" \
+            "-PcodeIdentity=$CODE_IDENTITY" "-PupdateKind=$KIND")
+          cp "$BUILD_ROOT/app/build/outputs/apk/release/app-release-unsigned.apk" "$RUNNER_TEMP/glance-unsigned.apk"
+          {
+            echo "version_code=$VERSION_CODE"
+            echo "version_name=$VERSION_NAME"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Align and describe the artifact
         run: |
           set -euo pipefail
           # zipalign runs here, where the x86_64 Android build tools exist. Google ships no
           # arm64 Linux build tools, so a Raspberry Pi updater can only sign, never align.
-          BUILD_TOOLS="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
+          BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
           "$BUILD_TOOLS/zipalign" -p -f 4 \
-            app/build/outputs/apk/release/app-release-unsigned.apk \
+            "$RUNNER_TEMP/glance-unsigned.apk" \
             glance-unsigned.apk
 
-          # Computed before the heredoc: a command substitution that fails inside one would not
-          # trip `set -e`, and the manifest would silently carry an empty digest.
-          SHA256="$(sha256sum glance-unsigned.apk | cut -d' ' -f1)"
-          cat > build.json <<EOF
-          {
-            "versionCode": ${{ steps.build.outputs.version_code }},
-            "versionName": "${{ steps.build.outputs.version_name }}",
-            "commit": "${GITHUB_SHA}",
-            "asset": "glance-unsigned.apk",
-            "sha256": "${SHA256}"
-          }
-          EOF
-          cat build.json
+          python3 tools/updater/describe-apk.py glance-unsigned.apk > build.json
+          python3 tools/updater/apk_metadata.py glance-unsigned.apk build.json
 
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ github.event_name == 'workflow_dispatch' && 'recovery' || 'release' }}-unsigned-${{ steps.build.outputs.version_code }}
+          path: |
+            glance-unsigned.apk
+            build.json
+
+  publish:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      # No checkout or build tooling runs with this token. Download only this run's artifact.
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ARTIFACT_NAME: release-unsigned-${{ needs.build.outputs.version_code }}
+          VERSION_NAME: ${{ needs.build.outputs.version_name }}
         run: |
           set -euo pipefail
+          gh run download "$GITHUB_RUN_ID" --name "$ARTIFACT_NAME"
           gh release create "${GITHUB_REF_NAME}" glance-unsigned.apk build.json \
             --verify-tag \
-            --title "Glance ${{ steps.build.outputs.version_name }}" \
+            --title "Glance $VERSION_NAME" \
             --notes "$(cat <<'NOTES'
           `glance-unsigned.apk` is an **unsigned** build artifact. Android cannot install it as it
           stands, and that is deliberate: this project never publishes a signed APK, because doing

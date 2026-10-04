@@ -16,6 +16,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./keys:/keys:ro
+      - ./recovery:/recovery:ro
       - glance-out:/out
     environment:
       GLANCE_REPO: mateuszsikora/glance

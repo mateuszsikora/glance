@@ -21,6 +21,7 @@ RUN curl -fsSL "$BUILD_TOOLS_URL" -o /tmp/build-tools.zip \
     && rm /tmp/build-tools.zip \
     && java -jar /opt/apksigner/apksigner.jar version
 
+COPY apk_metadata.py /opt/glance/apk_metadata.py
 COPY entrypoint.sh /usr/local/bin/glance-updater
 RUN chmod +x /usr/local/bin/glance-updater
 
@@ -32,7 +33,6 @@ ENV GLANCE_POLL_SECONDS=300
 ENV GLANCE_KEYS_DIR=/keys
 ENV GLANCE_OUT=/out
 ENV GLANCE_PORT=8080
-ENV GLANCE_KEEP=5
 
 EXPOSE 8080
 VOLUME ["/out"]

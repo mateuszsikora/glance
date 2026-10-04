@@ -23,6 +23,10 @@
         android:usesCleartextTraffic="true"
         tools:ignore="UnusedAttribute">
 
+        <meta-data android:name="com.glance.CODE_IDENTITY" android:value="${codeIdentity}" />
+        <meta-data android:name="com.glance.DATA_CONTRACT" android:value="${dataContract}" />
+        <meta-data android:name="com.glance.UPDATE_KIND" android:value="${updateKind}" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

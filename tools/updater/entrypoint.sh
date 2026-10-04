@@ -83,6 +83,9 @@ load_target() {
   T_SECRETS="${SECRETS_DIR}/${T_NAME}"
   T_STATE="${T_OUT}/.last-signed"
   T_MANIFEST="${T_OUT}/glance-update.json"
+  if [[ "${BUILD_KIND:-normal}" == restore ]]; then
+    T_MANIFEST="${T_OUT}/glance-restore.json"
+  fi
 }
 
 # apksigner consumes each `file:` reference sequentially from a single handle, so pointing both
@@ -121,7 +124,7 @@ verify_key() {
   fi
 
   # keytool prints AA:BB:CC..., apksigner prints aabbcc...; compare in the latter form.
-  fingerprint="$(sed -n 's/^[[:space:]]*SHA256: //p' <<<"$listing" | head -n 1 | tr -d ':' | tr 'A-Z' 'a-z')"
+  fingerprint="$(sed -n 's/^[[:space:]]*SHA256: //p' <<<"$listing" | head -n 1 | tr -d ':' | tr '[:upper:]' '[:lower:]')"
   log "${T_NAME}: key '${T_ALIAS}' certificate ${fingerprint}"
 
   if [[ -n "$T_EXPECT" && "$fingerprint" != "${T_EXPECT,,}" ]]; then
@@ -188,21 +191,34 @@ publish() {
     --arg versionName "$version_name" \
     --arg url "${T_URL}/glance-${version_code}.apk" \
     --arg sha256 "$digest" \
-    '{versionCode: $versionCode, versionName: $versionName, url: $url, sha256: $sha256}' \
-    > "${T_MANIFEST}.tmp"
-  mv "${T_MANIFEST}.tmp" "$T_MANIFEST"
+    --arg codeIdentity "${CODE_IDENTITY:-}" \
+    --arg dataContract "${DATA_CONTRACT:-}" \
+    --arg kind "${BUILD_KIND:-normal}" \
+    '{versionCode: $versionCode, versionName: $versionName, url: $url, sha256: $sha256,
+      codeIdentity: $codeIdentity, dataContract: $dataContract, kind: $kind}' \
+    > "${T_MANIFEST}.tmp" || return 1
+  mv "${T_MANIFEST}.tmp" "$T_MANIFEST" || return 1
 
-  printf '%s' "$version_code" > "$T_STATE"
+  printf '%s' "$version_code" > "${T_STATE}.tmp" || return 1
+  mv "${T_STATE}.tmp" "$T_STATE" || return 1
   log "${T_NAME}: published ${version_code} (${version_name}) signed by ${signer_sha:-unknown}"
 
-  # Older APKs are kept briefly so a tablet mid-download is not left with a dead URL.
-  find "$T_OUT" -maxdepth 1 -name 'glance-*.apk' -printf '%T@ %p\n' \
-    | sort -rn | tail -n "+$((GLANCE_KEEP + 1))" | cut -d' ' -f2- | xargs -r rm -f
+  # Keep both channel targets, even if repeated recoveries made the normal APK older.
+  # Explicit operator retention avoids deleting an APK still referenced by a tablet confirmation.
+
 }
 
 target_is_current() {
-  local version_code="$1" last=0
+  local version_code="$1" last=0 manifest published
   [[ -r "$T_STATE" ]] && last="$(cat "$T_STATE")"
+  # If the process died after publishing a manifest but before writing its high-water mark,
+  # recover from both channels instead of reusing an already published installation number.
+  for manifest in "$T_OUT/glance-update.json" "$T_OUT/glance-restore.json"; do
+    [[ -r "$manifest" ]] || continue
+    published="$(jq -r .versionCode "$manifest")" || return 0
+    [[ "$published" =~ ^[0-9]+$ ]] || return 0
+    (( published > last )) && last="$published"
+  done
   (( version_code <= last ))
 }
 
@@ -213,7 +229,12 @@ check_once() {
   local work=/tmp/glance-updater
   rm -rf "$work" && mkdir -p "$work"
 
+  BUILD_KIND=normal
   fetch_asset build.json "${work}/build.json" || return 0
+  BUILD_KIND="$(jq -r '.kind // "normal"' "${work}/build.json")"
+  CODE_IDENTITY="$(jq -r '.codeIdentity // ""' "${work}/build.json")"
+  DATA_CONTRACT="$(jq -r '.dataContract // ""' "${work}/build.json")"
+  [[ "$BUILD_KIND" == normal ]] || { log "recovery releases are imported locally, never automatic"; return 0; }
   version_code="$(jq -r '.versionCode' "${work}/build.json")"
   version_name="$(jq -r '.versionName' "${work}/build.json")"
   asset="$(jq -r '.asset' "${work}/build.json")"
@@ -238,11 +259,39 @@ check_once() {
     return 0
   fi
 
+  python3 /opt/glance/apk_metadata.py "${work}/unsigned.apk" "${work}/build.json" >/dev/null || return 1
+
   # One key failing must not hold up the others; each retries on the next poll because a failed
   # publish deliberately leaves its state file alone.
   for name in "${pending[@]}"; do
     load_target "$name"
     publish "$version_code" "$version_name" "${work}/unsigned.apk" || failed=1
+  done
+  return "$failed"
+}
+
+# An operator places the CI recovery artifact here; this directory is never served and holds no keys.
+check_recovery() {
+  local source="${GLANCE_RECOVERY_DIR:-/recovery}" bundle=/tmp/glance-recovery version_code version_name expected actual name failed=0
+  [[ -r "$source/build.json" && -r "$source/glance-unsigned.apk" ]] || return 0
+  mkdir -p "$bundle" || return 1
+  cp "$source/build.json" "$bundle/build.json" || return 1
+  cp "$source/glance-unsigned.apk" "$bundle/glance-unsigned.apk" || return 1
+  BUILD_KIND="$(jq -r .kind "$bundle/build.json")"
+  [[ "$BUILD_KIND" == restore ]] || return 1
+  CODE_IDENTITY="$(jq -r .codeIdentity "$bundle/build.json")"
+  DATA_CONTRACT="$(jq -r .dataContract "$bundle/build.json")"
+  version_code="$(jq -r .versionCode "$bundle/build.json")"
+  version_name="$(jq -r .versionName "$bundle/build.json")"
+  [[ "$version_code" =~ ^[0-9]+$ ]] || return 1
+  expected="$(jq -r .sha256 "$bundle/build.json")"
+  actual="$(sha256sum "$bundle/glance-unsigned.apk" | cut -d' ' -f1)"
+  [[ "$actual" == "$expected" ]] || { log "Recovery checksum mismatch"; return 1; }
+  python3 /opt/glance/apk_metadata.py "$bundle/glance-unsigned.apk" "$bundle/build.json" >/dev/null || return 1
+  for name in "${TARGETS[@]}"; do
+    load_target "$name"
+    target_is_current "$version_code" && continue
+    publish "$version_code" "$version_name" "$bundle/glance-unsigned.apk" || failed=1
   done
   return "$failed"
 }
@@ -283,5 +332,6 @@ trap 'kill 0' TERM INT
 log "watching ${GLANCE_REPO} releases every ${GLANCE_POLL_SECONDS}s"
 while true; do
   check_once || log "update check failed"
+  check_recovery || log "recovery import failed"
   sleep "${GLANCE_POLL_SECONDS}"
 done

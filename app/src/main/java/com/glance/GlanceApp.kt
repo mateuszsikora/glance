@@ -27,6 +27,10 @@ class GlanceApp : Application() {
         processStartElapsedMs = SystemClock.elapsedRealtime()
         appConfig = AppConfig(this)
         appConfig.clearSettledUpdateAttempts(BuildConfig.VERSION_CODE)
+        com.glance.update.RestoreState(this).apply {
+            reconcile()
+            recoverInterruptedSession()
+        }
         installCrashLogger()
         createNotificationChannels()
     }

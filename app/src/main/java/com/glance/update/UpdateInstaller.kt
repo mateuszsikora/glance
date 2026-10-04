@@ -28,13 +28,14 @@ internal object UpdateInstaller {
         data class Rejected(val reason: String) : Result()
     }
 
-    fun install(context: Context, apk: File): Result {
+    fun install(context: Context, apk: File, manifest: UpdateManifest, restore: Boolean = false): Result {
         if (!LockTaskHelper.isDeviceOwner(context)) {
             return Result.Rejected("Glance is not Device Owner; silent installation is unavailable")
         }
-        if (!isSignedByInstalledCertificate(context, apk)) {
-            return Result.Rejected("Update is not signed by the installed certificate")
-        }
+        val rejection = verify(context, apk, manifest, restore)
+        if (rejection != null) return Result.Rejected(rejection)
+        val state = RestoreState(context)
+        var sessionId = -1
 
         return runCatching {
             val installer = context.packageManager.packageInstaller
@@ -47,7 +48,8 @@ internal object UpdateInstaller {
                 }
             }
 
-            val sessionId = installer.createSession(params)
+            sessionId = installer.createSession(params)
+            state.begin(manifest, "${com.glance.BuildConfig.CODE_IDENTITY} / installation ${com.glance.BuildConfig.VERSION_CODE}", sessionId)
             installer.openSession(sessionId).use { session ->
                 session.openWrite(APK_ENTRY, 0, apk.length()).use { output ->
                     apk.inputStream().use { input -> input.copyTo(output) }
@@ -58,6 +60,7 @@ internal object UpdateInstaller {
             Log.i(TAG, "Committed update session $sessionId")
             Result.Committed
         }.getOrElse { error ->
+            if (sessionId >= 0) runCatching { context.packageManager.packageInstaller.abandonSession(sessionId) }
             Log.e(TAG, "Unable to commit update session", error)
             Result.Rejected(error.message ?: error.javaClass.simpleName)
         }
@@ -77,27 +80,23 @@ internal object UpdateInstaller {
      * that late, opaque rejection into an early, logged one, and avoids streaming a large APK into
      * a session that cannot succeed.
      */
-    private fun isSignedByInstalledCertificate(context: Context, apk: File): Boolean {
-        val packageManager = context.packageManager
-        val candidate = runCatching {
-            packageManager.getPackageArchiveInfo(apk.absolutePath, signatureFlags())
-        }.getOrNull() ?: run {
-            Log.w(TAG, "Downloaded file could not be parsed as an APK")
-            return false
-        }
+    internal fun verify(context: Context, apk: File, manifest: UpdateManifest, restore: Boolean): String? {
+        val pm = context.packageManager
+        val candidate = pm.getPackageArchiveInfo(apk.absolutePath, signatureFlags() or PackageManager.GET_META_DATA)
+            ?: return "Downloaded file is not an APK"
+        val installed = pm.getPackageInfo(context.packageName, signatureFlags())
+        return UpdateVerification.reject(manifest, identity(candidate), identity(installed),
+            RestoreState(context).dataContract, restore)
+    }
 
-        if (candidate.packageName != context.packageName) {
-            Log.w(TAG, "Update declares package ${candidate.packageName}")
-            return false
-        }
-
-        val installed = runCatching {
-            packageManager.getPackageInfo(context.packageName, signatureFlags())
-        }.getOrNull() ?: return false
-
-        val expected = certificateDigests(installed)
-        val offered = certificateDigests(candidate)
-        return expected.isNotEmpty() && expected == offered
+    @Suppress("DEPRECATION")
+    private fun identity(info: PackageInfo): ApkIdentity {
+        val metadata = info.applicationInfo?.metaData
+        return ApkIdentity(info.packageName,
+            if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong(),
+            certificateDigests(info), metadata?.getString("com.glance.CODE_IDENTITY").orEmpty(),
+            metadata?.getString("com.glance.DATA_CONTRACT").orEmpty(),
+            metadata?.getString("com.glance.UPDATE_KIND") ?: "normal")
     }
 
     @Suppress("DEPRECATION")
