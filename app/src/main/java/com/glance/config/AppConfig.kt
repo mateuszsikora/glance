@@ -247,15 +247,6 @@ class AppConfig(context: Context) {
         get() = prefs.getInt(KEY_HEALTH_CHECK_INTERVAL, 30).coerceIn(10, 3600)
         set(value) = prefs.edit().putInt(KEY_HEALTH_CHECK_INTERVAL, value.coerceIn(10, 3600)).apply()
 
-    /**
-     * Records reloads, idle-screen changes, memory pressure, and periodic memory samples to the
-     * on-device diagnostic journal. Off by default: it exists to investigate a problem, and an
-     * always-on journal would keep writing to the tablet's storage for no reason.
-     */
-    var diagnosticLogEnabled: Boolean
-        get() = prefs.getBoolean(KEY_DIAGNOSTIC_LOG_ENABLED, false)
-        set(value) = prefs.edit().putBoolean(KEY_DIAGNOSTIC_LOG_ENABLED, value).apply()
-
     // --- Remote configuration ---
 
     var remoteConfigEnabled: Boolean
@@ -471,7 +462,6 @@ class AppConfig(context: Context) {
         private const val KEY_SCHEDULE_ENABLED = "schedule_enabled"
         private const val KEY_RELOAD_INTERVAL = "reload_interval_hours"
         private const val KEY_HEALTH_CHECK_INTERVAL = "health_check_interval_seconds"
-        private const val KEY_DIAGNOSTIC_LOG_ENABLED = "diagnostic_log_enabled"
         private const val KEY_REMOTE_CONFIG_ENABLED = "remote_config_enabled"
         private const val KEY_UPDATE_URL = "update_url"
         private const val KEY_AUTO_UPDATE_ENABLED = "auto_update_enabled"

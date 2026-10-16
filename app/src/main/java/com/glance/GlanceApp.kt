@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.os.SystemClock
 import com.glance.config.AppConfig
 import com.glance.diagnostics.DiagnosticLog
+import com.glance.diagnostics.DiagnosticSettings
 import com.glance.diagnostics.Diagnostics
 import com.glance.diagnostics.MemorySample
 import com.glance.watchdog.CrashLogger
@@ -40,10 +41,11 @@ class GlanceApp : Application() {
     }
 
     private fun installDiagnostics() {
+        val settings = DiagnosticSettings(this)
         Diagnostics.install(
             DiagnosticLog(
                 directory = filesDir,
-                enabled = { appConfig.diagnosticLogEnabled },
+                enabled = { settings.enabled },
                 sampleMemory = { MemorySample.capture(this) }
             )
         )

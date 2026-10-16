@@ -89,15 +89,6 @@ class AppConfigTest {
     }
 
     @Test
-    fun diagnosticLogDefaultsToOffAndCanBeEnabled() {
-        assertFalse(AppConfig(context).diagnosticLogEnabled)
-
-        AppConfig(context).diagnosticLogEnabled = true
-
-        assertTrue(AppConfig(context).diagnosticLogEnabled)
-    }
-
-    @Test
     fun updateCheckStateSurvivesControllerRecreation() {
         val state = UpdateCheckState(
             checkedAt = 1_700_000_000_000L,

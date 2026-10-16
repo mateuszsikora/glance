@@ -1,7 +1,9 @@
 package com.glance.remote
 
+import com.glance.GlanceApp
 import com.glance.config.AppConfig
 import com.glance.content.ContentProfile
+import com.glance.diagnostics.DiagnosticSettings
 import com.glance.settings.ConfigValidator
 import com.glance.update.UpdateSummary
 
@@ -42,7 +44,10 @@ internal sealed class RemoteConfigUpdateResult {
 }
 
 /** Validates and atomically orders writes shared by the remote settings page. */
-internal class RemoteConfigUpdater(private val config: AppConfig) {
+internal class RemoteConfigUpdater(
+    private val config: AppConfig,
+    private val diagnostics: DiagnosticSettings = DiagnosticSettings(GlanceApp.instance)
+) {
 
     fun snapshot(): RemoteConfigSnapshot {
         val password = config.readMqttPassword()
@@ -73,7 +78,7 @@ internal class RemoteConfigUpdater(private val config: AppConfig) {
             remoteConfigEnabled = config.remoteConfigEnabled,
             updateUrl = config.updateUrl,
             autoUpdateEnabled = config.autoUpdateEnabled,
-            diagnosticLogEnabled = config.diagnosticLogEnabled,
+            diagnosticLogEnabled = diagnostics.enabled,
             update = UpdateSummary.of(config)
         )
     }
@@ -233,7 +238,7 @@ internal class RemoteConfigUpdater(private val config: AppConfig) {
         config.remoteConfigEnabled = parameters.hasCheckbox("remoteConfigEnabled")
         config.updateUrl = updateUrl
         config.autoUpdateEnabled = parameters.hasCheckbox("autoUpdateEnabled")
-        config.diagnosticLogEnabled = parameters.hasCheckbox("diagnosticLogEnabled")
+        diagnostics.enabled = parameters.hasCheckbox("diagnosticLogEnabled")
 
         val pinChanged = newPin.isNotEmpty()
         if (pinChanged) config.setSettingsPin(newPin)

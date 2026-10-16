@@ -32,6 +32,8 @@ class UpdaterTests(unittest.TestCase):
                 self.assertEqual((ROOT / name).read_bytes(), (dest / name).read_bytes())
             self.assertEqual((ROOT / "app/src/main/java/com/glance/update/UpdateChecker.kt").read_bytes(),
                              (dest / "app/src/main/java/com/glance/update/UpdateChecker.kt").read_bytes())
+            self.assertEqual((ROOT / "app/src/main/java/com/glance/diagnostics/DiagnosticLog.kt").read_bytes(),
+                             (dest / "app/src/main/java/com/glance/diagnostics/DiagnosticLog.kt").read_bytes())
             old = prepare.git(ROOT, "show", "ecf8b56:app/src/main/java/com/glance/kiosk/KioskService.kt")
             self.assertEqual(old, (dest / "app/src/main/java/com/glance/kiosk/KioskService.kt").read_bytes())
             self.assertEqual(hashlib.sha256(b"".join((dest / p).read_bytes() for p in prepare.DATA_FILES)).hexdigest(), result["dataContract"])

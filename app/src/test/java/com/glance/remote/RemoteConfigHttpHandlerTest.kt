@@ -11,6 +11,7 @@ import com.glance.BuildConfig
 import com.glance.R
 import com.glance.config.AppConfig
 import com.glance.content.ContentProfile
+import com.glance.diagnostics.DiagnosticSettings
 import com.glance.settings.DebugInfoProvider
 import com.glance.settings.DebugInfoSnapshot
 import com.glance.settings.SettingsActivity
@@ -609,17 +610,18 @@ class RemoteConfigHttpHandlerTest {
 
     @Test
     fun theDiagnosticLogSwitchDefaultsOffAndRoundTrips() {
-        assertFalse(config.diagnosticLogEnabled)
+        val diagnostics = DiagnosticSettings(ApplicationProvider.getApplicationContext())
+        assertFalse(diagnostics.enabled)
         val handler = handler()
         val cookie = login(handler)
 
         val enabled = validSettings(csrf(handler, cookie)) + mapOf("diagnosticLogEnabled" to "on")
         assertEquals(303, handler.handle(post("/save", enabled, cookie)).status)
-        assertTrue(config.diagnosticLogEnabled)
+        assertTrue(diagnostics.enabled)
 
         val disabled = validSettings(csrf(handler, cookie))
         assertEquals(303, handler.handle(post("/save", disabled, cookie)).status)
-        assertFalse(config.diagnosticLogEnabled)
+        assertFalse(diagnostics.enabled)
     }
 
     @Test

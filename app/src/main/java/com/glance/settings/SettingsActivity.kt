@@ -23,6 +23,7 @@ import com.glance.GlanceApp
 import com.glance.MainActivity
 import com.glance.R
 import com.glance.config.AppConfig
+import com.glance.diagnostics.DiagnosticSettings
 import com.glance.content.ContentProfile
 import com.glance.content.WeekDays
 import com.glance.kiosk.KioskService
@@ -283,7 +284,7 @@ class SettingsActivity : AppCompatActivity() {
         editUpdateUrl.setText(config.updateUrl)
         switchAutoUpdate.isChecked = config.autoUpdateEnabled
         showUpdateStatus()
-        switchDiagnosticLog.isChecked = config.diagnosticLogEnabled
+        switchDiagnosticLog.isChecked = DiagnosticSettings(this).enabled
         editPin.setText("")
     }
 
@@ -511,7 +512,7 @@ class SettingsActivity : AppCompatActivity() {
         config.remoteConfigEnabled = switchRemoteConfig.isChecked
         config.updateUrl = updateUrl
         config.autoUpdateEnabled = switchAutoUpdate.isChecked
-        config.diagnosticLogEnabled = switchDiagnosticLog.isChecked
+        DiagnosticSettings(this).enabled = switchDiagnosticLog.isChecked
 
         if (newPin.isNotBlank()) {
             config.setSettingsPin(newPin)
