@@ -18,7 +18,6 @@ import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
-import androidx.core.content.ContextCompat
 import com.glance.GlanceApp
 import com.glance.MainActivity
 import com.glance.R
@@ -27,6 +26,7 @@ import com.glance.content.ContentProfile
 import com.glance.content.WeekDays
 import com.glance.kiosk.KioskService
 import com.glance.kiosk.LockTaskHelper
+import com.glance.kiosk.ServiceStarter
 import com.glance.remote.RemoteConfigAddress
 import com.glance.screen.ScheduleManager
 import com.glance.update.UpdateChecker
@@ -513,7 +513,8 @@ class SettingsActivity : AppCompatActivity() {
             config.setSettingsPin(newPin)
         }
 
-        ContextCompat.startForegroundService(
+        // The dashboard recreates its WebViews right after this, keeping the main thread busy.
+        ServiceStarter.startFromForeground(
             this,
             Intent(this, KioskService::class.java).setAction(KioskService.ACTION_RELOAD_CONFIG)
         )
