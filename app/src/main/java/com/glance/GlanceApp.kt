@@ -5,6 +5,9 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.SystemClock
 import com.glance.config.AppConfig
+import com.glance.diagnostics.DiagnosticLog
+import com.glance.diagnostics.Diagnostics
+import com.glance.diagnostics.MemorySample
 import com.glance.watchdog.CrashLogger
 import kotlin.system.exitProcess
 
@@ -32,7 +35,22 @@ class GlanceApp : Application() {
             recoverInterruptedSession()
         }
         installCrashLogger()
+        installDiagnostics()
         createNotificationChannels()
+    }
+
+    private fun installDiagnostics() {
+        Diagnostics.install(
+            DiagnosticLog(
+                directory = filesDir,
+                enabled = { appConfig.diagnosticLogEnabled },
+                sampleMemory = { MemorySample.capture(this) }
+            )
+        )
+        Diagnostics.record(
+            "App process started (${BuildConfig.VERSION_NAME}, build ${BuildConfig.VERSION_CODE})",
+            includeMemory = true
+        )
     }
 
     private fun installCrashLogger() {

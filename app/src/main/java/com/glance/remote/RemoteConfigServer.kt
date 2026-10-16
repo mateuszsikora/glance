@@ -4,6 +4,7 @@ import android.util.Log
 import com.glance.GlanceApp
 import com.glance.config.AppConfig
 import com.glance.content.WeekDays
+import com.glance.diagnostics.Diagnostics
 import com.glance.settings.ContentProfileDraft
 import com.glance.settings.DebugInfoProvider
 import com.glance.settings.DebugInfoSnapshot
@@ -202,6 +203,8 @@ internal class RemoteConfigHttpHandler(
     private val debugInfo: () -> DebugInfoSnapshot = {
         DebugInfoProvider(GlanceApp.instance, config).snapshot()
     },
+    private val diagnosticLog: () -> String = Diagnostics::read,
+    private val clearDiagnosticLog: () -> Unit = Diagnostics::clear,
     private val recoveryState: com.glance.update.RestoreState = com.glance.update.RestoreState(com.glance.GlanceApp.instance),
     private val onRecoveryRequested: (String, Int, String) -> Unit = { action, version, hash ->
         Thread({
@@ -249,6 +252,8 @@ internal class RemoteConfigHttpHandler(
             "POST" to "/restore-cancel" -> requestRecovery(request, "cancel")
             "POST" to "/restore-resume" -> requestRecovery(request, "resume")
             "POST" to "/logout" -> logout(request)
+            "GET" to "/diagnostic-log" -> downloadDiagnosticLog(request)
+            "POST" to "/diagnostic-log-clear" -> clearDiagnosticLog(request)
             else -> RemoteHttpResponse.html(404, page("Not found", "The requested page does not exist."))
         }
     }
@@ -401,6 +406,29 @@ internal class RemoteConfigHttpHandler(
             onRecoveryRequested(action, target?.versionCode ?: 0, target?.sha256.orEmpty())
         }
         synchronized(sessionLock) { session.notice = "Recovery operation requested. Reload this page for the result." }
+        return RemoteHttpResponse.redirect("/")
+    }
+
+    private fun downloadDiagnosticLog(request: RemoteHttpRequest): RemoteHttpResponse {
+        sessionFor(request) ?: return RemoteHttpResponse.redirect("/")
+        return RemoteHttpResponse(
+            200,
+            mapOf(
+                "Content-Type" to "text/plain; charset=utf-8",
+                "Content-Disposition" to "attachment; filename=\"glance-diagnostics.log\""
+            ),
+            diagnosticLog().toByteArray(StandardCharsets.UTF_8)
+        )
+    }
+
+    private fun clearDiagnosticLog(request: RemoteHttpRequest): RemoteHttpResponse {
+        val session = sessionFor(request) ?: return RemoteHttpResponse.redirect("/")
+        val parameters = formParameters(request)
+        if (!constantTimeEquals(session.csrfToken, parameters["csrf"].orEmpty())) {
+            return RemoteHttpResponse.html(403, page("Request rejected", "Invalid form token."))
+        }
+        clearDiagnosticLog()
+        synchronized(sessionLock) { session.notice = "Diagnostic log cleared." }
         return RemoteHttpResponse.redirect("/")
     }
 
@@ -613,6 +641,7 @@ internal class RemoteConfigHttpHandler(
                       <a href="#updates">Self-hosted updates</a>
                       <a href="#access">Remote access &amp; PIN</a>
                       <a href="#debug-info">Debug Info</a>
+                      <a href="#diagnostic-log">Diagnostic log</a>
                       <div class="nav-note"><span aria-hidden="true">⌁</span><p>Connected directly to your tablet over the local network.</p></div>
                     </nav>
 
@@ -771,6 +800,15 @@ internal class RemoteConfigHttpHandler(
                           <p class="hint">Select and copy this summary into an issue. It omits private addresses and credentials. MQTT shows whether it is enabled, not its connection state.</p>
                         </div>
                       </section>
+
+                      <section id="diagnostic-log" class="card settings-card">
+                        ${sectionHeading("09", "Diagnostic log", "An opt-in journal of reloads and memory pressure, kept on the tablet.")}
+                        <div class="section-body">
+                          ${checkbox("diagnosticLogEnabled", "Record diagnostic event log", checked("diagnosticLogEnabled", values.diagnosticLogEnabled))}
+                          <p class="hint">Journals reloads with their cause, idle-screen changes, page load failures, charger and display events, and a memory sample every 15 minutes. It never records addresses or credentials. Saving applies the switch. Leave it off when not investigating a problem to avoid needless storage writes.</p>
+                          ${diagnosticLogPreview()}
+                        </div>
+                      </section>
                     </div>
                   </div>
 
@@ -816,6 +854,25 @@ internal class RemoteConfigHttpHandler(
     /** One read-only fact inside a `.status-list`. */
     private fun statusRow(label: String, value: String): String =
         "<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>"
+
+    private fun diagnosticLogPreview(): String {
+        val lines = diagnosticLog().lines().filter(String::isNotBlank)
+        if (lines.isEmpty()) return "<p class=\"hint\">The diagnostic log is empty.</p>"
+        val shown = lines.takeLast(DIAGNOSTIC_PREVIEW_LINES)
+        val heading = if (shown.size < lines.size) {
+            "Latest ${shown.size} of ${lines.size} entries, newest last."
+        } else {
+            "${lines.size} entries, newest last."
+        }
+        return """
+            <p class="hint">${escapeHtml(heading)}</p>
+            <pre class="debug-summary">${escapeHtml(shown.joinToString("\n"))}</pre>
+            <div class="button-row">
+              <a class="ghost button-link" href="/diagnostic-log">Download full log</a>
+              <button class="ghost" type="submit" formaction="/diagnostic-log-clear">Clear log</button>
+            </div>
+        """.trimIndent()
+    }
 
     private fun sectionHeading(number: String, title: String, description: String): String = """
         <div class="section-heading">
@@ -974,6 +1031,7 @@ internal class RemoteConfigHttpHandler(
                 .ghost:hover { color:white; border-color:var(--border-strong); background:var(--surface-raised); }
                 .small-button { min-height:34px; padding:6px 11px; font-size:.78rem; }
                 .button-row { display:flex; flex-wrap:wrap; gap:10px; }
+                .button-link { display:inline-flex; align-items:center; min-height:40px; box-sizing:border-box; border-radius:10px; padding:10px 18px; font:700 .88rem system-ui,-apple-system,sans-serif; text-decoration:none; }
                 .default-submit { position:absolute; width:1px; height:1px; padding:0; opacity:0; pointer-events:none; }
                 .wide { width:100%; margin-top:4px; }
                 .save-bar { position:sticky; bottom:16px; z-index:4; display:flex; align-items:center; justify-content:space-between; gap:18px; margin:8px 0 24px 242px; padding:14px 16px 14px 18px; border:1px solid #34503e; border-radius:15px; background:rgba(16,27,21,.94); box-shadow:0 15px 45px rgba(0,0,0,.35); backdrop-filter:blur(14px); }
@@ -1031,6 +1089,7 @@ internal class RemoteConfigHttpHandler(
         private const val SESSION_COOKIE = "glance_session"
         private const val SESSION_DURATION_MS = 30L * 60L * 1_000L
         private const val MAX_SESSIONS = 8
+        private const val DIAGNOSTIC_PREVIEW_LINES = 200
     }
 }
 

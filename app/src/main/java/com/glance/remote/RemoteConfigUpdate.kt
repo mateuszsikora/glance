@@ -32,6 +32,7 @@ internal data class RemoteConfigSnapshot(
     val remoteConfigEnabled: Boolean,
     val updateUrl: String,
     val autoUpdateEnabled: Boolean,
+    val diagnosticLogEnabled: Boolean,
     val update: UpdateSummary
 )
 
@@ -72,6 +73,7 @@ internal class RemoteConfigUpdater(private val config: AppConfig) {
             remoteConfigEnabled = config.remoteConfigEnabled,
             updateUrl = config.updateUrl,
             autoUpdateEnabled = config.autoUpdateEnabled,
+            diagnosticLogEnabled = config.diagnosticLogEnabled,
             update = UpdateSummary.of(config)
         )
     }
@@ -231,6 +233,7 @@ internal class RemoteConfigUpdater(private val config: AppConfig) {
         config.remoteConfigEnabled = parameters.hasCheckbox("remoteConfigEnabled")
         config.updateUrl = updateUrl
         config.autoUpdateEnabled = parameters.hasCheckbox("autoUpdateEnabled")
+        config.diagnosticLogEnabled = parameters.hasCheckbox("diagnosticLogEnabled")
 
         val pinChanged = newPin.isNotEmpty()
         if (pinChanged) config.setSettingsPin(newPin)

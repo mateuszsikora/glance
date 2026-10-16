@@ -26,6 +26,7 @@ import com.glance.dashboard.DashboardPagerAdapter
 import com.glance.dashboard.IdleMaintenanceReload
 import com.glance.dashboard.WebViewFragment
 import com.glance.databinding.ActivityMainBinding
+import com.glance.diagnostics.Diagnostics
 import com.glance.kiosk.KioskService
 import com.glance.kiosk.LockTaskHelper
 import com.glance.screen.ScreenController
@@ -146,6 +147,7 @@ class MainActivity : AppCompatActivity() {
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        Diagnostics.record("Dashboard activity created")
 
         enterImmersiveMode()
         blockBackButton()
@@ -341,6 +343,7 @@ class MainActivity : AppCompatActivity() {
         screenController = ScreenController(this, brightnessController, binding.rootContainer)
         screenController.setListener(object : ScreenController.Listener {
             override fun onScreenStateChanged(isOn: Boolean) {
+                Diagnostics.record("Screen turned ${if (isOn) "on" else "off"} by Glance")
                 reportScreenState(isOn)
                 if (isOn) {
                     recordUserActivity()
@@ -453,6 +456,7 @@ class MainActivity : AppCompatActivity() {
         binding.idleScreenLayer.visibility = View.VISIBLE
         idleScreenFragment()?.setWebContentPaused(false)
         Log.i(TAG, "Idle screen shown")
+        Diagnostics.record("Idle screen shown")
     }
 
     private fun hideIdleScreen(resetTimer: Boolean) {
@@ -462,10 +466,12 @@ class MainActivity : AppCompatActivity() {
             idleScreenActive = false
             if (idleMaintenanceReload.onIdleHidden()) {
                 Log.i(TAG, "Running the idle page reload deferred during playback")
+                Diagnostics.record("Running the idle page reload deferred during playback")
                 idleScreenFragment()?.reload()
             }
             applyActiveContentProfile()
             Log.i(TAG, "Idle screen hidden")
+            Diagnostics.record("Idle screen hidden")
         }
         if (resetTimer) recordUserActivity()
     }
@@ -525,14 +531,17 @@ class MainActivity : AppCompatActivity() {
 
     private fun reloadAllWebViews() {
         val idleFragment = idleScreenFragment()
-        supportFragmentManager.fragments.filterIsInstance<WebViewFragment>()
+        val dashboards = supportFragmentManager.fragments.filterIsInstance<WebViewFragment>()
             .filter { it !== idleFragment }
-            .forEach { it.reload() }
+        Diagnostics.record("Reload broadcast: reloading ${dashboards.size} dashboard page(s)")
+        dashboards.forEach { it.reload() }
         if (idleFragment == null) return
         if (idleMaintenanceReload.onMaintenanceReload(idleOnScreen = idleScreenActive)) {
+            Diagnostics.record("Reloading the hidden idle page")
             idleFragment.reload()
         } else {
             Log.i(TAG, "Idle page reload deferred until the idle screen is dismissed")
+            Diagnostics.record("Idle page reload deferred until the idle screen is dismissed")
         }
     }
 
@@ -541,10 +550,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupWebViewHealthChecker() {
         webViewHealthChecker.onReloadNeeded = {
+            Diagnostics.record("Health check failed; reloading the visible page")
             currentWebViewFragment()?.reload()
         }
         webViewHealthChecker.onRestartNeeded = {
             Log.e(TAG, "WebView health checks failed repeatedly — recreating dashboard")
+            Diagnostics.record(
+                "Health checks failed repeatedly; recreating the activity",
+                includeMemory = true
+            )
             recreate()
         }
     }
@@ -607,7 +621,7 @@ class MainActivity : AppCompatActivity() {
         private const val TAP_TIMEOUT_MS = 2000L
         private const val MINUTE_MS = 60_000L
         private const val CLOCK_BOUNDARY_SLOP_MS = 100L
-        private const val IDLE_SCREEN_FRAGMENT_TAG = "idle_screen"
+        private const val IDLE_SCREEN_FRAGMENT_TAG = WebViewFragment.IDLE_TAG
         const val ACTION_RELOAD_UI = "com.glance.action.RELOAD_UI"
     }
 }

@@ -69,6 +69,8 @@
     <string name="update_install_started">Installing. The tablet restarts into the new build if it is accepted.</string>
     <string name="settings_pin_hint">New settings PIN (blank keeps the current PIN)</string>
     <string name="debug_info_title">Debug Info</string>
+    <string name="diagnostic_log_label">Record diagnostic event log</string>
+    <string name="diagnostic_log_help">Keeps a journal of reloads, idle-screen changes, charger events, and memory samples for troubleshooting. Read, download, or clear it in the remote panel. Leave it off when not investigating a problem to avoid needless storage writes.</string>
     <string name="save">Save</string>
     <string name="cancel">Cancel</string>
     <string name="exit_kiosk_mode">Exit Kiosk Mode</string>

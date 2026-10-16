@@ -21,6 +21,7 @@ import com.glance.R
 import com.glance.battery.BatteryMonitor
 import com.glance.battery.BatteryStatus
 import com.glance.config.AppConfig
+import com.glance.diagnostics.Diagnostics
 import com.glance.mqtt.MqttLightCommand
 import com.glance.mqtt.MqttReportedState
 import com.glance.mqtt.MqttStateManager
@@ -62,8 +63,14 @@ class KioskService : Service() {
     private val screenStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
-                Intent.ACTION_SCREEN_ON -> reportScreenState(true)
-                Intent.ACTION_SCREEN_OFF -> reportScreenState(false)
+                Intent.ACTION_SCREEN_ON -> {
+                    Diagnostics.record("Display turned on")
+                    reportScreenState(true)
+                }
+                Intent.ACTION_SCREEN_OFF -> {
+                    Diagnostics.record("Display turned off")
+                    reportScreenState(false)
+                }
             }
         }
     }
@@ -72,7 +79,14 @@ class KioskService : Service() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
                 Intent.ACTION_POWER_CONNECTED,
-                Intent.ACTION_POWER_DISCONNECTED -> restoreScreenOffAfterPowerEvent()
+                Intent.ACTION_POWER_DISCONNECTED -> {
+                    val connected = intent.action == Intent.ACTION_POWER_CONNECTED
+                    Diagnostics.record(
+                        "Charger ${if (connected) "connected" else "disconnected"}",
+                        includeMemory = true
+                    )
+                    restoreScreenOffAfterPowerEvent()
+                }
             }
         }
     }

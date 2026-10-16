@@ -62,6 +62,15 @@ app Java heap usage/limit, device uptime, and configuration status.
 Reload the page for a fresh sample without interrupting the tablet display. The summary can be
 copied into an issue and omits private addresses and credentials.
 
+The **Diagnostic log** section controls an opt-in journal kept on the tablet. It is off by default
+and also has a switch under Debug Info in on-device settings. While on, it records every reload with
+its cause, idle-screen changes, page load failures, renderer crashes, charger and display events,
+memory trim signals, and a memory sample every 15 minutes: available memory, swap use, and the
+app's footprint. It works without adb, including on vendor builds that hide application logcat
+output. The panel shows the latest entries and can download or clear the full log. Entries contain
+no addresses or credentials. Turn it off once the problem is understood, so the tablet does not
+keep writing to storage.
+
 Changes are validated and applied immediately without restarting the application. The browser talks
 directly to the tablet—there is no Glance cloud service, account, or separate desktop application.
 Remote configuration is disabled by default and the tablet shows the correct URL when it is enabled.
