@@ -4,6 +4,7 @@ import android.app.AlarmManager
 import android.app.Application
 import android.content.Context
 import android.os.Looper
+import android.os.SystemClock
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -37,8 +38,22 @@ class AlarmPingSenderTest {
         sender.start()
 
         val alarm = shadowAlarmManager.scheduledAlarms.single()
-        assertEquals(AlarmManager.RTC_WAKEUP, alarm.getType())
+        assertEquals(AlarmManager.ELAPSED_REALTIME_WAKEUP, alarm.getType())
         assertTrue(alarm.isAllowWhileIdle)
+        sender.stop()
+    }
+
+    @Test
+    fun alarmLandsAfterThePingIsDue() {
+        val sender = AlarmPingSender(context, "glance_tablet")
+        sender.start()
+        val keepAliveMs = 900_000L
+
+        sender.schedule(keepAliveMs)
+
+        // Paho skips a ping that is due even a fraction of a millisecond later than the alarm.
+        val alarm = shadowAlarmManager.scheduledAlarms.single()
+        assertTrue(alarm.getTriggerAtMs() > SystemClock.elapsedRealtime() + keepAliveMs)
         sender.stop()
     }
 

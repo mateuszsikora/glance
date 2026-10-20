@@ -71,12 +71,7 @@ class MqttStateManager(
             }
             cleanupOnly = !config.mqttEnabled
             val alarmPingSender = AlarmPingSender(context, clientId)
-            val mqttClient = MqttAsyncClient(
-                serverUri,
-                clientId,
-                MemoryPersistence(),
-                alarmPingSender
-            )
+            val mqttClient = createClient(serverUri, clientId, alarmPingSender)
             mqttClient.setCallback(createCallback(mqttClient))
             client = mqttClient
             pingSender = alarmPingSender
@@ -421,11 +416,28 @@ class MqttStateManager(
     }
 
     companion object {
+        /** Builds the Paho client with the alarm-driven ping sender and a suspend-aware clock. */
+        internal fun createClient(
+            serverUri: String,
+            clientId: String,
+            pingSender: AlarmPingSender
+        ) = MqttAsyncClient(
+            serverUri,
+            clientId,
+            MemoryPersistence(),
+            pingSender,
+            null,
+            ElapsedRealtimeTimer
+        )
+
         private const val TAG = "MqttStateManager"
         private const val QOS = 1
-        // One wakeup per minute keeps the broker session alive without waking the tablet
-        // constantly; the broker gives up after 1.5x this window.
-        private const val KEEP_ALIVE_SECONDS = 60
+        // On battery with the screen off, EMUI delivers even exact wakeup alarms only in
+        // five-minute batches, so a ping can arrive up to that much late. The broker gives up
+        // after 1.5x this window, which must cover the keep-alive plus that delay; at 60 s the
+        // session dropped and reconnected every ~92 s all night.
+        internal const val KEEP_ALIVE_SECONDS = 900
+        internal const val MAX_ALARM_DELAY_SECONDS = 300
         private const val DISCONNECT_TIMEOUT_MS = 1_000L
         private const val DISCOVERY_CLEANUP_TIMEOUT_MS = 2_000L
     }
