@@ -11,6 +11,10 @@ import org.eclipse.paho.client.mqttv3.internal.HighResolutionTimer
  * that fires after minutes of screen-off sleep would then see only the few seconds the CPU was
  * awake, judge the ping not yet due and send nothing, while the broker's wall-clock deadline
  * keeps running.
+ *
+ * [HighResolutionTimer] sits in Paho's `internal` package although the public
+ * [org.eclipse.paho.client.mqttv3.MqttAsyncClient] constructor takes it; recheck it when
+ * upgrading Paho.
  */
 object ElapsedRealtimeTimer : HighResolutionTimer {
     override fun nanoTime(): Long = SystemClock.elapsedRealtimeNanos()

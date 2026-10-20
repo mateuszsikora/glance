@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
 import android.os.PowerManager
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
 import org.eclipse.paho.client.mqttv3.IMqttActionListener
@@ -71,20 +72,27 @@ class AlarmPingSender(
     }
 
     override fun schedule(delayInMilliseconds: Long) {
-        val triggerAtMs = System.currentTimeMillis() + delayInMilliseconds.coerceAtLeast(0L)
+        // Paho re-arms the alarm the moment it queues a ping, a few milliseconds before the packet
+        // is written and becomes the last activity. An alarm delivered exactly on time would then
+        // find the next ping not yet due and re-arm for those milliseconds, which alarm batching
+        // or idle throttling turns into another full delay. The slack makes it land after the due
+        // time. Elapsed realtime keeps the deadline on the same clock as Paho's keep-alive
+        // bookkeeping, immune to wall-clock changes.
+        val triggerAtMs = SystemClock.elapsedRealtime() +
+            delayInMilliseconds.coerceAtLeast(0L) + PING_SLACK_MS
         val canScheduleExact = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
             alarmManager.canScheduleExactAlarms()
 
         try {
             if (canScheduleExact) {
                 alarmManager.setExactAndAllowWhileIdle(
-                    AlarmManager.RTC_WAKEUP,
+                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
                     triggerAtMs,
                     pendingIntent()
                 )
             } else {
                 alarmManager.setAndAllowWhileIdle(
-                    AlarmManager.RTC_WAKEUP,
+                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
                     triggerAtMs,
                     pendingIntent()
                 )
@@ -138,5 +146,6 @@ class AlarmPingSender(
         private const val WAKE_LOCK_TAG = "glance:mqtt_keep_alive"
         private const val PING_TIMEOUT_MS = 10_000L
         private const val DEFAULT_KEEP_ALIVE_MS = 60_000L
+        internal const val PING_SLACK_MS = 1_000L
     }
 }

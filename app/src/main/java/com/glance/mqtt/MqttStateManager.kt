@@ -71,14 +71,7 @@ class MqttStateManager(
             }
             cleanupOnly = !config.mqttEnabled
             val alarmPingSender = AlarmPingSender(context, clientId)
-            val mqttClient = MqttAsyncClient(
-                serverUri,
-                clientId,
-                MemoryPersistence(),
-                alarmPingSender,
-                null,
-                ElapsedRealtimeTimer
-            )
+            val mqttClient = createClient(serverUri, clientId, alarmPingSender)
             mqttClient.setCallback(createCallback(mqttClient))
             client = mqttClient
             pingSender = alarmPingSender
@@ -423,6 +416,20 @@ class MqttStateManager(
     }
 
     companion object {
+        /** Builds the Paho client with the alarm-driven ping sender and a suspend-aware clock. */
+        internal fun createClient(
+            serverUri: String,
+            clientId: String,
+            pingSender: AlarmPingSender
+        ) = MqttAsyncClient(
+            serverUri,
+            clientId,
+            MemoryPersistence(),
+            pingSender,
+            null,
+            ElapsedRealtimeTimer
+        )
+
         private const val TAG = "MqttStateManager"
         private const val QOS = 1
         // On battery with the screen off, EMUI delivers even exact wakeup alarms only in

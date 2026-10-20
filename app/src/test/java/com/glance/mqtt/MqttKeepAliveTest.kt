@@ -1,21 +1,26 @@
 package com.glance.mqtt
 
-import android.os.SystemClock
-import org.junit.Assert.assertEquals
+import android.app.Application
+import androidx.test.core.app.ApplicationProvider
+import org.eclipse.paho.client.mqttv3.MqttAsyncClient
+import org.eclipse.paho.client.mqttv3.internal.ClientComms
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
-import java.util.concurrent.TimeUnit
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [26])
 class MqttKeepAliveTest {
 
+    private val context: Application = ApplicationProvider.getApplicationContext()
+
     @Test
     fun brokerGraceCoversAPingDelayedByAlarmBatching() {
         val keepAlive = MqttStateManager.KEEP_ALIVE_SECONDS
+        // The slack keeps an on-time alarm from re-arming, so one batch delay is the worst case.
         val latestPing = keepAlive + MqttStateManager.MAX_ALARM_DELAY_SECONDS
 
         // The broker disconnects after 1.5x the keep-alive without any packet.
@@ -25,12 +30,24 @@ class MqttKeepAliveTest {
     }
 
     @Test
-    fun keepAliveClockFollowsElapsedRealtime() {
-        val before = ElapsedRealtimeTimer.nanoTime()
+    fun clientMeasuresKeepAliveWithTheSuspendAwareClock() {
+        val client = MqttStateManager.createClient(
+            "tcp://localhost:1883",
+            "glance_tablet",
+            AlarmPingSender(context, "glance_tablet")
+        )
 
-        SystemClock.sleep(TimeUnit.MINUTES.toMillis(5))
+        // Paho silently falls back to System.nanoTime, which stops during suspend, if a refactor
+        // drops the timer argument; only its internals reveal which clock is in use.
+        val comms = MqttAsyncClient::class.java.getDeclaredField("comms")
+            .apply { isAccessible = true }
+            .get(client) as ClientComms
+        val clientState = comms.clientState
+        val timer = clientState.javaClass.getDeclaredField("highResolutionTimer")
+            .apply { isAccessible = true }
+            .get(clientState)
 
-        assertEquals(SystemClock.elapsedRealtimeNanos(), ElapsedRealtimeTimer.nanoTime())
-        assertTrue(ElapsedRealtimeTimer.nanoTime() - before >= TimeUnit.MINUTES.toNanos(5))
+        assertSame(ElapsedRealtimeTimer, timer)
+        client.close(true)
     }
 }
