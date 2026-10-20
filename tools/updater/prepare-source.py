@@ -15,6 +15,8 @@ CONTROL_FILES = ["app/src/main/java/com/glance/update", "app/src/main/java/com/g
                  "app/build.gradle.kts", "build.gradle.kts", "settings.gradle.kts", "gradle", "gradlew",
                  "app/src/main/java/com/glance/settings/DebugInfoProvider.kt",
                  "app/src/main/java/com/glance/settings/DeviceDebugInfo.kt",
+                 # GlanceApp and the remote panel install and read the diagnostic journal.
+                 "app/src/main/java/com/glance/diagnostics",
                  "app/src/test/java/com/glance/update"]
 # Keep the archived UI tests: current cross-surface diagnostics tests assume current tablet UI,
 # while recovery intentionally retains the older SettingsActivity. The main checkout tests the

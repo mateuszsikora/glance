@@ -23,6 +23,7 @@ import com.glance.GlanceApp
 import com.glance.MainActivity
 import com.glance.R
 import com.glance.config.AppConfig
+import com.glance.diagnostics.DiagnosticSettings
 import com.glance.content.ContentProfile
 import com.glance.content.WeekDays
 import com.glance.kiosk.KioskService
@@ -79,6 +80,7 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var buttonInstallUpdate: MaterialButton
     private lateinit var editPin: EditText
     private lateinit var textDebugInfo: TextView
+    private lateinit var switchDiagnosticLog: SwitchCompat
     private var awaitingExactAlarmAccess = false
     private var mqttPasswordUnreadable = false
 
@@ -234,6 +236,7 @@ class SettingsActivity : AppCompatActivity() {
         buttonInstallUpdate.setOnClickListener { requestUpdate(installNow = true) }
         editPin = findViewById(R.id.editPin)
         textDebugInfo = findViewById(R.id.textDebugInfo)
+        switchDiagnosticLog = findViewById(R.id.switchDiagnosticLog)
     }
 
     private fun loadConfig() {
@@ -281,6 +284,7 @@ class SettingsActivity : AppCompatActivity() {
         editUpdateUrl.setText(config.updateUrl)
         switchAutoUpdate.isChecked = config.autoUpdateEnabled
         showUpdateStatus()
+        switchDiagnosticLog.isChecked = DiagnosticSettings(this).enabled
         editPin.setText("")
     }
 
@@ -508,6 +512,7 @@ class SettingsActivity : AppCompatActivity() {
         config.remoteConfigEnabled = switchRemoteConfig.isChecked
         config.updateUrl = updateUrl
         config.autoUpdateEnabled = switchAutoUpdate.isChecked
+        DiagnosticSettings(this).enabled = switchDiagnosticLog.isChecked
 
         if (newPin.isNotBlank()) {
             config.setSettingsPin(newPin)

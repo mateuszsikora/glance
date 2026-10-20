@@ -6,6 +6,8 @@ Glance does not contain analytics, advertising, telemetry, crash-reporting SDKs,
 
 Glance stores application settings, a generated MQTT device ID, scheduling state, settings PIN verification data, and MQTT connection settings in private application storage. The MQTT password is encrypted with an Android Keystore AES-GCM key. Android WebView separately manages dashboard browser data such as cookies, cache, and authenticated sessions.
 
+When the optional diagnostic log is turned on, Glance also keeps a bounded journal of reload causes, idle-screen changes, page failures, charger and display events, and memory figures in private application storage. It contains no addresses, URLs, or credentials and is only readable through settings and the authenticated remote panel. It is off by default. Turning it off stops recording but keeps existing entries until they are cleared in the remote panel.
+
 Android backups are disabled for the application. Removing the application or resetting the device removes application data, subject to Android and device-vendor behavior.
 
 ## Network communication

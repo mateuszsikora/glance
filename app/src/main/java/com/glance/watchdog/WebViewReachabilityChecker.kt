@@ -6,6 +6,7 @@ import android.os.SystemClock
 import android.util.Log
 import android.view.View
 import com.glance.dashboard.WebViewFragment
+import com.glance.diagnostics.Diagnostics
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -61,6 +62,10 @@ class WebViewReachabilityChecker(
                     if (reachable && (!canReload() || !shouldCheck(target.fragment))) return@post
                     if (policy.onProbeResult(nowMs(), reachable)) {
                         Log.i(TAG, "Content host answered again, reloading its WebView")
+                        Diagnostics.record(
+                            "Content host answered again; reloading page " +
+                                target.fragment.diagnosticLabel
+                        )
                         target.fragment.reload()
                     }
                 }

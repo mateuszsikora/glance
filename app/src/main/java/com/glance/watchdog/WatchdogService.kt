@@ -15,6 +15,7 @@ import androidx.core.app.NotificationCompat
 import com.glance.GlanceApp
 import com.glance.MainActivity
 import com.glance.R
+import com.glance.diagnostics.Diagnostics
 import com.glance.update.UpdateChecker
 import java.util.concurrent.Executors
 
@@ -26,6 +27,7 @@ class WatchdogService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private val updateExecutor = Executors.newSingleThreadExecutor()
     private var lastMemoryReloadElapsedMs = 0L
+    private var cooldownSkipRecorded = false
     private var loopsStarted = false
     private var reloadPendingUntilScreenOn = false
     private var destroyed = false
@@ -52,6 +54,7 @@ class WatchdogService : Service() {
             startHealthCheckLoop()
             startPeriodicReloadLoop()
             startUpdateCheckLoop()
+            startMemorySampleLoop()
         }
         Log.i(TAG, "WatchdogService started")
         return START_STICKY
@@ -79,10 +82,12 @@ class WatchdogService : Service() {
             override fun run() {
                 if (powerManager.isInteractive) {
                     Log.i(TAG, "Periodic WebView reload triggered")
+                    Diagnostics.record("Periodic reload requested")
                     triggerWebViewReload()
                 } else {
                     reloadPendingUntilScreenOn = true
                     Log.i(TAG, "Periodic reload deferred until the screen wakes")
+                    Diagnostics.record("Periodic reload deferred until the screen wakes")
                 }
                 handler.postDelayed(this, intervalMs)
             }
@@ -114,6 +119,17 @@ class WatchdogService : Service() {
         }, UPDATE_CHECK_INITIAL_DELAY_MS)
     }
 
+    /** Gives the diagnostic journal a memory trend between events; a no-op while it is off. */
+    private fun startMemorySampleLoop() {
+        handler.postDelayed(object : Runnable {
+            override fun run() {
+                if (destroyed) return
+                Diagnostics.record("Memory sample", includeMemory = true)
+                handler.postDelayed(this, MEMORY_SAMPLE_INTERVAL_MS)
+            }
+        }, MEMORY_SAMPLE_INTERVAL_MS)
+    }
+
     private fun performHealthCheck() {
         if (!powerManager.isInteractive) {
             stalePolicy.onScreenOff(SystemClock.elapsedRealtime())
@@ -122,11 +138,13 @@ class WatchdogService : Service() {
         }
         if (stalePolicy.onScreenOn(SystemClock.elapsedRealtime())) {
             Log.i(TAG, "Dashboard slept through a long screen-off window; reload required")
+            Diagnostics.record("Long screen-off window ended; reload required")
             reloadPendingUntilScreenOn = true
         }
         if (reloadPendingUntilScreenOn) {
             reloadPendingUntilScreenOn = false
             Log.i(TAG, "Running deferred WebView reload")
+            Diagnostics.record("Running deferred reload after the screen woke")
             triggerWebViewReload()
             return
         }
@@ -177,7 +195,13 @@ class WatchdogService : Service() {
 
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
-        if (MemoryTrimPolicy.requiresReload(level)) {
+        val reload = MemoryTrimPolicy.requiresReload(level)
+        // Recorded even when ignored: it shows whether the device is still under pressure.
+        Diagnostics.record(
+            "Trim memory level=$level (${if (reload) "reload requested" else "ignored"})",
+            includeMemory = true
+        )
+        if (reload) {
             requestMemoryRecovery("trim level=$level")
         }
     }
@@ -186,12 +210,22 @@ class WatchdogService : Service() {
         if (!powerManager.isInteractive) {
             reloadPendingUntilScreenOn = true
             Log.w(TAG, "Memory recovery deferred while screen is off ($reason)")
+            Diagnostics.record("Memory reload deferred until the screen wakes ($reason)")
             return
         }
         val now = SystemClock.elapsedRealtime()
-        if (now - lastMemoryReloadElapsedMs < MEMORY_RELOAD_COOLDOWN_MS) return
+        if (now - lastMemoryReloadElapsedMs < MEMORY_RELOAD_COOLDOWN_MS) {
+            // Once per cooldown: a health check under sustained pressure asks every tick.
+            if (!cooldownSkipRecorded) {
+                cooldownSkipRecorded = true
+                Diagnostics.record("Memory reload skipped during cooldown ($reason)")
+            }
+            return
+        }
         lastMemoryReloadElapsedMs = now
+        cooldownSkipRecorded = false
         Log.w(TAG, "Memory pressure ($reason), forcing WebView reload")
+        Diagnostics.record("Memory reload requested ($reason)", includeMemory = true)
         triggerWebViewReload()
     }
 
@@ -237,6 +271,7 @@ class WatchdogService : Service() {
         private const val BYTES_PER_MB = 1024L * 1024L
         private const val UPDATE_CHECK_INITIAL_DELAY_MS = 16 * 60 * 1000L
         private const val UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000L
+        private const val MEMORY_SAMPLE_INTERVAL_MS = 15 * 60 * 1000L
 
         const val ACTION_RELOAD_WEBVIEW = "com.glance.ACTION_RELOAD_WEBVIEW"
         const val ACTION_HEALTH_CHECK = "com.glance.ACTION_HEALTH_CHECK"

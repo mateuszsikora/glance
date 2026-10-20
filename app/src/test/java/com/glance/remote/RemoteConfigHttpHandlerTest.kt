@@ -11,6 +11,7 @@ import com.glance.BuildConfig
 import com.glance.R
 import com.glance.config.AppConfig
 import com.glance.content.ContentProfile
+import com.glance.diagnostics.DiagnosticSettings
 import com.glance.settings.DebugInfoProvider
 import com.glance.settings.DebugInfoSnapshot
 import com.glance.settings.SettingsActivity
@@ -605,6 +606,78 @@ class RemoteConfigHttpHandlerTest {
         val disabled = validSettings(csrf(handler, cookie))
         assertEquals(303, handler.handle(post("/save", disabled, cookie)).status)
         assertFalse(config.autoUpdateEnabled)
+    }
+
+    @Test
+    fun theDiagnosticLogSwitchDefaultsOffAndRoundTrips() {
+        val diagnostics = DiagnosticSettings(ApplicationProvider.getApplicationContext())
+        assertFalse(diagnostics.enabled)
+        val handler = handler()
+        val cookie = login(handler)
+
+        val enabled = validSettings(csrf(handler, cookie)) + mapOf("diagnosticLogEnabled" to "on")
+        assertEquals(303, handler.handle(post("/save", enabled, cookie)).status)
+        assertTrue(diagnostics.enabled)
+
+        val disabled = validSettings(csrf(handler, cookie))
+        assertEquals(303, handler.handle(post("/save", disabled, cookie)).status)
+        assertFalse(diagnostics.enabled)
+    }
+
+    @Test
+    fun diagnosticLogIsPreviewedDownloadedAndClearedOnlyWithinASession() {
+        var journal = "2026-10-16 13:52:42 Idle screen shown\n" +
+            "2026-10-16 13:52:43 <b>escaped</b>\n"
+        val handler = RemoteConfigHttpHandler(
+            config,
+            { changes++ },
+            diagnosticLog = { journal },
+            clearDiagnosticLog = { journal = "" }
+        )
+
+        assertEquals(303, handler.handle(get("/diagnostic-log")).status)
+        assertEquals(303, handler.handle(post("/diagnostic-log-clear", emptyMap())).status)
+
+        val cookie = login(handler)
+        val page = handler.handle(get("/", cookie)).text()
+        assertTrue(page.contains("2 entries, newest last."))
+        assertTrue(page.contains("&lt;b&gt;escaped&lt;/b&gt;"))
+        // Clearing must not be blocked by unrelated, invalid fields in the shared settings form.
+        assertTrue(page.contains("formaction=\"/diagnostic-log-clear\" formnovalidate"))
+
+        val download = handler.handle(get("/diagnostic-log", cookie))
+        assertEquals(200, download.status)
+        assertEquals("text/plain; charset=utf-8", download.headers["Content-Type"])
+        assertTrue(download.headers["Content-Disposition"].orEmpty().startsWith("attachment"))
+        assertEquals(journal, download.text())
+
+        val forged = post("/diagnostic-log-clear", mapOf("csrf" to "forged"), cookie)
+        assertEquals(403, handler.handle(forged).status)
+        assertTrue(journal.isNotEmpty())
+
+        val clear = post("/diagnostic-log-clear", mapOf("csrf" to csrf(handler, cookie)), cookie)
+        assertEquals(303, handler.handle(clear).status)
+        assertEquals("", journal)
+        val cleared = handler.handle(get("/", cookie)).text()
+        assertTrue(cleared.contains("Diagnostic log cleared."))
+        assertTrue(cleared.contains("The diagnostic log is empty."))
+        assertEquals(0, changes)
+    }
+
+    @Test
+    fun anUnreadableDiagnosticLogDoesNotTakeDownTheSettingsPage() {
+        val handler = RemoteConfigHttpHandler(
+            config,
+            { changes++ },
+            diagnosticLog = { throw java.util.concurrent.TimeoutException("journal busy") }
+        )
+        val cookie = login(handler)
+
+        val response = handler.handle(get("/", cookie))
+
+        assertEquals(200, response.status)
+        assertTrue(response.text().contains("The diagnostic log is busy."))
+        assertTrue(response.text().contains("name=\"diagnosticLogEnabled\""))
     }
 
     @Test

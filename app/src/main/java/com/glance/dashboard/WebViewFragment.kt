@@ -11,6 +11,7 @@ import android.view.ViewGroup
 import android.webkit.*
 import androidx.fragment.app.Fragment
 import com.glance.databinding.FragmentWebviewBinding
+import com.glance.diagnostics.Diagnostics
 import com.glance.watchdog.CrashLogger
 
 /**
@@ -34,10 +35,15 @@ class WebViewFragment : Fragment() {
     private val retryRunnable = Runnable {
         if (_binding == null || rendererGone || !isAdded || url.isBlank()) return@Runnable
         Log.i(TAG, "Retrying dashboard load")
+        Diagnostics.record("Retrying load of page $diagnosticLabel")
         loadUrl(url)
     }
 
     var onHealthCheckCallback: ((Boolean) -> Unit)? = null
+
+    /** Address-free name for the diagnostic journal, such as `idle` or `dashboard 2`. */
+    val diagnosticLabel: String
+        get() = arguments?.getString(ARG_DIAGNOSTIC_LABEL) ?: "page"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -101,6 +107,9 @@ class WebViewFragment : Fragment() {
                         )
                     ) {
                         Log.w(TAG, "Blocked navigation outside configured dashboard origin")
+                        Diagnostics.record(
+                            "Blocked navigation off the allowed origins on page $diagnosticLabel"
+                        )
                         mainFrameError = true
                         isLoaded = false
                         showError()
@@ -121,6 +130,7 @@ class WebViewFragment : Fragment() {
                     super.onPageFinished(view, url)
                     isLoaded = !mainFrameError
                     Log.d(TAG, "Dashboard page loaded")
+                    Diagnostics.record("Page $diagnosticLabel finished loading")
                 }
 
                 override fun onReceivedError(
@@ -132,6 +142,10 @@ class WebViewFragment : Fragment() {
                     if (request?.isForMainFrame == true) {
                         mainFrameError = true
                         Log.e(TAG, "WebView error: ${error?.description}")
+                        // A WebViewClient error constant; the description can embed a URL.
+                        Diagnostics.record(
+                            "Page $diagnosticLabel failed to load (error ${error?.errorCode})"
+                        )
                         showError()
                         scheduleRetry()
                     }
@@ -147,6 +161,9 @@ class WebViewFragment : Fragment() {
                         mainFrameError = true
                         isLoaded = false
                         Log.e(TAG, "Dashboard HTTP error: ${errorResponse?.statusCode}")
+                        Diagnostics.record(
+                            "Page $diagnosticLabel failed with HTTP ${errorResponse?.statusCode}"
+                        )
                         showError()
                         scheduleRetry()
                     }
@@ -158,6 +175,9 @@ class WebViewFragment : Fragment() {
                     error: SslError?
                 ) {
                     Log.e(TAG, "SSL validation failed: ${error?.primaryError}")
+                    Diagnostics.record(
+                        "Page $diagnosticLabel failed SSL validation (${error?.primaryError})"
+                    )
                     mainFrameError = true
                     isLoaded = false
                     handler?.cancel()
@@ -172,6 +192,7 @@ class WebViewFragment : Fragment() {
                     val message = "WebView renderer gone (crashed=${detail?.didCrash() == true})"
                     Log.e(TAG, message)
                     context?.let { CrashLogger.log(it, "ERROR", message) }
+                    Diagnostics.record("$message on page $diagnosticLabel", includeMemory = true)
                     rendererGone = true
                     isLoaded = false
                     view?.removeCallbacks(retryRunnable)
@@ -269,15 +290,19 @@ class WebViewFragment : Fragment() {
         private const val TAG = "WebViewFragment"
         private const val ARG_URL = "url"
         private const val ARG_ALLOWED_NAVIGATION_ORIGINS = "allowed_navigation_origins"
+        private const val ARG_DIAGNOSTIC_LABEL = "diagnostic_label"
         private const val RETRY_DELAY_MS = 10_000L
 
+        /** @param diagnosticLabel names the page in the diagnostic journal; never an address. */
         fun newInstance(
             url: String,
-            allowedNavigationOrigins: List<String> = emptyList()
+            allowedNavigationOrigins: List<String> = emptyList(),
+            diagnosticLabel: String? = null
         ): WebViewFragment {
             return WebViewFragment().apply {
                 arguments = Bundle().apply {
                     putString(ARG_URL, url)
+                    putString(ARG_DIAGNOSTIC_LABEL, diagnosticLabel)
                     putStringArrayList(
                         ARG_ALLOWED_NAVIGATION_ORIGINS,
                         ArrayList(allowedNavigationOrigins)
