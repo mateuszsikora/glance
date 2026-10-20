@@ -21,12 +21,13 @@ class MqttKeepAliveTest {
     fun brokerGraceCoversAPingDelayedByAlarmBatching() {
         val keepAlive = MqttStateManager.KEEP_ALIVE_SECONDS
         // The slack keeps an on-time alarm from re-arming, so one batch delay is the worst case.
-        val latestPing = keepAlive + MqttStateManager.MAX_ALARM_DELAY_SECONDS
+        val latestPing = keepAlive + MqttStateManager.MAX_ALARM_DELAY_SECONDS +
+            AlarmPingSender.PING_SLACK_MS / 1_000.0
 
         // The broker disconnects after 1.5x the keep-alive without any packet.
-        assertTrue(latestPing < keepAlive * 3 / 2)
+        assertTrue(latestPing < keepAlive * 1.5)
         // Paho drops the connection itself when nothing was sent for 2x the keep-alive.
-        assertTrue(latestPing < keepAlive * 2)
+        assertTrue(latestPing < keepAlive * 2.0)
     }
 
     @Test

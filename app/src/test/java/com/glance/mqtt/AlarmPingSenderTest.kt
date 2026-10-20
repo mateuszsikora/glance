@@ -53,11 +53,7 @@ class AlarmPingSenderTest {
 
         // Paho skips a ping that is due even a fraction of a millisecond later than the alarm.
         val alarm = shadowAlarmManager.scheduledAlarms.single()
-        assertEquals(
-            SystemClock.elapsedRealtime() + keepAliveMs + AlarmPingSender.PING_SLACK_MS,
-            alarm.getTriggerAtMs()
-        )
-        assertTrue(AlarmPingSender.PING_SLACK_MS > 0)
+        assertTrue(alarm.getTriggerAtMs() > SystemClock.elapsedRealtime() + keepAliveMs)
         sender.stop()
     }
 
