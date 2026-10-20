@@ -513,7 +513,9 @@ class SettingsActivity : AppCompatActivity() {
             config.setSettingsPin(newPin)
         }
 
-        // The dashboard recreates its WebViews right after this, keeping the main thread busy.
+        // KioskService is normally already in the foreground, which carries no deadline. In case it
+        // was killed, the dashboard recreating its WebViews right after this keeps the main thread
+        // busy for longer than a startForegroundService() deadline would allow.
         ServiceStarter.startFromForeground(
             this,
             Intent(this, KioskService::class.java).setAction(KioskService.ACTION_RELOAD_CONFIG)
