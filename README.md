@@ -69,7 +69,7 @@ memory trim signals, and a memory sample every 15 minutes: available memory, swa
 app's footprint. It works without adb, including on vendor builds that hide application logcat
 output. The panel shows the latest entries and can download or clear the full log. Entries contain
 no addresses or credentials. Turn it off once the problem is understood, so the tablet does not
-keep writing to storage.
+keep writing to storage. Turning it off keeps the recorded entries readable until **Clear log**.
 
 Changes are validated and applied immediately without restarting the application. The browser talks
 directly to the tablet—there is no Glance cloud service, account, or separate desktop application.

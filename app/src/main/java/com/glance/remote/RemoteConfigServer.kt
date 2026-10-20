@@ -869,7 +869,7 @@ internal class RemoteConfigHttpHandler(
             <pre class="debug-summary">${escapeHtml(shown.joinToString("\n"))}</pre>
             <div class="button-row">
               <a class="ghost button-link" href="/diagnostic-log">Download full log</a>
-              <button class="ghost" type="submit" formaction="/diagnostic-log-clear">Clear log</button>
+              <button class="ghost" type="submit" formaction="/diagnostic-log-clear" formnovalidate>Clear log</button>
             </div>
         """.trimIndent()
     }

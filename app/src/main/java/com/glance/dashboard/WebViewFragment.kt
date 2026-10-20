@@ -41,13 +41,9 @@ class WebViewFragment : Fragment() {
 
     var onHealthCheckCallback: ((Boolean) -> Unit)? = null
 
-    /** Address-free name for the diagnostic journal: the idle page or the dashboard pager slot. */
+    /** Address-free name for the diagnostic journal, such as `idle` or `dashboard 2`. */
     val diagnosticLabel: String
-        get() = when (val fragmentTag = tag) {
-            null -> "untagged"
-            IDLE_TAG -> "idle"
-            else -> "dashboard ${fragmentTag.removePrefix("f")}"
-        }
+        get() = arguments?.getString(ARG_DIAGNOSTIC_LABEL) ?: "page"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -294,17 +290,19 @@ class WebViewFragment : Fragment() {
         private const val TAG = "WebViewFragment"
         private const val ARG_URL = "url"
         private const val ARG_ALLOWED_NAVIGATION_ORIGINS = "allowed_navigation_origins"
+        private const val ARG_DIAGNOSTIC_LABEL = "diagnostic_label"
         private const val RETRY_DELAY_MS = 10_000L
-        /** Fragment tag MainActivity gives the idle screen page. */
-        const val IDLE_TAG = "idle_screen"
 
+        /** @param diagnosticLabel names the page in the diagnostic journal; never an address. */
         fun newInstance(
             url: String,
-            allowedNavigationOrigins: List<String> = emptyList()
+            allowedNavigationOrigins: List<String> = emptyList(),
+            diagnosticLabel: String? = null
         ): WebViewFragment {
             return WebViewFragment().apply {
                 arguments = Bundle().apply {
                     putString(ARG_URL, url)
+                    putString(ARG_DIAGNOSTIC_LABEL, diagnosticLabel)
                     putStringArrayList(
                         ARG_ALLOWED_NAVIGATION_ORIGINS,
                         ArrayList(allowedNavigationOrigins)

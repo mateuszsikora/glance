@@ -642,6 +642,8 @@ class RemoteConfigHttpHandlerTest {
         val page = handler.handle(get("/", cookie)).text()
         assertTrue(page.contains("2 entries, newest last."))
         assertTrue(page.contains("&lt;b&gt;escaped&lt;/b&gt;"))
+        // Clearing must not be blocked by unrelated, invalid fields in the shared settings form.
+        assertTrue(page.contains("formaction=\"/diagnostic-log-clear\" formnovalidate"))
 
         val download = handler.handle(get("/diagnostic-log", cookie))
         assertEquals(200, download.status)

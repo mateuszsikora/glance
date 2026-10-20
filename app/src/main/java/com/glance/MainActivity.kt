@@ -446,7 +446,8 @@ class MainActivity : AppCompatActivity() {
                     R.id.idle_screen_container,
                     WebViewFragment.newInstance(
                         config.idleScreenUrl,
-                        config.dashboardAllowedOrigins
+                        config.dashboardAllowedOrigins,
+                        diagnosticLabel = "idle"
                     ),
                     IDLE_SCREEN_FRAGMENT_TAG
                 )
@@ -621,7 +622,7 @@ class MainActivity : AppCompatActivity() {
         private const val TAP_TIMEOUT_MS = 2000L
         private const val MINUTE_MS = 60_000L
         private const val CLOCK_BOUNDARY_SLOP_MS = 100L
-        private const val IDLE_SCREEN_FRAGMENT_TAG = WebViewFragment.IDLE_TAG
+        private const val IDLE_SCREEN_FRAGMENT_TAG = "idle_screen"
         const val ACTION_RELOAD_UI = "com.glance.action.RELOAD_UI"
     }
 }

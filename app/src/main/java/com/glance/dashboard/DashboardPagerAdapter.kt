@@ -17,7 +17,11 @@ class DashboardPagerAdapter(
     override fun getItemCount(): Int = urls.size
 
     override fun createFragment(position: Int): Fragment {
-        return WebViewFragment.newInstance(urls[position], allowedNavigationOrigins)
+        return WebViewFragment.newInstance(
+            urls[position],
+            allowedNavigationOrigins,
+            diagnosticLabel = "dashboard ${position + 1}"
+        )
     }
 
     override fun getItemId(position: Int): Long {

@@ -5,8 +5,10 @@ import java.io.File
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
-import java.util.concurrent.Executor
+import java.util.concurrent.Callable
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /**
  * Opt-in event journal for diagnosing reloads and memory pressure on the tablet itself.
@@ -17,14 +19,16 @@ import java.util.concurrent.Executors
  *
  * Nothing is written while [enabled] is false, so normal operation causes no storage writes.
  * Entries never contain URLs, addresses, or credentials. The journal is bounded to two files:
- * the current one and its predecessor.
+ * the current one and its predecessor. Every file operation runs on the journal's own thread, so
+ * reads and clears are ordered after every entry recorded before them.
  */
 class DiagnosticLog(
     private val directory: File,
     private val enabled: () -> Boolean,
     private val sampleMemory: () -> String,
     private val maxFileBytes: Long = DEFAULT_MAX_FILE_BYTES,
-    private val executor: Executor = Executors.newSingleThreadExecutor(),
+    private val executor: ExecutorService =
+        Executors.newSingleThreadExecutor { Thread(it, THREAD_NAME) },
     private val now: () -> ZonedDateTime = ZonedDateTime::now
 ) {
     private val current get() = File(directory, FILE_NAME)
@@ -50,22 +54,28 @@ class DiagnosticLog(
     }
 
     /** Both files, oldest entry first. */
-    @Synchronized
-    fun read(): String = listOf(previous, current)
-        .filter(File::exists)
-        .joinToString("") { it.readText() }
-
-    @Synchronized
-    fun clear() {
-        current.delete()
-        previous.delete()
+    fun read(): String = onJournalThread {
+        listOf(previous, current)
+            .filter(File::exists)
+            .joinToString("") { it.readText() }
     }
 
-    @Synchronized
+    /** Waits for queued entries first, so none of them can recreate the file afterwards. */
+    fun clear() {
+        onJournalThread {
+            current.delete()
+            previous.delete()
+        }
+    }
+
+    private fun <T> onJournalThread(task: () -> T): T =
+        executor.submit(Callable(task)).get(FILE_OPERATION_TIMEOUT_S, TimeUnit.SECONDS)
+
     private fun append(line: String) {
         try {
             val file = current
-            if (file.exists() && file.length() + line.length > maxFileBytes) {
+            val lineBytes = line.toByteArray(Charsets.UTF_8).size
+            if (file.exists() && file.length() + lineBytes > maxFileBytes) {
                 previous.delete()
                 file.renameTo(previous)
             }
@@ -80,8 +90,11 @@ class DiagnosticLog(
         const val FILE_NAME = "glance_diagnostics.log"
         /** Around a week of entries with the 15-minute memory sample and a busy day of events. */
         const val DEFAULT_MAX_FILE_BYTES = 256L * 1024L
+        private const val THREAD_NAME = "glance-diagnostics"
+        private const val FILE_OPERATION_TIMEOUT_S = 5L
+        // The UTC offset keeps entries unambiguous across daylight-saving changes.
         private val TIMESTAMP_FORMAT =
-            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss", Locale.US)
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ssxxx", Locale.US)
     }
 }
 

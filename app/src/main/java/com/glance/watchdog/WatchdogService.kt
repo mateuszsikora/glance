@@ -27,6 +27,7 @@ class WatchdogService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private val updateExecutor = Executors.newSingleThreadExecutor()
     private var lastMemoryReloadElapsedMs = 0L
+    private var cooldownSkipRecorded = false
     private var loopsStarted = false
     private var reloadPendingUntilScreenOn = false
     private var destroyed = false
@@ -214,10 +215,15 @@ class WatchdogService : Service() {
         }
         val now = SystemClock.elapsedRealtime()
         if (now - lastMemoryReloadElapsedMs < MEMORY_RELOAD_COOLDOWN_MS) {
-            Diagnostics.record("Memory reload skipped during cooldown ($reason)")
+            // Once per cooldown: a health check under sustained pressure asks every tick.
+            if (!cooldownSkipRecorded) {
+                cooldownSkipRecorded = true
+                Diagnostics.record("Memory reload skipped during cooldown ($reason)")
+            }
             return
         }
         lastMemoryReloadElapsedMs = now
+        cooldownSkipRecorded = false
         Log.w(TAG, "Memory pressure ($reason), forcing WebView reload")
         Diagnostics.record("Memory reload requested ($reason)", includeMemory = true)
         triggerWebViewReload()
