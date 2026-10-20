@@ -328,6 +328,34 @@
             android:textSize="12sp"
             android:layout_marginBottom="16dp" />
 
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/switchNightlyRestart"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/nightly_restart_label"
+            android:textColor="#FFFFFFFF"
+            android:layout_marginBottom="8dp" />
+
+        <EditText
+            android:id="@+id/editNightlyRestartTime"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="@string/nightly_restart_time_hint"
+            android:inputType="time"
+            android:background="#FF2A2A2A"
+            android:textColor="#FFFFFFFF"
+            android:textColorHint="#FF808080"
+            android:padding="12dp"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/nightly_restart_help"
+            android:textColor="#FFB0B0B0"
+            android:textSize="12sp"
+            android:layout_marginBottom="16dp" />
+
         <!-- Divider -->
         <View
             android:layout_width="match_parent"

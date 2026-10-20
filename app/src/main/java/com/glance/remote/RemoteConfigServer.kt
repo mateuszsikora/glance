@@ -205,6 +205,8 @@ internal class RemoteConfigHttpHandler(
     },
     private val diagnosticLog: () -> String = Diagnostics::read,
     private val clearDiagnosticLog: () -> Unit = Diagnostics::clear,
+    /** False in recovery builds, whose older app code has no nightly restart to configure. */
+    private val nightlyRestartAvailable: Boolean = !com.glance.BuildConfig.RESTORE_BUILD,
     private val recoveryState: com.glance.update.RestoreState = com.glance.update.RestoreState(com.glance.GlanceApp.instance),
     private val onRecoveryRequested: (String, Int, String) -> Unit = { action, version, hash ->
         Thread({
@@ -229,7 +231,7 @@ internal class RemoteConfigHttpHandler(
         var notice: String? = null
     )
 
-    private val updater = RemoteConfigUpdater(config)
+    private val updater = RemoteConfigUpdater(config, nightlyRestartAvailable = nightlyRestartAvailable)
     private val secureRandom = SecureRandom()
     private val loginLock = Any()
     private val updateLock = Any()
@@ -594,6 +596,13 @@ internal class RemoteConfigHttpHandler(
             values.mqttPasswordConfigured -> "A password is stored. Leave blank to keep it."
             else -> "No password is stored."
         }
+        // Indented to match the screen-schedule section it is placed in.
+        val nightlyRestartSettings = if (!nightlyRestartAvailable) "" else """<div class="subsection">
+                            ${checkbox("nightlyRestartEnabled", "Restart Glance nightly to free WebView memory", checked("nightlyRestartEnabled", values.nightlyRestartEnabled))}
+                            <div class="field compact-field"><label for="nightlyRestartTime">Restart at <small>without a screen schedule</small></label>
+                              <input id="nightlyRestartTime" name="nightlyRestartTime" type="time" value="${value("nightlyRestartTime", values.nightlyRestartTime)}" required></div>
+                            <p class="hint">The WebView's memory keeps growing while Glance runs, and only a restart releases it. With the screen schedule on, the restart runs 15 minutes after the screen turns off (halfway through a shorter OFF window) and this time is not used. If the screen is on, it waits until the idle screen is showing or nobody has used the tablet for 10 minutes. The display goes dark for a few seconds and Home Assistant briefly sees the tablet as unavailable. Without Device Owner every page, including the idle screen, is reloaded instead.</p>
+                          </div>"""
         val updateStatus = buildString {
             append(statusRow("Installed version", values.update.installedVersion))
             append(statusRow("Code identity", com.glance.BuildConfig.CODE_IDENTITY))
@@ -712,6 +721,7 @@ internal class RemoteConfigHttpHandler(
                               <input id="screenOffTime" name="screenOffTime" type="time" value="${value("screenOffTime", values.screenOffTime)}" required></div>
                           </div>
                           <p class="hint">Exact timing requires exact-alarm access on the tablet.</p>
+                          $nightlyRestartSettings
                         </div>
                       </section>
 

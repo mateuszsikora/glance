@@ -27,9 +27,12 @@ import com.glance.dashboard.IdleMaintenanceReload
 import com.glance.dashboard.WebViewFragment
 import com.glance.databinding.ActivityMainBinding
 import com.glance.diagnostics.Diagnostics
+import com.glance.kiosk.AppRestarter
 import com.glance.kiosk.KioskService
 import com.glance.kiosk.LockTaskHelper
 import com.glance.kiosk.ServiceStarter
+import com.glance.maintenance.NightlyMaintenanceAttempt
+import com.glance.maintenance.NightlyMaintenancePolicy
 import com.glance.screen.ScreenController
 import com.glance.settings.SettingsActivity
 import com.glance.watchdog.WatchdogService
@@ -66,6 +69,7 @@ class MainActivity : AppCompatActivity() {
     private var idleScreenActive = false
     private var consumeIdleDismissGesture = false
     private var idleTimeoutTracker: IdleTimeoutTracker? = null
+    private var lastUserActivityElapsedMs: Long? = null
 
     private val contentScheduleRunnable = object : Runnable {
         override fun run() {
@@ -136,6 +140,12 @@ class MainActivity : AppCompatActivity() {
                     )
                 }
                 ACTION_RELOAD_UI -> recreate()
+                KioskService.ACTION_CONTROL_NIGHTLY_MAINTENANCE -> runNightlyMaintenance(
+                    intent.getLongExtra(
+                        KioskService.EXTRA_MAINTENANCE_REQUESTED_AT,
+                        SystemClock.elapsedRealtime()
+                    )
+                )
             }
         }
     }
@@ -402,7 +412,9 @@ class MainActivity : AppCompatActivity() {
         return super.dispatchTouchEvent(event)
     }
 
+    /** Touches, dismissing the idle screen, returning to the dashboard, and the display waking. */
     private fun recordUserActivity() {
+        lastUserActivityElapsedMs = SystemClock.elapsedRealtime()
         val tracker = idleTimeoutTracker ?: return
         tracker.recordActivity(SystemClock.elapsedRealtime())
         scheduleIdleTimeout()
@@ -497,6 +509,7 @@ class MainActivity : AppCompatActivity() {
         val filter = IntentFilter().apply {
             addAction(KioskService.ACTION_CONTROL_SCREEN)
             addAction(KioskService.ACTION_CONTROL_BRIGHTNESS)
+            addAction(KioskService.ACTION_CONTROL_NIGHTLY_MAINTENANCE)
             addAction(ACTION_RELOAD_UI)
         }
         ContextCompat.registerReceiver(
@@ -508,18 +521,24 @@ class MainActivity : AppCompatActivity() {
         controlReceiverRegistered = true
     }
 
+    /**
+     * Only an observation: Android may recreate this Activity while the display is dark for
+     * reasons of its own, such as the moment a maintenance restart brings the dashboard back,
+     * and that must not be mistaken for a request to keep the screen off.
+     */
     private fun reportCurrentState() {
-        reportScreenState(screenController.isScreenOn)
+        reportScreenState(screenController.isScreenOn, deliberate = false)
         brightnessController.currentBrightness
             .takeIf { it >= 0 }
             ?.let(::reportBrightness)
     }
 
-    private fun reportScreenState(isOn: Boolean) {
+    private fun reportScreenState(isOn: Boolean, deliberate: Boolean = true) {
         sendBroadcast(
             Intent(KioskService.ACTION_REPORT_SCREEN_STATE)
                 .setPackage(packageName)
                 .putExtra(KioskService.EXTRA_SCREEN_ON, isOn)
+                .putExtra(KioskService.EXTRA_DELIBERATE, deliberate)
         )
     }
 
@@ -531,19 +550,67 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun reloadAllWebViews() {
+    /** @param includeIdleOnScreen also restarts idle playback; only for nightly maintenance. */
+    private fun reloadAllWebViews(includeIdleOnScreen: Boolean = false) {
         val idleFragment = idleScreenFragment()
         val dashboards = supportFragmentManager.fragments.filterIsInstance<WebViewFragment>()
             .filter { it !== idleFragment }
         Diagnostics.record("Reload broadcast: reloading ${dashboards.size} dashboard page(s)")
         dashboards.forEach { it.reload() }
         if (idleFragment == null) return
-        if (idleMaintenanceReload.onMaintenanceReload(idleOnScreen = idleScreenActive)) {
-            Diagnostics.record("Reloading the hidden idle page")
+        val idleOnScreen = idleScreenActive && !includeIdleOnScreen
+        if (idleMaintenanceReload.onMaintenanceReload(idleOnScreen = idleOnScreen)) {
+            Diagnostics.record(
+                if (idleScreenActive) {
+                    "Reloading the idle page on screen"
+                } else {
+                    "Reloading the hidden idle page"
+                }
+            )
             idleFragment.reload()
         } else {
             Log.i(TAG, "Idle page reload deferred until the idle screen is dismissed")
             Diagnostics.record("Idle page reload deferred until the idle screen is dismissed")
+        }
+    }
+
+    // --- Nightly maintenance ---
+
+    /** One attempt; [KioskService] repeats it while the tablet stays in use. */
+    private fun runNightlyMaintenance(requestedAtMs: Long) {
+        val now = SystemClock.elapsedRealtime()
+        val attempt = NightlyMaintenanceAttempt(
+            deviceOwner = LockTaskHelper.isDeviceOwner(this),
+            restart = { displayOn ->
+                AppRestarter.restart(this, "nightly maintenance", displayOn = displayOn)
+            },
+            reloadEveryPage = {
+                Diagnostics.record("Nightly maintenance: reloading every page without Device Owner")
+                reloadAllWebViews(includeIdleOnScreen = true)
+            },
+            reportDone = {
+                sendBroadcast(
+                    Intent(KioskService.ACTION_REPORT_NIGHTLY_MAINTENANCE_DONE)
+                        .setPackage(packageName)
+                )
+            }
+        )
+        val decision = attempt.run(
+            screenVisible = screenController.isScreenOn,
+            dashboardResumed = dashboardResumed,
+            idleScreenActive = idleScreenActive,
+            sinceLastActivityMs = lastUserActivityElapsedMs?.let { now - it } ?: Long.MAX_VALUE,
+            postponedForMs = now - requestedAtMs
+        )
+        when (decision) {
+            NightlyMaintenancePolicy.Decision.RUN -> Unit
+            NightlyMaintenancePolicy.Decision.POSTPONE -> {
+                Diagnostics.record("Nightly maintenance postponed; the tablet is in use")
+            }
+            NightlyMaintenancePolicy.Decision.GIVE_UP -> {
+                Log.i(TAG, "Nightly maintenance skipped until the next night")
+                Diagnostics.record("Nightly maintenance skipped; the tablet stayed in use")
+            }
         }
     }
 

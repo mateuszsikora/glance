@@ -23,6 +23,7 @@ import com.glance.MainActivity
 import com.glance.R
 import com.glance.config.AppConfig
 import com.glance.diagnostics.DiagnosticSettings
+import com.glance.maintenance.MaintenanceSettings
 import com.glance.content.ContentProfile
 import com.glance.content.WeekDays
 import com.glance.kiosk.KioskService
@@ -65,6 +66,8 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var switchSchedule: SwitchCompat
     private lateinit var editScreenOnTime: EditText
     private lateinit var editScreenOffTime: EditText
+    private lateinit var switchNightlyRestart: SwitchCompat
+    private lateinit var editNightlyRestartTime: EditText
     private lateinit var switchMqttEnabled: SwitchCompat
     private lateinit var editMqttBrokerHost: EditText
     private lateinit var editMqttBrokerPort: EditText
@@ -217,6 +220,8 @@ class SettingsActivity : AppCompatActivity() {
         switchSchedule = findViewById(R.id.switchSchedule)
         editScreenOnTime = findViewById(R.id.editScreenOnTime)
         editScreenOffTime = findViewById(R.id.editScreenOffTime)
+        switchNightlyRestart = findViewById(R.id.switchNightlyRestart)
+        editNightlyRestartTime = findViewById(R.id.editNightlyRestartTime)
         switchMqttEnabled = findViewById(R.id.switchMqttEnabled)
         editMqttBrokerHost = findViewById(R.id.editMqttBrokerHost)
         editMqttBrokerPort = findViewById(R.id.editMqttBrokerPort)
@@ -257,6 +262,9 @@ class SettingsActivity : AppCompatActivity() {
         switchSchedule.isChecked = config.scheduleEnabled
         editScreenOnTime.setText(config.screenOnTime)
         editScreenOffTime.setText(config.screenOffTime)
+        val maintenance = MaintenanceSettings(this)
+        switchNightlyRestart.isChecked = maintenance.nightlyRestartEnabled
+        editNightlyRestartTime.setText(maintenance.quietTime)
         switchMqttEnabled.isChecked = config.mqttEnabled
         editMqttBrokerHost.setText(
             config.mqttBrokerHost.ifBlank {
@@ -397,6 +405,13 @@ class SettingsActivity : AppCompatActivity() {
             ).show()
             return
         }
+        val nightlyRestartTime = editNightlyRestartTime.text.toString()
+            .ifBlank { MaintenanceSettings.DEFAULT_QUIET_TIME }
+        if (!ConfigValidator.isValidTime(nightlyRestartTime)) {
+            Toast.makeText(this, "Restart time must use HH:mm (00:00-23:59)", Toast.LENGTH_LONG)
+                .show()
+            return
+        }
         if (switchSchedule.isChecked && !allowInexactSchedule && !canScheduleExactAlarms()) {
             showExactAlarmAccessDialog()
             return
@@ -512,6 +527,10 @@ class SettingsActivity : AppCompatActivity() {
         config.remoteConfigEnabled = switchRemoteConfig.isChecked
         config.updateUrl = updateUrl
         config.autoUpdateEnabled = switchAutoUpdate.isChecked
+        MaintenanceSettings(this).apply {
+            nightlyRestartEnabled = switchNightlyRestart.isChecked
+            quietTime = nightlyRestartTime
+        }
         DiagnosticSettings(this).enabled = switchDiagnosticLog.isChecked
 
         if (newPin.isNotBlank()) {

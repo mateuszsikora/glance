@@ -12,6 +12,7 @@ import com.glance.R
 import com.glance.config.AppConfig
 import com.glance.content.ContentProfile
 import com.glance.diagnostics.DiagnosticSettings
+import com.glance.maintenance.MaintenanceSettings
 import com.glance.settings.DebugInfoProvider
 import com.glance.settings.DebugInfoSnapshot
 import com.glance.settings.SettingsActivity
@@ -622,6 +623,57 @@ class RemoteConfigHttpHandlerTest {
         val disabled = validSettings(csrf(handler, cookie))
         assertEquals(303, handler.handle(post("/save", disabled, cookie)).status)
         assertFalse(diagnostics.enabled)
+    }
+
+    @Test
+    fun theNightlyRestartDefaultsOnAndRoundTripsWithItsTime() {
+        val maintenance = MaintenanceSettings(ApplicationProvider.getApplicationContext())
+        val handler = handler()
+        val cookie = login(handler)
+        val page = handler.handle(get("/", cookie)).text()
+        assertTrue(page.contains("name=\"nightlyRestartEnabled\" checked"))
+        assertTrue(page.contains("name=\"nightlyRestartTime\" type=\"time\" value=\"03:30\""))
+
+        val disabled = validSettings(csrf(handler, cookie)) + mapOf("nightlyRestartTime" to "04:45")
+        assertEquals(303, handler.handle(post("/save", disabled, cookie)).status)
+        assertFalse(maintenance.nightlyRestartEnabled)
+        assertEquals("04:45", maintenance.quietTime)
+
+        val enabled = validSettings(csrf(handler, cookie)) +
+            mapOf("nightlyRestartEnabled" to "on", "nightlyRestartTime" to "")
+        assertEquals(303, handler.handle(post("/save", enabled, cookie)).status)
+        assertTrue(maintenance.nightlyRestartEnabled)
+        assertEquals("03:30", maintenance.quietTime)
+    }
+
+    @Test
+    fun recoveryBuildsHideTheNightlyRestartAndLeaveItsSettingsAlone() {
+        val maintenance = MaintenanceSettings(ApplicationProvider.getApplicationContext())
+        maintenance.quietTime = "04:45"
+        val handler = RemoteConfigHttpHandler(config, { changes++ }, nightlyRestartAvailable = false)
+        val cookie = login(handler)
+
+        assertFalse(handler.handle(get("/", cookie)).text().contains("nightlyRestart"))
+        val saved = validSettings(csrf(handler, cookie)) + mapOf("nightlyRestartTime" to "25:00")
+        assertEquals(303, handler.handle(post("/save", saved, cookie)).status)
+
+        assertTrue(maintenance.nightlyRestartEnabled)
+        assertEquals("04:45", maintenance.quietTime)
+    }
+
+    @Test
+    fun anInvalidNightlyRestartTimeIsRejected() {
+        val maintenance = MaintenanceSettings(ApplicationProvider.getApplicationContext())
+        val handler = handler()
+        val cookie = login(handler)
+
+        val invalid = validSettings(csrf(handler, cookie)) + mapOf("nightlyRestartTime" to "25:00")
+        val response = handler.handle(post("/save", invalid, cookie))
+
+        assertEquals(400, response.status)
+        assertTrue(response.text().contains("Restart time must use HH:mm"))
+        assertTrue(maintenance.nightlyRestartEnabled)
+        assertEquals("03:30", maintenance.quietTime)
     }
 
     @Test

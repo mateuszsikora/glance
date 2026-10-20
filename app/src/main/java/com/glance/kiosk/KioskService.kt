@@ -12,6 +12,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationCompat
@@ -22,6 +23,7 @@ import com.glance.battery.BatteryMonitor
 import com.glance.battery.BatteryStatus
 import com.glance.config.AppConfig
 import com.glance.diagnostics.Diagnostics
+import com.glance.maintenance.NightlyMaintenancePolicy
 import com.glance.mqtt.MqttLightCommand
 import com.glance.mqtt.MqttReportedState
 import com.glance.mqtt.MqttStateManager
@@ -59,6 +61,10 @@ class KioskService : Service() {
     @Volatile private var reportedBrightness = 5
     @Volatile private var reportedBattery: BatteryStatus? = null
     private var remainingPowerWakeChecks = 0
+    /** Between a maintenance restart and turning its darkened display back on. */
+    private var displayRestorePending = false
+    /** Elapsed-realtime start of tonight's maintenance while it still waits; null otherwise. */
+    private var maintenanceRequestedAtMs: Long? = null
 
     private val screenStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -95,11 +101,17 @@ class KioskService : Service() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
                 ACTION_REPORT_SCREEN_STATE -> {
-                    updateScreenState(intent.getBooleanExtra(EXTRA_SCREEN_ON, reportedScreenOn))
+                    val isOn = intent.getBooleanExtra(EXTRA_SCREEN_ON, reportedScreenOn)
+                    if (intent.getBooleanExtra(EXTRA_DELIBERATE, true)) {
+                        updateScreenState(isOn)
+                    } else {
+                        reportScreenState(isOn)
+                    }
                 }
                 ACTION_REPORT_BRIGHTNESS -> {
                     updateBrightness(intent.getIntExtra(EXTRA_BRIGHTNESS, reportedBrightness))
                 }
+                ACTION_REPORT_NIGHTLY_MAINTENANCE_DONE -> finishNightlyMaintenance()
             }
         }
     }
@@ -136,6 +148,7 @@ class KioskService : Service() {
                     )
                 )
             }
+            ACTION_NIGHTLY_MAINTENANCE -> startNightlyMaintenance()
         }
 
         Log.i(TAG, "KioskService running")
@@ -203,14 +216,41 @@ class KioskService : Service() {
             IntentFilter().apply {
                 addAction(ACTION_REPORT_SCREEN_STATE)
                 addAction(ACTION_REPORT_BRIGHTNESS)
+                addAction(ACTION_REPORT_NIGHTLY_MAINTENANCE_DONE)
             },
             ContextCompat.RECEIVER_NOT_EXPORTED
         )
 
+        val relaunch = AppRestarter.consumePendingRelaunch(this)
+        val restoreDisplay = relaunch?.wakeDisplay == true && config.requestedScreenOn
+        if (restoreDisplay) {
+            // The display is only dark for the restart; Home Assistant should not see it go off.
+            reportedScreenOn = true
+            displayRestorePending = true
+        }
         startMqtt()
         startBatteryMonitor()
-        scheduleManager = ScheduleManager(this, config).also { it.start() }
+        // After a maintenance restart the persisted requested state stands. Recomputing it from
+        // the schedule would cancel a manual MQTT override until the next scheduled transition.
+        scheduleManager = ScheduleManager(this, config).also {
+            it.start(applyCurrentState = relaunch == null)
+        }
         reconcileRemoteConfigServer()
+        if (relaunch != null) {
+            Log.i(TAG, "First start after a maintenance restart, launching dashboard")
+            launchDashboard()
+            AppRestarter.cancelRelaunchAlarm(this)
+            if (restoreDisplay) {
+                // Lit only once the dashboard has had a moment to cover the home screen.
+                mainHandler.postDelayed(
+                    {
+                        displayRestorePending = false
+                        wakeDisplay()
+                    },
+                    RELAUNCH_WAKE_DELAY_MS
+                )
+            }
+        }
     }
 
     private fun startMqtt() {
@@ -381,6 +421,53 @@ class KioskService : Service() {
         }
     }
 
+    private fun startNightlyMaintenance() {
+        val now = SystemClock.elapsedRealtime()
+        if (!NightlyMaintenancePolicy.worthwhile(now - GlanceApp.instance.processStartElapsedMs)) {
+            Diagnostics.record("Nightly maintenance skipped; the app started less than an hour ago")
+            return
+        }
+        Diagnostics.record("Nightly maintenance requested")
+        maintenanceRequestedAtMs = now
+        mainHandler.removeCallbacks(nightlyMaintenanceRunnable)
+        attemptNightlyMaintenance()
+    }
+
+    private val nightlyMaintenanceRunnable = Runnable { attemptNightlyMaintenance() }
+
+    /**
+     * With the display off nobody sees the restart and the Activity may already be gone, so the
+     * service restarts the app itself. Otherwise the Activity decides, because only it knows
+     * whether someone is using the tablet. The retries live here rather than in the Activity,
+     * which a settings save recreates and which may not exist at all. They are timed in uptime,
+     * which stands still in deep sleep; with the display off the next one may come late, but then
+     * it restarts at once, and how long it was postponed is measured in elapsed realtime.
+     */
+    private fun attemptNightlyMaintenance() {
+        val requestedAt = maintenanceRequestedAtMs ?: return
+        if (devicePolicyManager.isDeviceOwnerApp(packageName) && !powerManager.isInteractive) {
+            finishNightlyMaintenance()
+            AppRestarter.restart(this, "nightly maintenance, display off", displayOn = false)
+            return
+        }
+        sendActivityControl(
+            Intent(ACTION_CONTROL_NIGHTLY_MAINTENANCE)
+                .putExtra(EXTRA_MAINTENANCE_REQUESTED_AT, requestedAt)
+        )
+        val postponedForMs = SystemClock.elapsedRealtime() - requestedAt
+        if (postponedForMs < NightlyMaintenancePolicy.MAX_POSTPONE_MS) {
+            mainHandler.postDelayed(nightlyMaintenanceRunnable, NightlyMaintenancePolicy.RETRY_MS)
+        } else {
+            // The Activity gives up with this last attempt unless the tablet is free by now.
+            finishNightlyMaintenance()
+        }
+    }
+
+    private fun finishNightlyMaintenance() {
+        maintenanceRequestedAtMs = null
+        mainHandler.removeCallbacks(nightlyMaintenanceRunnable)
+    }
+
     /** A deliberate state change inside Glance also redefines what the kiosk is asking for. */
     private fun updateScreenState(isOn: Boolean) {
         if (config.requestedScreenOn != isOn) {
@@ -396,6 +483,8 @@ class KioskService : Service() {
      * and such a wake must not be mistaken for a request to abandon the screen schedule.
      */
     private fun reportScreenState(isOn: Boolean) {
+        // A restart darkens the display only until the next process turns it back on.
+        if (AppRestarter.restartInProgress || displayRestorePending) return
         if (reportedScreenOn == isOn) return
         reportedScreenOn = isOn
         mqttStateManager?.publishCurrentState()
@@ -537,14 +626,23 @@ class KioskService : Service() {
         private const val POWER_EVENT_RECHECK_MS = 3_000L
         private const val POWER_EVENT_CHECKS = 3
         private const val REMOTE_SERVER_RELOAD_DELAY_MS = 750L
+        private const val RELAUNCH_WAKE_DELAY_MS = 2_000L
 
         const val ACTION_RELOAD_CONFIG = "com.glance.action.RELOAD_CONFIG"
         const val ACTION_COMMAND_SCREEN = "com.glance.action.COMMAND_SCREEN"
         const val ACTION_CONTROL_SCREEN = "com.glance.action.CONTROL_SCREEN"
         const val ACTION_CONTROL_BRIGHTNESS = "com.glance.action.CONTROL_BRIGHTNESS"
+        const val ACTION_NIGHTLY_MAINTENANCE = "com.glance.action.RUN_NIGHTLY_MAINTENANCE"
+        const val ACTION_CONTROL_NIGHTLY_MAINTENANCE =
+            "com.glance.action.CONTROL_NIGHTLY_MAINTENANCE"
         const val ACTION_REPORT_SCREEN_STATE = "com.glance.action.REPORT_SCREEN_STATE"
         const val ACTION_REPORT_BRIGHTNESS = "com.glance.action.REPORT_BRIGHTNESS"
+        const val ACTION_REPORT_NIGHTLY_MAINTENANCE_DONE =
+            "com.glance.action.REPORT_NIGHTLY_MAINTENANCE_DONE"
+        const val EXTRA_MAINTENANCE_REQUESTED_AT = "maintenance_requested_at"
         const val EXTRA_SCREEN_ON = "screen_on"
+        /** False when the Activity merely observed the screen state rather than changing it. */
+        const val EXTRA_DELIBERATE = "deliberate"
         const val EXTRA_BRIGHTNESS = "brightness"
     }
 }

@@ -51,7 +51,7 @@ Open that address from a computer or phone, sign in with the tablet's settings P
 - dashboard URLs, allowed login origins, rotation and scheduled content profiles;
 - the idle-screen URL and inactivity timeout;
 - automatic and minimum/maximum brightness;
-- screen wake and turn-off schedules;
+- screen wake and turn-off schedules and the nightly maintenance restart;
 - Home Assistant MQTT connection and discovery;
 - remote access and the settings PIN itself.
 
@@ -214,7 +214,28 @@ glance/<device-id>/availability
 
 Without Device Owner privileges, OFF uses a reversible soft-off (black overlay and window brightness zero); tapping the black screen or sending ON wakes it. As Device Owner, Glance uses `DevicePolicyManager.lockNow()` for hardware screen-off.
 
-The optional schedule defines a daytime or overnight ON window. A manual MQTT command overrides the current state until the next scheduled transition. On Android 12 and newer, Glance requests exact-alarm access; when approximate alarms are selected, Android may deliver a transition later than its configured minute. Time, time-zone, package-update, and reboot events reschedule both alarms.
+The optional schedule defines a daytime or overnight ON window. A manual MQTT command overrides the current state until the next scheduled transition. On Android 12 and newer, Glance requests exact-alarm access; when approximate alarms are selected, Android may deliver a transition later than its configured minute. Time, time-zone, package-update, and reboot events reschedule these alarms.
+
+### Nightly maintenance restart
+
+Android System WebView keeps memory in the app process that neither a page reload nor a new set of
+WebViews gives back; on a 3 GB tablet it grew by about 40 MB a day. Glance therefore restarts itself
+once a day, which also refreshes an idle screen that stays on for days. The restart is on by
+default and can be switched off next to the screen schedule, on the tablet or in the remote panel.
+
+- With the screen schedule on, it runs 15 minutes after the screen turns off (or halfway through a
+  shorter OFF window), so nobody sees it.
+- Without one, it runs at the configured quiet time, 03:30 by default.
+- If the screen is on at that moment, it waits until the idle screen is showing or nobody has
+  used the tablet for 10 minutes, and it is skipped for the night after three hours of use.
+
+The restart takes a few seconds. With the screen on, the display goes dark meanwhile and comes back
+with the dashboard. A screen turned on manually during the OFF window stays on, and the `Screen`
+light keeps reporting ON throughout; Home Assistant only sees the tablet briefly unavailable while
+MQTT reconnects. The restart needs Device Owner, because only then may Glance bring its dashboard
+back from the background. Without Device Owner, Glance reloads every page at that time instead, the
+idle screen included even while it is on screen; that refreshes the pages but does not release the
+memory.
 
 ### Keeping the battery healthy
 
