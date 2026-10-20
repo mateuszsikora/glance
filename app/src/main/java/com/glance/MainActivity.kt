@@ -29,6 +29,7 @@ import com.glance.databinding.ActivityMainBinding
 import com.glance.diagnostics.Diagnostics
 import com.glance.kiosk.KioskService
 import com.glance.kiosk.LockTaskHelper
+import com.glance.kiosk.ServiceStarter
 import com.glance.screen.ScreenController
 import com.glance.settings.SettingsActivity
 import com.glance.watchdog.WatchdogService
@@ -586,8 +587,8 @@ class MainActivity : AppCompatActivity() {
     // --- Services ---
 
     private fun startServices() {
-        startForegroundService(Intent(this, KioskService::class.java))
-        startForegroundService(Intent(this, WatchdogService::class.java))
+        ServiceStarter.startFromForeground(this, Intent(this, KioskService::class.java))
+        ServiceStarter.startFromForeground(this, Intent(this, WatchdogService::class.java))
     }
 
     // --- Block back button ---
