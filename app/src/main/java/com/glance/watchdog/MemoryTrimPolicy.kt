@@ -5,11 +5,13 @@ import android.content.ComponentCallbacks2
 /**
  * Decides which memory trim signals justify reloading the WebViews.
  *
- * [ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW] is deliberately ignored. Android sends it to the
- * foreground app whenever the device as a whole runs short, which on a small tablet happens every
- * time the charger is connected and the system starts a burst of power-event receivers. It says
- * nothing about the WebViews themselves, and reloading every page at once only adds allocation
- * pressure while interrupting what is on screen.
+ * Both `TRIM_MEMORY_RUNNING_*` levels describe the device as a whole, not the WebViews. On a small
+ * tablet they arrive whenever the charger is connected and the system starts a burst of
+ * power-event receivers. [ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW] is the most frequent and
+ * least severe of them, so it is ignored to cut down needless reloads. This is noise reduction
+ * only: [ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL] usually follows within seconds and
+ * still reloads. What keeps such a reload off the idle page on screen is
+ * [com.glance.dashboard.IdleMaintenanceReload].
  */
 object MemoryTrimPolicy {
 
