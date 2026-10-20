@@ -4,7 +4,6 @@ import android.app.Notification
 import android.app.PendingIntent
 import android.app.Service
 import android.app.ActivityManager
-import android.content.ComponentCallbacks2
 import android.content.Intent
 import android.os.Handler
 import android.os.IBinder
@@ -176,15 +175,9 @@ class WatchdogService : Service() {
         )
     }
 
-    // These callbacks still matter on the supported Android 8-14 devices even though
-    // Android 15 deprecated the legacy trim levels for newer platform behavior.
-    @Suppress("DEPRECATION")
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
-        if (level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW ||
-            level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL ||
-            level >= ComponentCallbacks2.TRIM_MEMORY_MODERATE
-        ) {
+        if (MemoryTrimPolicy.requiresReload(level)) {
             requestMemoryRecovery("trim level=$level")
         }
     }
