@@ -1,12 +1,14 @@
 package com.glance.diagnostics
 
 import java.io.File
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.time.ZoneOffset
 import java.time.ZonedDateTime
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.After
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -16,6 +18,7 @@ class DiagnosticLogTest {
     @get:Rule
     val folder = TemporaryFolder()
 
+    private val executors = mutableListOf<ExecutorService>()
     private var enabled = true
     private var memory: () -> String = { "system available=400/2748MB" }
 
@@ -24,9 +27,17 @@ class DiagnosticLogTest {
         enabled = { enabled },
         sampleMemory = { memory() },
         maxFileBytes = maxFileBytes,
-        executor = Executors.newSingleThreadExecutor(),
+        executor = executor(),
         now = { ZonedDateTime.of(2026, 10, 16, 13, 52, 42, 0, ZoneOffset.UTC) }
     )
+
+    @After
+    fun shutDownExecutors() {
+        executors.forEach(ExecutorService::shutdownNow)
+    }
+
+    private fun executor(): ExecutorService =
+        Executors.newSingleThreadExecutor().also(executors::add)
 
     @Test
     fun disabledJournalNeverTouchesStorage() {
@@ -120,12 +131,28 @@ class DiagnosticLogTest {
             directory = folder.root,
             enabled = { true },
             sampleMemory = { "" },
-            executor = Executors.newSingleThreadExecutor(),
+            executor = executor(),
             now = { ZonedDateTime.of(2026, 10, 25, 2, 30, 0, 0, ZoneOffset.ofHours(2)) }
         )
         log.record("Memory sample")
 
         assertEquals("2026-10-25 02:30:00+02:00 Memory sample\n", log.read())
+    }
+
+    @Test
+    fun journalThatNeverRecordedNeedsNoThread() {
+        // A shut-down executor rejects every task, so any use of it would fail this test.
+        val unusable = Executors.newSingleThreadExecutor().apply { shutdown() }
+        val log = DiagnosticLog(
+            directory = folder.root,
+            enabled = { false },
+            sampleMemory = { "" },
+            executor = unusable
+        )
+        log.record("Idle screen shown")
+
+        assertEquals("", log.read())
+        log.clear()
     }
 
     @Test

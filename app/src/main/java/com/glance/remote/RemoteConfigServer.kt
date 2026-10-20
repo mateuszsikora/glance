@@ -856,7 +856,13 @@ internal class RemoteConfigHttpHandler(
         "<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>"
 
     private fun diagnosticLogPreview(): String {
-        val lines = diagnosticLog().lines().filter(String::isNotBlank)
+        // The preview must never take down the settings page, which is also where the journal
+        // is switched off.
+        val text = runCatching(diagnosticLog).getOrElse {
+            Log.w(TAG, "Diagnostic log unavailable", it)
+            return "<p class=\"hint\">The diagnostic log is busy. Reload the page to see it.</p>"
+        }
+        val lines = text.lines().filter(String::isNotBlank)
         if (lines.isEmpty()) return "<p class=\"hint\">The diagnostic log is empty.</p>"
         val shown = lines.takeLast(DIAGNOSTIC_PREVIEW_LINES)
         val heading = if (shown.size < lines.size) {
@@ -1088,6 +1094,7 @@ internal class RemoteConfigHttpHandler(
         private const val DEFAULT_PROFILE_TIME = "06:00"
         private const val SESSION_COOKIE = "glance_session"
         private const val SESSION_DURATION_MS = 30L * 60L * 1_000L
+        private const val TAG = "RemoteConfigHttpHandler"
         private const val MAX_SESSIONS = 8
         private const val DIAGNOSTIC_PREVIEW_LINES = 200
     }

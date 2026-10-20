@@ -34,6 +34,9 @@ class DiagnosticLog(
     private val current get() = File(directory, FILE_NAME)
     private val previous get() = File(directory, "$FILE_NAME.old")
 
+    /** Until something is queued, files can be read directly and no thread is ever started. */
+    @Volatile private var queued = false
+
     /**
      * Queues one entry. The timestamp is taken immediately; sampling memory and writing happen on
      * the journal's own thread, so callers on the main thread never wait for storage.
@@ -41,6 +44,7 @@ class DiagnosticLog(
     fun record(event: String, includeMemory: Boolean = false) {
         if (!enabled()) return
         val timestamp = TIMESTAMP_FORMAT.format(now())
+        queued = true
         executor.execute {
             val memory = if (includeMemory) runCatching(sampleMemory).getOrNull() else null
             append(
@@ -68,8 +72,10 @@ class DiagnosticLog(
         }
     }
 
-    private fun <T> onJournalThread(task: () -> T): T =
-        executor.submit(Callable(task)).get(FILE_OPERATION_TIMEOUT_S, TimeUnit.SECONDS)
+    private fun <T> onJournalThread(task: () -> T): T {
+        if (!queued) return task()
+        return executor.submit(Callable(task)).get(FILE_OPERATION_TIMEOUT_S, TimeUnit.SECONDS)
+    }
 
     private fun append(line: String) {
         try {

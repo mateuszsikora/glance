@@ -665,6 +665,22 @@ class RemoteConfigHttpHandlerTest {
     }
 
     @Test
+    fun anUnreadableDiagnosticLogDoesNotTakeDownTheSettingsPage() {
+        val handler = RemoteConfigHttpHandler(
+            config,
+            { changes++ },
+            diagnosticLog = { throw java.util.concurrent.TimeoutException("journal busy") }
+        )
+        val cookie = login(handler)
+
+        val response = handler.handle(get("/", cookie))
+
+        assertEquals(200, response.status)
+        assertTrue(response.text().contains("The diagnostic log is busy."))
+        assertTrue(response.text().contains("name=\"diagnosticLogEnabled\""))
+    }
+
+    @Test
     fun tabletAndRemoteViewsRenderTheSameSharedDiagnostics() {
         val controller = Robolectric.buildActivity(SettingsActivity::class.java).setup()
         try {
