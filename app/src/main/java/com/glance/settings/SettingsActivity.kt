@@ -13,6 +13,7 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.RadioGroup
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -23,6 +24,7 @@ import com.glance.MainActivity
 import com.glance.R
 import com.glance.config.AppConfig
 import com.glance.diagnostics.DiagnosticSettings
+import com.glance.maintenance.IdleRendering
 import com.glance.maintenance.MaintenanceSettings
 import com.glance.content.ContentProfile
 import com.glance.content.WeekDays
@@ -68,6 +70,7 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var editScreenOffTime: EditText
     private lateinit var switchNightlyRestart: SwitchCompat
     private lateinit var editNightlyRestartTime: EditText
+    private lateinit var groupIdleRendering: RadioGroup
     private lateinit var switchMqttEnabled: SwitchCompat
     private lateinit var editMqttBrokerHost: EditText
     private lateinit var editMqttBrokerPort: EditText
@@ -222,6 +225,7 @@ class SettingsActivity : AppCompatActivity() {
         editScreenOffTime = findViewById(R.id.editScreenOffTime)
         switchNightlyRestart = findViewById(R.id.switchNightlyRestart)
         editNightlyRestartTime = findViewById(R.id.editNightlyRestartTime)
+        groupIdleRendering = findViewById(R.id.groupIdleRendering)
         switchMqttEnabled = findViewById(R.id.switchMqttEnabled)
         editMqttBrokerHost = findViewById(R.id.editMqttBrokerHost)
         editMqttBrokerPort = findViewById(R.id.editMqttBrokerPort)
@@ -265,6 +269,13 @@ class SettingsActivity : AppCompatActivity() {
         val maintenance = MaintenanceSettings(this)
         switchNightlyRestart.isChecked = maintenance.nightlyRestartEnabled
         editNightlyRestartTime.setText(maintenance.quietTime)
+        groupIdleRendering.check(
+            when (maintenance.idleRendering) {
+                IdleRendering.GPU_LAYER -> R.id.radioIdleRenderingGpuLayer
+                IdleRendering.GPU -> R.id.radioIdleRenderingGpu
+                IdleRendering.SOFTWARE -> R.id.radioIdleRenderingSoftware
+            }
+        )
         switchMqttEnabled.isChecked = config.mqttEnabled
         editMqttBrokerHost.setText(
             config.mqttBrokerHost.ifBlank {
@@ -530,6 +541,11 @@ class SettingsActivity : AppCompatActivity() {
         MaintenanceSettings(this).apply {
             nightlyRestartEnabled = switchNightlyRestart.isChecked
             quietTime = nightlyRestartTime
+            idleRendering = when (groupIdleRendering.checkedRadioButtonId) {
+                R.id.radioIdleRenderingGpu -> IdleRendering.GPU
+                R.id.radioIdleRenderingSoftware -> IdleRendering.SOFTWARE
+                else -> IdleRendering.GPU_LAYER
+            }
         }
         DiagnosticSettings(this).enabled = switchDiagnosticLog.isChecked
 

@@ -237,6 +237,15 @@ back from the background. Without Device Owner, Glance reloads every page at tha
 idle screen included even while it is on screen; that refreshes the pages but does not release the
 memory.
 
+### Idle screen drawing method
+
+On a 3 GB Huawei tablet with Android 8, Glance's native memory grows for as long as an idle photo
+slideshow plays, outside the WebView's own allocators, and nothing but a restart gives it back.
+Next to the nightly restart you can choose how the idle screen is drawn: with the GPU through an
+offscreen layer (Glance's original behaviour and the default), with the GPU directly, or with the
+CPU. Which method avoids the growth depends on the device's GPU driver; the diagnostic journal's
+`nativeAlloc` figure shows whether it keeps rising.
+
 ### Keeping the battery healthy
 
 A tablet held at 100% on a permanent charger ages its battery quickly. The `Battery` sensor reports the charge level as a percentage, which is what a Home Assistant automation needs to switch a smart plug and keep the charge inside a window such as 40–80%. `Charging` reports whether the charge is actually rising, so a charger that a vendor charge limit or a high temperature has paused is visible rather than hidden. Both are published retained on every change, so Home Assistant has a value immediately after a restart.

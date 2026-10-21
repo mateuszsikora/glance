@@ -31,6 +31,8 @@ import com.glance.kiosk.AppRestarter
 import com.glance.kiosk.KioskService
 import com.glance.kiosk.LockTaskHelper
 import com.glance.kiosk.ServiceStarter
+import com.glance.maintenance.IdleRendering
+import com.glance.maintenance.MaintenanceSettings
 import com.glance.maintenance.NightlyMaintenanceAttempt
 import com.glance.maintenance.NightlyMaintenancePolicy
 import com.glance.screen.ScreenController
@@ -454,23 +456,32 @@ class MainActivity : AppCompatActivity() {
         }
 
         if (supportFragmentManager.findFragmentByTag(IDLE_SCREEN_FRAGMENT_TAG) == null) {
+            val rendering = MaintenanceSettings(this).idleRendering
             supportFragmentManager.beginTransaction()
                 .add(
                     R.id.idle_screen_container,
                     WebViewFragment.newInstance(
                         config.idleScreenUrl,
                         config.dashboardAllowedOrigins,
-                        diagnosticLabel = "idle"
+                        diagnosticLabel = "idle",
+                        layerType = layerTypeOf(rendering)
                     ),
                     IDLE_SCREEN_FRAGMENT_TAG
                 )
                 .commitNow()
+            Diagnostics.record("Idle page created (rendering ${rendering.key})")
         }
         idleScreenActive = true
         binding.idleScreenLayer.visibility = View.VISIBLE
         idleScreenFragment()?.setWebContentPaused(false)
         Log.i(TAG, "Idle screen shown")
         Diagnostics.record("Idle screen shown")
+    }
+
+    private fun layerTypeOf(rendering: IdleRendering): Int = when (rendering) {
+        IdleRendering.GPU_LAYER -> View.LAYER_TYPE_HARDWARE
+        IdleRendering.GPU -> View.LAYER_TYPE_NONE
+        IdleRendering.SOFTWARE -> View.LAYER_TYPE_SOFTWARE
     }
 
     private fun hideIdleScreen(resetTimer: Boolean) {

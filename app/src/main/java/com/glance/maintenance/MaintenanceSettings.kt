@@ -23,6 +23,11 @@ class MaintenanceSettings(context: Context) {
         get() = prefs.getBoolean(KEY_ENABLED, true)
         set(value) = prefs.edit().putBoolean(KEY_ENABLED, value).apply()
 
+    /** How the idle screen's WebView is drawn; see [IdleRendering]. */
+    var idleRendering: IdleRendering
+        get() = IdleRendering.fromKey(prefs.getString(KEY_IDLE_RENDERING, null))
+        set(value) = prefs.edit().putString(KEY_IDLE_RENDERING, value.key).apply()
+
     /** Local "HH:mm" time used when no screen OFF window is configured. */
     var quietTime: String
         get() = prefs.getString(KEY_QUIET_TIME, DEFAULT_QUIET_TIME) ?: DEFAULT_QUIET_TIME
@@ -33,5 +38,6 @@ class MaintenanceSettings(context: Context) {
         private const val PREFS_NAME = "glance_maintenance"
         private const val KEY_ENABLED = "nightly_restart_enabled"
         private const val KEY_QUIET_TIME = "nightly_restart_quiet_time"
+        private const val KEY_IDLE_RENDERING = "idle_rendering"
     }
 }

@@ -31,6 +31,21 @@ class MaintenanceSettingsTest {
     }
 
     @Test
+    fun idleRenderingDefaultsToTheOriginalGpuLayerAndPersists() {
+        assertEquals(IdleRendering.GPU_LAYER, MaintenanceSettings(context).idleRendering)
+
+        MaintenanceSettings(context).idleRendering = IdleRendering.SOFTWARE
+
+        assertEquals(IdleRendering.SOFTWARE, MaintenanceSettings(context).idleRendering)
+    }
+
+    @Test
+    fun anUnknownStoredRenderingFallsBackToTheDefault() {
+        assertEquals(IdleRendering.GPU_LAYER, IdleRendering.fromKey("vulkan"))
+        assertEquals(IdleRendering.GPU_LAYER, IdleRendering.fromKey(null))
+    }
+
+    @Test
     fun settingsAreNotStoredInTheMainConfiguration() {
         MaintenanceSettings(context).apply {
             nightlyRestartEnabled = false

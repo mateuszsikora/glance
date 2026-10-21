@@ -5,6 +5,7 @@ import com.glance.GlanceApp
 import com.glance.config.AppConfig
 import com.glance.content.WeekDays
 import com.glance.diagnostics.Diagnostics
+import com.glance.maintenance.IdleRendering
 import com.glance.settings.ContentProfileDraft
 import com.glance.settings.DebugInfoProvider
 import com.glance.settings.DebugInfoSnapshot
@@ -596,12 +597,25 @@ internal class RemoteConfigHttpHandler(
             values.mqttPasswordConfigured -> "A password is stored. Leave blank to keep it."
             else -> "No password is stored."
         }
+        val selectedIdleRendering = submittedValues?.get("idleRendering") ?: values.idleRendering.key
+        val idleRenderingOptions = listOf(
+            IdleRendering.GPU_LAYER to "With the GPU, through an offscreen layer (default)",
+            IdleRendering.GPU to "With the GPU, directly",
+            IdleRendering.SOFTWARE to "With the CPU"
+        ).joinToString("") { (rendering, label) ->
+            "<option value=\"${rendering.key}\"" +
+                (if (rendering.key == selectedIdleRendering) " selected" else "") +
+                ">${escapeHtml(label)}</option>"
+        }
         // Indented to match the screen-schedule section it is placed in.
         val nightlyRestartSettings = if (!nightlyRestartAvailable) "" else """<div class="subsection">
                             ${checkbox("nightlyRestartEnabled", "Restart Glance nightly to free WebView memory", checked("nightlyRestartEnabled", values.nightlyRestartEnabled))}
                             <div class="field compact-field"><label for="nightlyRestartTime">Restart at <small>without a screen schedule</small></label>
                               <input id="nightlyRestartTime" name="nightlyRestartTime" type="time" value="${value("nightlyRestartTime", values.nightlyRestartTime)}" required></div>
                             <p class="hint">The WebView's memory keeps growing while Glance runs, and only a restart releases it. With the screen schedule on, the restart runs 15 minutes after the screen turns off (halfway through a shorter OFF window) and this time is not used. If the screen is on, it waits until the idle screen is showing or nobody has used the tablet for 10 minutes. The display goes dark for a few seconds and Home Assistant briefly sees the tablet as unavailable. Without Device Owner every page, including the idle screen, is reloaded instead.</p>
+                            <div class="field compact-field"><label for="idleRendering">Draw the idle screen</label>
+                              <select id="idleRendering" name="idleRendering">${idleRenderingOptions}</select></div>
+                            <p class="hint">Some tablets' GPU drivers keep a little memory for every photo an idle slideshow shows, until Glance restarts. A different drawing method may avoid that; the CPU method uses no GPU memory per photo but costs more CPU. Saving recreates the idle screen.</p>
                           </div>"""
         val updateStatus = buildString {
             append(statusRow("Installed version", values.update.installedVersion))

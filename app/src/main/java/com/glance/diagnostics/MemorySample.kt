@@ -11,6 +11,11 @@ import java.io.File
  *
  * The WebView renderer runs in an isolated process that an app cannot measure. Its growth shows
  * up indirectly, as falling available memory and rising swap use.
+ *
+ * The PSS figures count only what is resident. On a tablet that swaps to zram they fall when
+ * memory pressure pushes pages out and rise when a reload touches them again, which looks like
+ * growth tied to reloads. `nativeAlloc`, the bytes the native heap has handed out, does not move
+ * with swapping and is the figure to follow for a leak.
  */
 internal object MemorySample {
 
@@ -30,7 +35,8 @@ internal object MemorySample {
             appPssKb = app.totalPss.toLong(),
             javaHeapKb = app.getMemoryStat("summary.java-heap")?.toLongOrNull(),
             nativeHeapKb = app.getMemoryStat("summary.native-heap")?.toLongOrNull(),
-            graphicsKb = app.getMemoryStat("summary.graphics")?.toLongOrNull()
+            graphicsKb = app.getMemoryStat("summary.graphics")?.toLongOrNull(),
+            nativeAllocatedBytes = Debug.getNativeHeapAllocatedSize()
         )
     }
 
@@ -44,7 +50,8 @@ internal object MemorySample {
         appPssKb: Long,
         javaHeapKb: Long?,
         nativeHeapKb: Long?,
-        graphicsKb: Long?
+        graphicsKb: Long?,
+        nativeAllocatedBytes: Long? = null
     ): String = buildString {
         append("system available=${availableBytes / MIB}/${totalBytes / MIB}MB")
         append(" threshold=${thresholdBytes / MIB}MB")
@@ -56,6 +63,7 @@ internal object MemorySample {
         javaHeapKb?.let { append(" java=${it / KIB}MB") }
         nativeHeapKb?.let { append(" native=${it / KIB}MB") }
         graphicsKb?.let { append(" graphics=${it / KIB}MB") }
+        nativeAllocatedBytes?.let { append(" nativeAlloc=${it / MIB}MB") }
     }
 
     /** @return SwapTotal and SwapFree in KiB, or null when `/proc/meminfo` lacks them. */

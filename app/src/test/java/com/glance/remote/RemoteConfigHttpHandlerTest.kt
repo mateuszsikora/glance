@@ -12,6 +12,7 @@ import com.glance.R
 import com.glance.config.AppConfig
 import com.glance.content.ContentProfile
 import com.glance.diagnostics.DiagnosticSettings
+import com.glance.maintenance.IdleRendering
 import com.glance.maintenance.MaintenanceSettings
 import com.glance.settings.DebugInfoProvider
 import com.glance.settings.DebugInfoSnapshot
@@ -659,6 +660,41 @@ class RemoteConfigHttpHandlerTest {
 
         assertTrue(maintenance.nightlyRestartEnabled)
         assertEquals("04:45", maintenance.quietTime)
+    }
+
+    @Test
+    fun theIdleRenderingChoiceRoundTripsAndAnOlderFormKeepsIt() {
+        val maintenance = MaintenanceSettings(ApplicationProvider.getApplicationContext())
+        val handler = handler()
+        val cookie = login(handler)
+        assertTrue(
+            handler.handle(get("/", cookie)).text()
+                .contains("<option value=\"gpu_layer\" selected>")
+        )
+
+        val software = validSettings(csrf(handler, cookie)) + mapOf("idleRendering" to "software")
+        assertEquals(303, handler.handle(post("/save", software, cookie)).status)
+        assertEquals(IdleRendering.SOFTWARE, maintenance.idleRendering)
+        assertTrue(
+            handler.handle(get("/", cookie)).text()
+                .contains("<option value=\"software\" selected>")
+        )
+
+        // A scripted client that predates the field leaves the stored choice alone.
+        assertEquals(303, handler.handle(post("/save", validSettings(csrf(handler, cookie)), cookie)).status)
+        assertEquals(IdleRendering.SOFTWARE, maintenance.idleRendering)
+    }
+
+    @Test
+    fun anUnknownIdleRenderingIsRejected() {
+        val handler = handler()
+        val cookie = login(handler)
+
+        val invalid = validSettings(csrf(handler, cookie)) + mapOf("idleRendering" to "vulkan")
+        val response = handler.handle(post("/save", invalid, cookie))
+
+        assertEquals(400, response.status)
+        assertTrue(response.text().contains("Unknown idle screen drawing method."))
     }
 
     @Test

@@ -4,6 +4,7 @@ import com.glance.GlanceApp
 import com.glance.config.AppConfig
 import com.glance.content.ContentProfile
 import com.glance.diagnostics.DiagnosticSettings
+import com.glance.maintenance.IdleRendering
 import com.glance.maintenance.MaintenanceSettings
 import com.glance.settings.ConfigValidator
 import com.glance.update.UpdateSummary
@@ -26,6 +27,7 @@ internal data class RemoteConfigSnapshot(
     val screenOffTime: String,
     val nightlyRestartEnabled: Boolean,
     val nightlyRestartTime: String,
+    val idleRendering: IdleRendering,
     val mqttEnabled: Boolean,
     val mqttBrokerHost: String,
     val mqttBrokerPort: Int,
@@ -74,6 +76,7 @@ internal class RemoteConfigUpdater(
             screenOffTime = config.screenOffTime,
             nightlyRestartEnabled = maintenance.nightlyRestartEnabled,
             nightlyRestartTime = maintenance.quietTime,
+            idleRendering = maintenance.idleRendering,
             mqttEnabled = config.mqttEnabled,
             mqttBrokerHost = config.mqttBrokerHost,
             mqttBrokerPort = config.mqttBrokerPort,
@@ -165,6 +168,11 @@ internal class RemoteConfigUpdater(
         if (nightlyRestartAvailable && !ConfigValidator.isValidTime(nightlyRestartTime)) {
             return error("Restart time must use HH:mm (00:00-23:59).")
         }
+        val idleRenderingKey = parameters["idleRendering"]
+        val idleRendering = IdleRendering.entries.firstOrNull { it.key == idleRenderingKey }
+        if (nightlyRestartAvailable && idleRenderingKey != null && idleRendering == null) {
+            return error("Unknown idle screen drawing method.")
+        }
 
         val mqttEnabled = parameters.hasCheckbox("mqttEnabled")
         val mqttHost = parameters["mqttBrokerHost"].orEmpty().trim()
@@ -254,6 +262,8 @@ internal class RemoteConfigUpdater(
         if (nightlyRestartAvailable) {
             maintenance.nightlyRestartEnabled = parameters.hasCheckbox("nightlyRestartEnabled")
             maintenance.quietTime = nightlyRestartTime
+            // A client that does not know the field keeps the stored choice.
+            if (idleRendering != null) maintenance.idleRendering = idleRendering
         }
         diagnostics.enabled = parameters.hasCheckbox("diagnosticLogEnabled")
 
