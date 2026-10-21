@@ -158,6 +158,7 @@ class MainActivity : AppCompatActivity() {
         // An explicit launch is the opt-in path back into kiosk mode after "Exit Kiosk Mode".
         GlanceApp.instance.appConfig.isKioskSuspended = false
 
+        liveInstances.incrementAndGet()
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         Diagnostics.record("Dashboard activity created")
@@ -680,6 +681,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        liveInstances.decrementAndGet()
         handler.removeCallbacksAndMessages(null)
         webViewHealthChecker.reset()
         webViewReachabilityChecker.destroy()
@@ -696,6 +698,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     companion object {
+        /** Dashboards alive in this process; a service restarted in a new process sees none. */
+        internal val liveInstances = java.util.concurrent.atomic.AtomicInteger()
         private const val TAG = "MainActivity"
         private const val TAPS_TO_SETTINGS = 5
         private const val TAP_TIMEOUT_MS = 2000L

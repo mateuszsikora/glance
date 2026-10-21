@@ -236,6 +236,13 @@ class KioskService : Service() {
             it.start(applyCurrentState = relaunch == null)
         }
         reconcileRemoteConfigServer()
+        if (relaunch == null && MainActivity.liveInstances.get() == 0) {
+            // Android restarts this sticky service after the process died, but not the Activity
+            // it lost; Glance is usually not the home app, so the launcher would stay in front.
+            Log.i(TAG, "Started without a dashboard in this process, launching it")
+            Diagnostics.record("Service started without a dashboard; launching it")
+            launchDashboard()
+        }
         if (relaunch != null) {
             Log.i(TAG, "First start after a maintenance restart, launching dashboard")
             launchDashboard()

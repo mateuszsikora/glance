@@ -114,6 +114,25 @@ class KioskServiceMaintenanceTest {
     }
 
     @Test
+    fun aServiceRestartedWithoutADashboardLaunchesIt() {
+        start()
+
+        assertEquals(MainActivity::class.java.name, shadowOf(app).nextStartedActivity.component?.className)
+    }
+
+    @Test
+    fun aServiceStartedByALiveDashboardDoesNotLaunchAnother() {
+        MainActivity.liveInstances.set(1)
+        try {
+            start()
+
+            assertNull(shadowOf(app).nextStartedActivity)
+        } finally {
+            MainActivity.liveInstances.set(0)
+        }
+    }
+
+    @Test
     fun anOrdinaryStartStillAppliesTheSchedule() {
         val now = LocalTime.now()
         config.scheduleEnabled = true
