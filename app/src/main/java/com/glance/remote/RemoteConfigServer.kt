@@ -829,7 +829,7 @@ internal class RemoteConfigHttpHandler(
                         ${sectionHeading("09", "Diagnostic log", "An opt-in journal of reloads and memory pressure, kept on the tablet.")}
                         <div class="section-body">
                           ${checkbox("diagnosticLogEnabled", "Record diagnostic event log", checked("diagnosticLogEnabled", values.diagnosticLogEnabled))}
-                          <p class="hint">Journals reloads with their cause, idle-screen changes, page load failures, charger and display events, and a memory sample every 15 minutes. It never records addresses or credentials. Saving applies the switch. Leave it off when not investigating a problem to avoid needless storage writes.</p>
+                          <p class="hint">Journals reloads with their cause, idle-screen changes, page load failures, charger and display events, and a memory sample every 5 minutes; every entry carries the app's native heap. It never records addresses or credentials. Saving applies the switch. Leave it off when not investigating a problem to avoid needless storage writes.</p>
                           ${diagnosticLogPreview()}
                         </div>
                       </section>

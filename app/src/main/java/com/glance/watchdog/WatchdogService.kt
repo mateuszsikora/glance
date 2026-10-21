@@ -271,7 +271,7 @@ class WatchdogService : Service() {
         private const val BYTES_PER_MB = 1024L * 1024L
         private const val UPDATE_CHECK_INITIAL_DELAY_MS = 16 * 60 * 1000L
         private const val UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000L
-        private const val MEMORY_SAMPLE_INTERVAL_MS = 15 * 60 * 1000L
+        private const val MEMORY_SAMPLE_INTERVAL_MS = 5 * 60 * 1000L
 
         const val ACTION_RELOAD_WEBVIEW = "com.glance.ACTION_RELOAD_WEBVIEW"
         const val ACTION_HEALTH_CHECK = "com.glance.ACTION_HEALTH_CHECK"

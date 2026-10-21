@@ -46,7 +46,8 @@ class GlanceApp : Application() {
             DiagnosticLog(
                 directory = filesDir,
                 enabled = { settings.enabled },
-                sampleMemory = { MemorySample.capture(this) }
+                sampleMemory = { MemorySample.capture(this) },
+                sampleNativeBytes = { android.os.Debug.getNativeHeapAllocatedSize() }
             )
         )
         Diagnostics.record(

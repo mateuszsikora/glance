@@ -48,6 +48,28 @@ class DiagnosticLogTest {
     }
 
     @Test
+    fun everyEntryCarriesTheNativeHeapWhenASamplerIsGiven() {
+        var nativeBytes = 23_400_000L
+        val log = DiagnosticLog(
+            directory = folder.root,
+            enabled = { true },
+            sampleMemory = { memory() },
+            sampleNativeBytes = { nativeBytes },
+            executor = executor(),
+            now = { ZonedDateTime.of(2026, 10, 16, 13, 52, 42, 0, ZoneOffset.UTC) }
+        )
+        log.record("Reload broadcast")
+        nativeBytes = 24_500_000L
+        log.record("Idle screen shown", includeMemory = true)
+
+        assertEquals(
+            "2026-10-16 13:52:42+00:00 Reload broadcast [native=22.3MB]\n" +
+                "2026-10-16 13:52:42+00:00 Idle screen shown [native=23.4MB] | system available=400/2748MB\n",
+            log.read()
+        )
+    }
+
+    @Test
     fun recordsTimestampedEventsInOrder() {
         val log = log()
         log.record("Idle screen shown")
