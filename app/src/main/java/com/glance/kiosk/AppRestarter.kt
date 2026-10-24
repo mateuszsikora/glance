@@ -57,6 +57,8 @@ object AppRestarter {
         Log.i(TAG, "Restarting the app process ($reason)")
         Diagnostics.record("Restarting the app process ($reason)", includeMemory = true)
         restartInProgress = true
+        // The new process starts without today's samples; judge them now.
+        (app as? com.glance.GlanceApp)?.memoryTrend?.evaluateNow(SystemClock.elapsedRealtime())
         markRelaunch(app, wakeDisplay = displayOn)
         scheduleRelaunch(app)
         if (displayOn) {

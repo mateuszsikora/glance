@@ -71,6 +71,8 @@ shows as the step between entries. It works without adb, including on vendor bui
 output. The panel shows the latest entries and can download or clear the full log. Entries contain
 no addresses or credentials. Turn it off once the problem is understood, so the tablet does not
 keep writing to storage. Turning it off keeps the recorded entries readable until **Clear log**.
+The section also shows whether the app's memory keeps growing; see
+[Memory growth warning](#memory-growth-warning).
 
 Changes are validated and applied immediately without restarting the application. The browser talks
 directly to the tablet—there is no Glance cloud service, account, or separate desktop application.
@@ -238,10 +240,20 @@ back from the background. Without Device Owner, Glance reloads every page at tha
 idle screen included even while it is on screen; that refreshes the pages but does not release the
 memory.
 
+### Memory growth warning
+
+Glance follows its allocated native heap all the time, whether the diagnostic log is on or not. After
+13 hours of running, then once a day and before each nightly restart, it compares the start and the
+end of the last day, using hourly minimums and leaving out the first hour after a start. If the heap
+grew by 20 MB or more, the remote panel shows a warning above every section until a later check
+finds it stable. The Diagnostic log section always shows the latest result. Only the result is
+stored; the samples stay in memory.
+
 ### Idle screen drawing method
 
 On a 3 GB Huawei tablet with Android 8, Glance's native memory grows for as long as an idle photo
-slideshow plays, outside the WebView's own allocators, and nothing but a restart gives it back.
+slideshow plays, in what the WebView allocates inside Glance's process, and nothing but a restart
+gives it back.
 Next to the nightly restart you can choose how the idle screen is drawn: with the GPU through an
 offscreen layer (Glance's original behaviour and the default), with the GPU directly, or with the
 CPU. Which method avoids the growth depends on the device's GPU driver; the diagnostic journal's

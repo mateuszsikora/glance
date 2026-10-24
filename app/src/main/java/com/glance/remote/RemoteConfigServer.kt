@@ -5,6 +5,7 @@ import com.glance.GlanceApp
 import com.glance.config.AppConfig
 import com.glance.content.WeekDays
 import com.glance.diagnostics.Diagnostics
+import com.glance.diagnostics.MemoryTrend
 import com.glance.maintenance.IdleRendering
 import com.glance.settings.ContentProfileDraft
 import com.glance.settings.DebugInfoProvider
@@ -206,6 +207,7 @@ internal class RemoteConfigHttpHandler(
     },
     private val diagnosticLog: () -> String = Diagnostics::read,
     private val clearDiagnosticLog: () -> Unit = Diagnostics::clear,
+    private val memoryTrend: () -> MemoryTrend.Verdict? = { GlanceApp.instance.memoryTrend.latest() },
     /** False in recovery builds, whose older app code has no nightly restart to configure. */
     private val nightlyRestartAvailable: Boolean = !com.glance.BuildConfig.RESTORE_BUILD,
     private val recoveryState: com.glance.update.RestoreState = com.glance.update.RestoreState(com.glance.GlanceApp.instance),
@@ -617,6 +619,8 @@ internal class RemoteConfigHttpHandler(
                               <select id="idleRendering" name="idleRendering">${idleRenderingOptions}</select></div>
                             <p class="hint">Some tablets' GPU drivers keep a little memory for every photo an idle slideshow shows, until Glance restarts. A different drawing method may avoid that; the CPU method uses no GPU memory per photo but costs more CPU. Saving recreates the idle screen.</p>
                           </div>"""
+        // Like the journal preview, a broken verdict must not take down the settings page.
+        val trend = runCatching(memoryTrend).getOrNull()
         val updateStatus = buildString {
             append(statusRow("Installed version", values.update.installedVersion))
             append(statusRow("Code identity", com.glance.BuildConfig.CODE_IDENTITY))
@@ -647,6 +651,7 @@ internal class RemoteConfigHttpHandler(
                   <h1>Tablet settings</h1>
                   <p>Changes are validated on the tablet and applied as soon as you save.</p>
                 </div>
+                ${memoryTrendWarning(trend, values.nightlyRestartEnabled)}
                 <form id="remote-settings-form" method="post" action="/save" accept-charset="UTF-8">
                   <input type="hidden" name="csrf" value="${escapeHtml(session.csrfToken)}">
                   <!-- Pressing Enter in a field submits the form's first submit button. Without
@@ -828,6 +833,7 @@ internal class RemoteConfigHttpHandler(
                       <section id="diagnostic-log" class="card settings-card">
                         ${sectionHeading("09", "Diagnostic log", "An opt-in journal of reloads and memory pressure, kept on the tablet.")}
                         <div class="section-body">
+                          <dl class="status-list">${statusRow("Memory trend", memoryTrendStatus(trend))}</dl>
                           ${checkbox("diagnosticLogEnabled", "Record diagnostic event log", checked("diagnosticLogEnabled", values.diagnosticLogEnabled))}
                           <p class="hint">Journals reloads with their cause, idle-screen changes, page load failures, charger and display events, and a memory sample every 5 minutes; every entry carries the app's native heap. It never records addresses or credentials. Saving applies the switch. Leave it off when not investigating a problem to avoid needless storage writes.</p>
                           ${diagnosticLogPreview()}
@@ -874,6 +880,40 @@ internal class RemoteConfigHttpHandler(
             "</textarea>" +
             "</div>"
     }
+
+    /**
+     * Shown above every section while the latest verdict says the native heap keeps growing:
+     * nothing on the tablet itself tells the owner, until Android closes Glance for lack of memory.
+     */
+    private fun memoryTrendWarning(trend: MemoryTrend.Verdict?, nightlyRestartEnabled: Boolean): String {
+        if (trend == null || !trend.growing) return ""
+        val remedy = when {
+            !nightlyRestartAvailable -> "Restarting Glance releases it."
+            nightlyRestartEnabled -> "The nightly restart releases it; if Android still closes Glance for lack of memory, make the page lighter."
+            else -> "Turn on the nightly restart in <a href=\"#screen\">Screen schedule</a> to release it every night."
+        }
+        return "<div class=\"banner warning\" role=\"status\"><span aria-hidden=\"true\">!</span>" +
+            "<p>Glance's memory keeps growing: ${escapeHtml(describe(trend))}. A page shown for a " +
+            "long time, often a slideshow on the idle screen, can leave memory behind in this " +
+            "tablet's WebView until Glance restarts. $remedy</p></div>"
+    }
+
+    private fun memoryTrendStatus(trend: MemoryTrend.Verdict?): String = when {
+        trend == null -> "Not checked yet. Glance checks after 13 hours of running, then daily."
+        trend.growing -> "Growing: ${describe(trend)}"
+        else -> "Stable: ${describe(trend)}"
+    }
+
+    private fun describe(trend: MemoryTrend.Verdict): String = String.format(
+        java.util.Locale.US,
+        "%+.0f MB in %.0f hours, checked %s",
+        trend.growthBytes / (1024.0 * 1024.0),
+        trend.windowMs / 3_600_000.0,
+        java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").format(
+            java.time.Instant.ofEpochMilli(trend.evaluatedAtEpochMs)
+                .atZone(java.time.ZoneId.systemDefault())
+        )
+    )
 
     /** One read-only fact inside a `.status-list`. */
     private fun statusRow(label: String, value: String): String =
@@ -1076,6 +1116,8 @@ internal class RemoteConfigHttpHandler(
                 .banner p { margin:0; font-size:.87rem; font-weight:650; }
                 .success { color:#bff5ce; background:#0d2b18; border:1px solid #28623b; }
                 .error { color:#fecdd3; background:#35151b; border:1px solid #793442; }
+                .warning { color:#fde68a; background:#2d2408; border:1px solid #7c5e10; }
+                .warning a { color:inherit; }
                 .auth-shell { width:min(430px,100%); margin:8vh auto 0; }
                 .auth-shell > .brand { justify-content:center; margin-bottom:20px; }
                 .auth-card { padding:30px; }

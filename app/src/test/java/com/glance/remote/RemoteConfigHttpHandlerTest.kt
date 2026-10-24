@@ -12,6 +12,7 @@ import com.glance.R
 import com.glance.config.AppConfig
 import com.glance.content.ContentProfile
 import com.glance.diagnostics.DiagnosticSettings
+import com.glance.diagnostics.MemoryTrend
 import com.glance.maintenance.IdleRendering
 import com.glance.maintenance.MaintenanceSettings
 import com.glance.settings.DebugInfoProvider
@@ -750,6 +751,51 @@ class RemoteConfigHttpHandlerTest {
         assertTrue(cleared.contains("Diagnostic log cleared."))
         assertTrue(cleared.contains("The diagnostic log is empty."))
         assertEquals(0, changes)
+    }
+
+    @Test
+    fun aGrowingNativeHeapIsWarnedAboutAboveEverySection() {
+        MaintenanceSettings(ApplicationProvider.getApplicationContext()).nightlyRestartEnabled = false
+        val growing = MemoryTrend.Verdict(
+            evaluatedAtEpochMs = 1_792_800_000_000L,
+            windowMs = 22 * 3_600_000L,
+            growthBytes = 46L * 1024L * 1024L,
+            growing = true
+        )
+        val handler = RemoteConfigHttpHandler(config, { changes++ }, memoryTrend = { growing })
+        val cookie = login(handler)
+
+        val page = handler.handle(get("/", cookie)).text()
+
+        assertTrue(page.contains("class=\"banner warning\""))
+        assertTrue(page.contains("Glance's memory keeps growing: +46 MB in 22 hours"))
+        assertTrue(page.contains("Turn on the nightly restart"))
+        assertTrue(page.indexOf("banner warning") < page.indexOf("id=\"dashboards\""))
+        assertTrue(page.contains("<dt>Memory trend</dt><dd>Growing: +46 MB in 22 hours"))
+
+        MaintenanceSettings(ApplicationProvider.getApplicationContext()).nightlyRestartEnabled = true
+        val withRestart = handler.handle(get("/", cookie)).text()
+        assertTrue(withRestart.contains("The nightly restart releases it"))
+        assertFalse(withRestart.contains("Turn on the nightly restart"))
+    }
+
+    @Test
+    fun aStableOrUncheckedHeapShowsOnlyItsStatus() {
+        var trend: MemoryTrend.Verdict? = null
+        val handler = RemoteConfigHttpHandler(config, { changes++ }, memoryTrend = { trend })
+        val cookie = login(handler)
+
+        val unchecked = handler.handle(get("/", cookie)).text()
+        assertFalse(unchecked.contains("banner warning"))
+        assertTrue(unchecked.contains("<dd>Not checked yet."))
+
+        trend = MemoryTrend.Verdict(1_792_800_000_000L, 23 * 3_600_000L, 2L * 1024L * 1024L, false)
+        val stable = handler.handle(get("/", cookie)).text()
+        assertFalse(stable.contains("banner warning"))
+        assertTrue(stable.contains("<dd>Stable: +2 MB in 23 hours"))
+
+        val broken = RemoteConfigHttpHandler(config, { changes++ }, memoryTrend = { error("prefs") })
+        assertEquals(200, broken.handle(get("/", login(broken))).status)
     }
 
     @Test
