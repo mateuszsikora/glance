@@ -815,7 +815,11 @@ class SettingsActivity : AppCompatActivity() {
         val megabytes = (trend.growthBytes / (1024 * 1024)).toInt()
         val hours = (trend.windowMs / 3_600_000L).toInt()
         val days = MemoryTrend.suggestedRestartIntervalDays(trend)
-            ?: return getString(R.string.memory_trend_stable, megabytes, hours)
+            ?: return getString(
+                if (trend.step) R.string.memory_trend_step else R.string.memory_trend_stable,
+                megabytes,
+                hours
+            )
         val label = getString(
             when (days) {
                 1 -> R.string.restart_every_day

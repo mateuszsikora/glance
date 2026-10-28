@@ -820,6 +820,11 @@ class RemoteConfigHttpHandlerTest {
         assertTrue(stable.contains("<dd>Stable: +2 MB in 23 hours"))
         assertTrue(stable.contains("<dd>No restarts needed while the memory stays stable.</dd>"))
 
+        trend = MemoryTrend.Verdict(1_792_800_000_000L, 20 * 3_600_000L, 30L * 1024L * 1024L, false, step = true)
+        val step = handler.handle(get("/", cookie)).text()
+        assertFalse(step.contains("banner warning"))
+        assertTrue(step.contains("<dd>Stable after a one-time step: +30 MB in 20 hours"))
+
         val broken = RemoteConfigHttpHandler(config, { changes++ }, memoryTrend = { error("prefs") })
         assertEquals(200, broken.handle(get("/", login(broken))).status)
     }

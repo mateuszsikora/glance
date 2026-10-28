@@ -2,6 +2,7 @@ package com.glance.diagnostics
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -47,6 +48,21 @@ class MemoryTrendTest {
 
         assertEquals(30 * MIB, verdict.growthBytes)
         assertFalse(verdict.growing)
+        assertTrue(verdict.step)
+    }
+
+    @Test
+    fun samplesPausedOverNightGiveNoVerdictUntilEnoughHoursAreFilled() {
+        // An evening start, an hour of samples, the screen off until morning: two hourly buckets
+        // 13 hours apart, then the day fills in.
+        val evening = (12..24).map { MemoryTrend.Sample(START + it * 5 * 60_000L, BASE) }
+        val morning = (0 until 8 * 12).map { i ->
+            MemoryTrend.Sample(START + 14 * HOUR + i * 5 * 60_000L, BASE + (i / 12) * MIB)
+        }
+
+        assertNull(MemoryTrend.evaluate(evening + morning.take(1), START, NOW))
+        assertNull(MemoryTrend.evaluate(evening + morning.take(6 * 12), START, NOW))
+        assertNotNull(MemoryTrend.evaluate(evening + morning, START, NOW))
     }
 
     @Test

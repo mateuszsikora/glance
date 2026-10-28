@@ -1,6 +1,7 @@
 package com.glance.diagnostics
 
 import android.content.Context
+import android.util.Log
 import java.util.Locale
 
 /**
@@ -46,12 +47,17 @@ class MemoryTrendMonitor(
             evaluatedAtEpochMs = prefs.getLong(KEY_EVALUATED_AT, 0L),
             windowMs = prefs.getLong(KEY_WINDOW_MS, 0L),
             growthBytes = prefs.getLong(KEY_GROWTH_BYTES, 0L),
-            growing = prefs.getBoolean(KEY_GROWING, false)
+            growing = prefs.getBoolean(KEY_GROWING, false),
+            step = prefs.getBoolean(KEY_STEP, false)
         )
     }
 
     private fun evaluate(elapsedMs: Long) {
-        val verdict = MemoryTrend.evaluate(samples.toList(), processStartElapsedMs, nowEpochMs())
+        // Runs in the watchdog's loop and just before a restart; a fault here must not end the
+        // process.
+        val verdict = runCatching {
+            MemoryTrend.evaluate(samples.toList(), processStartElapsedMs, nowEpochMs())
+        }.onFailure { Log.w(TAG, "Memory trend evaluation failed", it) }.getOrNull()
             ?: return
         lastEvaluationElapsedMs = elapsedMs
         prefs.edit()
@@ -59,12 +65,17 @@ class MemoryTrendMonitor(
             .putLong(KEY_WINDOW_MS, verdict.windowMs)
             .putLong(KEY_GROWTH_BYTES, verdict.growthBytes)
             .putBoolean(KEY_GROWING, verdict.growing)
+            .putBoolean(KEY_STEP, verdict.step)
             .commit()
         Diagnostics.record(
             String.format(
                 Locale.US,
                 "Memory trend: native heap %s %.1f MB in %.1f h",
-                if (verdict.growing) "keeps growing," else "stable,",
+                when {
+                    verdict.growing -> "keeps growing,"
+                    verdict.step -> "stable after one step of"
+                    else -> "stable,"
+                },
                 verdict.growthBytes / MIB,
                 verdict.windowMs / HOUR_MS
             )
@@ -80,6 +91,8 @@ class MemoryTrendMonitor(
         private const val KEY_WINDOW_MS = "window_ms"
         private const val KEY_GROWTH_BYTES = "growth_bytes"
         private const val KEY_GROWING = "growing"
+        private const val KEY_STEP = "step"
+        private const val TAG = "MemoryTrendMonitor"
         private const val MIB = 1024.0 * 1024.0
         private const val HOUR_MS = 60.0 * 60_000.0
     }

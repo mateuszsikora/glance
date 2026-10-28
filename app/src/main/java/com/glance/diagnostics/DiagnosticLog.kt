@@ -83,11 +83,8 @@ class DiagnosticLog(
         var remaining = maxBytes.toLong()
         var cut = false
         for (file in listOf(current, previous)) {
-            if (!file.exists()) continue
-            if (remaining <= 0) {
-                cut = true
-                continue
-            }
+            // A file skipped whole leaves the text starting at a line boundary.
+            if (!file.exists() || remaining <= 0) continue
             RandomAccessFile(file, "r").use { raf ->
                 val take = minOf(remaining, raf.length())
                 if (take < raf.length()) cut = true

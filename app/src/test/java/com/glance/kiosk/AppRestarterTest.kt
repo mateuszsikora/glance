@@ -3,6 +3,7 @@ package com.glance.kiosk
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -33,12 +34,27 @@ class AppRestarterTest {
         assertNull(AppRestarter.consumePendingRelaunch(context, nowElapsedMs = 9_005_000L))
 
         AppRestarter.markRelaunch(context, wakeDisplay = false, nowElapsedMs = 9_000_000L)
-        assertNull(AppRestarter.consumePendingRelaunch(context, nowElapsedMs = 9_120_000L))
+        assertNull(AppRestarter.consumePendingRelaunch(context, nowElapsedMs = 9_000_000L + 11 * 60_000L))
 
-        AppRestarter.markRelaunch(context, wakeDisplay = false, nowElapsedMs = 9_000_000L)
+        // The sticky-service fallback can come minutes late and is still the relaunch.
+        AppRestarter.markRelaunch(context, wakeDisplay = true, nowElapsedMs = 9_000_000L)
         assertEquals(
-            AppRestarter.Relaunch(wakeDisplay = false),
-            AppRestarter.consumePendingRelaunch(context, nowElapsedMs = 9_005_000L)
+            AppRestarter.Relaunch(wakeDisplay = true),
+            AppRestarter.consumePendingRelaunch(context, nowElapsedMs = 9_000_000L + 4 * 60_000L)
+        )
+    }
+
+    @Test
+    fun aMarkerWithoutATimeIsNotTrusted() {
+        context.getSharedPreferences("glance_restart_state", Context.MODE_PRIVATE).edit()
+            .putBoolean("relaunch_pending", true)
+            .putBoolean("wake_display", true)
+            .commit()
+
+        assertNull(AppRestarter.consumePendingRelaunch(context))
+        assertFalse(
+            context.getSharedPreferences("glance_restart_state", Context.MODE_PRIVATE)
+                .contains("relaunch_pending")
         )
     }
 }

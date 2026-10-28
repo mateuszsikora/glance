@@ -913,6 +913,7 @@ internal class RemoteConfigHttpHandler(
         !nightlyRestartAvailable -> "Not measured by this recovery build."
         trend == null -> "Not checked yet. Glance checks after 13 hours of running, then daily."
         trend.growing -> "Growing: ${describe(trend)}"
+        trend.step -> "Stable after a one-time step: ${describe(trend)}"
         else -> "Stable: ${describe(trend)}"
     }
 

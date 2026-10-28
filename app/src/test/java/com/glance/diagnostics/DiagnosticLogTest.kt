@@ -133,6 +133,10 @@ class DiagnosticLogTest {
         val tail = log.readTail(55).lines().filter(String::isNotBlank)
         assertEquals(listOf("fifth event"), tail.map { it.substringAfter("+00:00 ") })
 
+        // Exactly the current file, with the previous one left out whole: nothing is dropped.
+        val currentBytes = File(folder.root, DiagnosticLog.FILE_NAME).length().toInt()
+        assertEquals(File(folder.root, DiagnosticLog.FILE_NAME).readText(), log.readTail(currentBytes))
+
         // Across the rotation: the end of the previous file and the whole current one.
         val across = log.readTail(100).lines().filter(String::isNotBlank)
         assertEquals(listOf("fourth event", "fifth event"), across.map { it.substringAfter("+00:00 ") })

@@ -43,8 +43,12 @@ object AppRestarter {
     private const val KILL_DELAY_MS = 1_000L
     /** Long enough for Android to have cleaned up the old process before the alarm fires. */
     private const val RELAUNCH_DELAY_MS = 4_000L
-    /** A relaunch comes seconds after the marker; anything later is an unrelated start. */
-    private const val MARKER_VALID_MS = 60_000L
+    /**
+     * The alarm relaunches within seconds. When it fails, Android restarts the sticky service
+     * with a backoff that EMUI can stretch to minutes; that late start must still restore the
+     * display. A reboot is recognised separately, by the clock having started over.
+     */
+    private const val MARKER_VALID_MS = 10 * 60_000L
 
     /** What the first process after [restart] has to restore. */
     data class Relaunch(val wakeDisplay: Boolean)
@@ -79,8 +83,9 @@ object AppRestarter {
 
     /**
      * @return the pending relaunch once, in the first process after [restart]; null otherwise,
-     * including when the device rebooted or lost power before the new process started: that start
-     * is an ordinary one, which applies the screen schedule.
+     * including when the device rebooted or lost power before the new process started, or the
+     * new process came more than ten minutes later: that start is an ordinary one, which applies
+     * the screen schedule.
      */
     fun consumePendingRelaunch(
         context: Context,
@@ -89,12 +94,15 @@ object AppRestarter {
         val prefs = context.applicationContext
             .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         if (!prefs.getBoolean(KEY_RELAUNCH_PENDING, false)) return null
-        val markedAt = prefs.getLong(KEY_MARKED_AT, Long.MIN_VALUE)
+        // A marker without a time cannot be placed, so it is not trusted.
+        val markedAt = if (prefs.contains(KEY_MARKED_AT)) prefs.getLong(KEY_MARKED_AT, 0L) else null
         val relaunch = Relaunch(wakeDisplay = prefs.getBoolean(KEY_WAKE_DISPLAY, false))
         prefs.edit().remove(KEY_RELAUNCH_PENDING).remove(KEY_WAKE_DISPLAY).remove(KEY_MARKED_AT)
             .commit()
         // elapsedRealtime restarts from zero on boot, so a marker from before it lies ahead.
-        if (nowElapsedMs < markedAt || nowElapsedMs - markedAt > MARKER_VALID_MS) return null
+        if (markedAt == null || nowElapsedMs < markedAt || nowElapsedMs - markedAt > MARKER_VALID_MS) {
+            return null
+        }
         return relaunch
     }
 

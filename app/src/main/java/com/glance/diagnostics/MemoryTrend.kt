@@ -22,11 +22,16 @@ object MemoryTrend {
     /** @param elapsedMs [android.os.SystemClock.elapsedRealtime] when the sample was taken. */
     data class Sample(val elapsedMs: Long, val nativeBytes: Long)
 
+    /**
+     * @param step the heap grew past the threshold, but in one step rather than gradually; it is
+     * then stable at its new level and not [growing].
+     */
     data class Verdict(
         val evaluatedAtEpochMs: Long,
         val windowMs: Long,
         val growthBytes: Long,
-        val growing: Boolean
+        val growing: Boolean,
+        val step: Boolean = false
     )
 
     /** Pages loading after a process start; their caches grow once and then stay. */
@@ -54,6 +59,9 @@ object MemoryTrend {
     private const val BUCKET_MS = 60 * 60_000L
     private const val EDGE_BUCKETS = 3
 
+    /** Start, middle and end each need their own hours. */
+    private const val MIN_BUCKETS = 3 * EDGE_BUCKETS
+
     /**
      * How far from either end the middle level must be. A leak that only runs while the screen is
      * on, with nights flat, still puts the middle about a third of the way.
@@ -63,7 +71,9 @@ object MemoryTrend {
     /**
      * @param samples one process's samples, oldest first.
      * @param processStartElapsedMs when the process started, on the samples' clock.
-     * @return null while the samples after the warm-up span less than [MIN_WINDOW_MS].
+     * @return null while the samples after the warm-up span less than [MIN_WINDOW_MS], or fill
+     * too few hours of it to tell a start, a middle and an end apart. With the screen off the
+     * samples pause for the night, so half a day can hold only a couple of hours of them.
      */
     fun evaluate(
         samples: List<Sample>,
@@ -82,17 +92,20 @@ object MemoryTrend {
             .toSortedMap()
             .values
             .map { bucket -> bucket.minOf(Sample::nativeBytes) }
+        if (floors.size < MIN_BUCKETS) return null
         val start = median(floors.take(EDGE_BUCKETS))
         val end = median(floors.takeLast(EDGE_BUCKETS))
         val middleFrom = (floors.size - EDGE_BUCKETS) / 2
         val middle = median(floors.subList(middleFrom, middleFrom + EDGE_BUCKETS))
         val growth = end - start
         val gradual = middle - start >= growth * MIDDLE_SHARE && end - middle >= growth * MIDDLE_SHARE
+        val large = growth >= GROWTH_THRESHOLD_BYTES
         return Verdict(
             evaluatedAtEpochMs = nowEpochMs,
             windowMs = windowMs,
             growthBytes = growth,
-            growing = growth >= GROWTH_THRESHOLD_BYTES && gradual
+            growing = large && gradual,
+            step = large && !gradual
         )
     }
 
