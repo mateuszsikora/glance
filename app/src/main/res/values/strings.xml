@@ -39,7 +39,7 @@
     <string name="screen_schedule_help">The display is physically off outside the ON–OFF window. Example: wake at 06:00 and turn off at 23:00 keeps it off overnight.</string>
     <string name="memory_title">Memory</string>
     <string name="memory_help">On some older tablets the graphics driver keeps a little memory every time a page redraws, for example each photo of an idle-screen slideshow, and only a restart of Glance gives it back. When memory runs out, Android closes Glance, which then starts again. If you notice Glance restarting unexpectedly, or the trend below keeps growing, schedule restarts here.</string>
-    <string name="memory_trend_unknown">Memory trend: not checked yet. Glance checks after 13 hours of running, then daily.</string>
+    <string name="memory_trend_unknown">Memory trend: not checked yet. Glance checks once it has run for about 13 hours, at least 9 of them with the screen on, then daily.</string>
     <string name="memory_trend_stable">Memory trend: stable, %1$+d MB in %2$d hours. No restarts needed.</string>
     <string name="memory_trend_step">Memory trend: stable after a one-time step of %1$+d MB in %2$d hours, for example a heavier page after a settings change. No restarts needed.</string>
     <string name="memory_trend_growing">Memory trend: growing, %1$+d MB in %2$d hours. Suggested: restart %3$s.</string>

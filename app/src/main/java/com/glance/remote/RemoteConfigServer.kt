@@ -911,7 +911,7 @@ internal class RemoteConfigHttpHandler(
         // The older app code of a recovery build does not sample the heap; an earlier verdict
         // would otherwise stay on screen as if it were current.
         !nightlyRestartAvailable -> "Not measured by this recovery build."
-        trend == null -> "Not checked yet. Glance checks after 13 hours of running, then daily."
+        trend == null -> "Not checked yet. Glance checks once it has run for about 13 hours, at least 9 of them with the screen on, then daily."
         trend.growing -> "Growing: ${describe(trend)}"
         trend.step -> "Stable after a one-time step: ${describe(trend)}"
         else -> "Stable: ${describe(trend)}"
