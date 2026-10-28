@@ -231,13 +231,15 @@ Glance never restarts itself on its own judgement. The **Memory** section, on th
 remote panel, shows what it measured and lets you schedule restarts:
 
 - **Memory trend.** Glance follows its allocated native heap all the time, whether the diagnostic
-  log is on or not; with the screen off the samples pause. Once it has run for about 13 hours, at
-  least 9 of them with the screen on, then once a day and before each scheduled restart, it compares
-  the start, middle and end of the last day, using hourly minimums and leaving out the first hour
-  after a start. A tablet whose screen is on for less than 9 hours a day gets no verdict. Growth of 20 MB or more that builds up over the day, rather than in one step,
-  is reported as growing. The remote panel then shows a warning above every section, until a later
+  log is on or not; while the display is powered off, the samples pause. Once it has run for about
+  13 hours, at least 9 of them with the screen on, then once a day and before each scheduled
+  restart, it compares the start, middle and end of the last day, using hourly minimums and leaving
+  out the first hour after a start. A tablet whose display is powered on for less than 9 hours a day
+  gets no verdict. Growth of 20 MB or more that builds up over the day, rather than in one step, is
+  reported as growing. The remote panel then shows a warning above every section, until a later
   check finds the heap stable or restarts are scheduled at least as often as suggested. Only the
-  result is stored; the samples stay in memory.
+  result is stored; the samples stay in memory. Without Device Owner, "off" is a black overlay on a
+  display that stays powered, so the samples continue.
 - **Suggestion.** While the heap keeps growing, Glance suggests the longest interval on offer that
   keeps the growth under 100 MB at the measured pace. It is only a suggestion.
 - **Scheduled restart**, off by default: every day, every 2 or 3 days, or once a week. The interval
