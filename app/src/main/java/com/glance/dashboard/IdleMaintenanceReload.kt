@@ -4,7 +4,9 @@ package com.glance.dashboard
  * Keeps maintenance reloads (periodic refresh, memory pressure, waking after a long screen-off)
  * from restarting the idle page while it is on screen. Restarting it there interrupts playback
  * with a blank page, so its reload is deferred until the idle screen is dismissed and the page
- * is out of sight. Main-thread API.
+ * is out of sight. The deferral itself has no time limit; the nightly maintenance restart
+ * ([com.glance.maintenance.NightlyMaintenancePolicy]) is what bounds it for an idle page that
+ * stays on screen. Main-thread API.
  */
 class IdleMaintenanceReload {
 

@@ -17,6 +17,9 @@ CONTROL_FILES = ["app/src/main/java/com/glance/update", "app/src/main/java/com/g
                  "app/src/main/java/com/glance/settings/DeviceDebugInfo.kt",
                  # GlanceApp and the remote panel install and read the diagnostic journal.
                  "app/src/main/java/com/glance/diagnostics",
+                 # The remote panel reads and writes the nightly maintenance settings. Recovery builds
+                 # (BuildConfig.RESTORE_BUILD) hide them: the restored app code has no nightly restart.
+                 "app/src/main/java/com/glance/maintenance",
                  "app/src/test/java/com/glance/update"]
 # Keep the archived UI tests: current cross-surface diagnostics tests assume current tablet UI,
 # while recovery intentionally retains the older SettingsActivity. The main checkout tests the

@@ -4,6 +4,7 @@ import com.glance.GlanceApp
 import com.glance.config.AppConfig
 import com.glance.content.ContentProfile
 import com.glance.diagnostics.DiagnosticSettings
+import com.glance.maintenance.MaintenanceSettings
 import com.glance.settings.ConfigValidator
 import com.glance.update.UpdateSummary
 
@@ -23,6 +24,9 @@ internal data class RemoteConfigSnapshot(
     val scheduleEnabled: Boolean,
     val screenOnTime: String,
     val screenOffTime: String,
+    val nightlyRestartEnabled: Boolean,
+    val nightlyRestartTime: String,
+    val restartIntervalDays: Int,
     val mqttEnabled: Boolean,
     val mqttBrokerHost: String,
     val mqttBrokerPort: Int,
@@ -46,7 +50,9 @@ internal sealed class RemoteConfigUpdateResult {
 /** Validates and atomically orders writes shared by the remote settings page. */
 internal class RemoteConfigUpdater(
     private val config: AppConfig,
-    private val diagnostics: DiagnosticSettings = DiagnosticSettings(GlanceApp.instance)
+    private val diagnostics: DiagnosticSettings = DiagnosticSettings(GlanceApp.instance),
+    private val maintenance: MaintenanceSettings = MaintenanceSettings(GlanceApp.instance),
+    private val nightlyRestartAvailable: Boolean = true
 ) {
 
     fun snapshot(): RemoteConfigSnapshot {
@@ -67,6 +73,9 @@ internal class RemoteConfigUpdater(
             scheduleEnabled = config.scheduleEnabled,
             screenOnTime = config.screenOnTime,
             screenOffTime = config.screenOffTime,
+            nightlyRestartEnabled = maintenance.nightlyRestartEnabled,
+            nightlyRestartTime = maintenance.quietTime,
+            restartIntervalDays = maintenance.restartIntervalDays,
             mqttEnabled = config.mqttEnabled,
             mqttBrokerHost = config.mqttBrokerHost,
             mqttBrokerPort = config.mqttBrokerPort,
@@ -153,6 +162,18 @@ internal class RemoteConfigUpdater(
         if (scheduleEnabled && screenOnTime == screenOffTime) {
             return error("Wake and turn-off times must be different.")
         }
+        val nightlyRestartTime = parameters["nightlyRestartTime"].orEmpty()
+            .ifBlank { MaintenanceSettings.DEFAULT_QUIET_TIME }
+        if (nightlyRestartAvailable && !ConfigValidator.isValidTime(nightlyRestartTime)) {
+            return error("Restart time must use HH:mm (00:00-23:59).")
+        }
+        val restartIntervalField = parameters["restartIntervalDays"]
+        val restartIntervalDays = restartIntervalField?.toIntOrNull()
+        if (nightlyRestartAvailable && restartIntervalField != null &&
+            restartIntervalDays !in MaintenanceSettings.INTERVAL_DAYS
+        ) {
+            return error("Unknown restart interval.")
+        }
 
         val mqttEnabled = parameters.hasCheckbox("mqttEnabled")
         val mqttHost = parameters["mqttBrokerHost"].orEmpty().trim()
@@ -238,6 +259,13 @@ internal class RemoteConfigUpdater(
         config.remoteConfigEnabled = parameters.hasCheckbox("remoteConfigEnabled")
         config.updateUrl = updateUrl
         config.autoUpdateEnabled = parameters.hasCheckbox("autoUpdateEnabled")
+        // A form without these fields must not switch the restart off for a later normal build.
+        if (nightlyRestartAvailable) {
+            maintenance.nightlyRestartEnabled = parameters.hasCheckbox("nightlyRestartEnabled")
+            maintenance.quietTime = nightlyRestartTime
+            // A client that does not know the field keeps the stored choice.
+            if (restartIntervalDays != null) maintenance.restartIntervalDays = restartIntervalDays
+        }
         diagnostics.enabled = parameters.hasCheckbox("diagnosticLogEnabled")
 
         val pinChanged = newPin.isNotEmpty()

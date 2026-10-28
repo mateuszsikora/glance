@@ -273,10 +273,12 @@ package replacement. Package name, signing certificate, app UID, preferences, PI
 Android Keystore secrets and Device Owner registration stay in place.
 
 `prepare-source.py` exports the older source and backports the current update package, remote panel,
-application startup reconciliation, diagnostic providers needed by the current remote panel,
-manifest and build tooling. Current update tests accompany the backport; archived UI tests remain
-with the older tablet UI, and the main checkout tests the current HTTP handler and its recovery
-authorization. It preserves the
+application startup reconciliation, diagnostic providers and scheduled-restart settings needed
+by the current remote panel, manifest and build tooling. The panel's Memory section shows only the
+explanation in these builds, whose older app code neither measures the memory trend nor restarts
+on a schedule. Current update tests accompany the
+backport; archived UI tests remain with the older tablet UI, and the main checkout tests the current
+HTTP handler and its recovery authorization. It preserves the
 older application behavior while retaining the recovery controls and future update support. This is
 a deliberately identified hybrid rebuild, **not a byte-for-byte copy of the old release**. The
 `codeIdentity` is its base source commit; the CI run identifies the current recovery infrastructure.

@@ -41,6 +41,14 @@ class WebViewFragment : Fragment() {
 
     var onHealthCheckCallback: ((Boolean) -> Unit)? = null
 
+    /**
+     * A `View.LAYER_TYPE_*` constant; a hardware layer unless the caller chose otherwise. Not
+     * called `layerType`: inside the WebView's `apply` block that name is the WebView's own.
+     */
+    val requestedLayerType: Int
+        get() = arguments?.getInt(ARG_LAYER_TYPE, View.LAYER_TYPE_HARDWARE)
+            ?: View.LAYER_TYPE_HARDWARE
+
     /** Address-free name for the diagnostic journal, such as `idle` or `dashboard 2`. */
     val diagnosticLabel: String
         get() = arguments?.getString(ARG_DIAGNOSTIC_LABEL) ?: "page"
@@ -91,8 +99,8 @@ class WebViewFragment : Fragment() {
                 displayZoomControls = false
                 @Suppress("DEPRECATION")
                 setRenderPriority(WebSettings.RenderPriority.HIGH)
-                setLayerType(View.LAYER_TYPE_HARDWARE, null)
             }
+            setLayerType(requestedLayerType, null)
 
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(
@@ -291,18 +299,24 @@ class WebViewFragment : Fragment() {
         private const val ARG_URL = "url"
         private const val ARG_ALLOWED_NAVIGATION_ORIGINS = "allowed_navigation_origins"
         private const val ARG_DIAGNOSTIC_LABEL = "diagnostic_label"
+        private const val ARG_LAYER_TYPE = "layer_type"
         private const val RETRY_DELAY_MS = 10_000L
 
-        /** @param diagnosticLabel names the page in the diagnostic journal; never an address. */
+        /**
+         * @param diagnosticLabel names the page in the diagnostic journal; never an address.
+         * @param layerType how the WebView is drawn, one of the `View.LAYER_TYPE_*` constants.
+         */
         fun newInstance(
             url: String,
             allowedNavigationOrigins: List<String> = emptyList(),
-            diagnosticLabel: String? = null
+            diagnosticLabel: String? = null,
+            layerType: Int = View.LAYER_TYPE_HARDWARE
         ): WebViewFragment {
             return WebViewFragment().apply {
                 arguments = Bundle().apply {
                     putString(ARG_URL, url)
                     putString(ARG_DIAGNOSTIC_LABEL, diagnosticLabel)
+                    putInt(ARG_LAYER_TYPE, layerType)
                     putStringArrayList(
                         ARG_ALLOWED_NAVIGATION_ORIGINS,
                         ArrayList(allowedNavigationOrigins)

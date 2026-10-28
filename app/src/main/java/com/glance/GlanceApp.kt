@@ -9,6 +9,7 @@ import com.glance.diagnostics.DiagnosticLog
 import com.glance.diagnostics.DiagnosticSettings
 import com.glance.diagnostics.Diagnostics
 import com.glance.diagnostics.MemorySample
+import com.glance.diagnostics.MemoryTrendMonitor
 import com.glance.watchdog.CrashLogger
 import kotlin.system.exitProcess
 
@@ -25,10 +26,15 @@ class GlanceApp : Application() {
     var processStartElapsedMs = 0L
         private set
 
+    /** Warns in the remote panel when the native heap keeps growing over a day. */
+    lateinit var memoryTrend: MemoryTrendMonitor
+        private set
+
     override fun onCreate() {
         super.onCreate()
         instance = this
         processStartElapsedMs = SystemClock.elapsedRealtime()
+        memoryTrend = MemoryTrendMonitor(this, processStartElapsedMs)
         appConfig = AppConfig(this)
         appConfig.clearSettledUpdateAttempts(BuildConfig.VERSION_CODE)
         com.glance.update.RestoreState(this).apply {
@@ -46,7 +52,8 @@ class GlanceApp : Application() {
             DiagnosticLog(
                 directory = filesDir,
                 enabled = { settings.enabled },
-                sampleMemory = { MemorySample.capture(this) }
+                sampleMemory = { MemorySample.capture(this) },
+                sampleNativeBytes = { android.os.Debug.getNativeHeapAllocatedSize() }
             )
         )
         Diagnostics.record(

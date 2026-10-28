@@ -48,6 +48,28 @@ class DiagnosticLogTest {
     }
 
     @Test
+    fun everyEntryCarriesTheNativeHeapWhenASamplerIsGiven() {
+        var nativeBytes = 23_400_000L
+        val log = DiagnosticLog(
+            directory = folder.root,
+            enabled = { true },
+            sampleMemory = { memory() },
+            sampleNativeBytes = { nativeBytes },
+            executor = executor(),
+            now = { ZonedDateTime.of(2026, 10, 16, 13, 52, 42, 0, ZoneOffset.UTC) }
+        )
+        log.record("Reload broadcast")
+        nativeBytes = 24_500_000L
+        log.record("Idle screen shown", includeMemory = true)
+
+        assertEquals(
+            "2026-10-16 13:52:42+00:00 Reload broadcast [native=22.3MB]\n" +
+                "2026-10-16 13:52:42+00:00 Idle screen shown [native=23.4MB] | system available=400/2748MB\n",
+            log.read()
+        )
+    }
+
+    @Test
     fun recordsTimestampedEventsInOrder() {
         val log = log()
         log.record("Idle screen shown")
@@ -96,6 +118,28 @@ class DiagnosticLogTest {
             entries.map { it.substringAfter("+00:00 ") }
         )
         assertTrue(folder.root.listFiles().orEmpty().size <= 2)
+    }
+
+    @Test
+    fun theTailSpansBothFilesAndStartsAtAWholeEntry() {
+        val log = log(maxFileBytes = 80)
+        listOf("first event", "second event", "third event", "fourth event", "fifth event")
+            .forEach(log::record)
+
+        // Everything fits: the same as a full read.
+        assertEquals(log.read(), log.readTail(1_000))
+
+        // Room for the last entry and part of the one before: the partial line is dropped.
+        val tail = log.readTail(55).lines().filter(String::isNotBlank)
+        assertEquals(listOf("fifth event"), tail.map { it.substringAfter("+00:00 ") })
+
+        // Exactly the current file, with the previous one left out whole: nothing is dropped.
+        val currentBytes = File(folder.root, DiagnosticLog.FILE_NAME).length().toInt()
+        assertEquals(File(folder.root, DiagnosticLog.FILE_NAME).readText(), log.readTail(currentBytes))
+
+        // Across the rotation: the end of the previous file and the whole current one.
+        val across = log.readTail(100).lines().filter(String::isNotBlank)
+        assertEquals(listOf("fourth event", "fifth event"), across.map { it.substringAfter("+00:00 ") })
     }
 
     @Test

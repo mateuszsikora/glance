@@ -57,6 +57,8 @@ android {
         versionName = releaseVersionName
         buildConfigField("String", "CODE_IDENTITY", "\"$codeIdentity\"")
         buildConfigField("String", "DATA_CONTRACT", "\"$dataContract\"")
+        // Recovery builds pair this panel with older app code that has no nightly restart.
+        buildConfigField("boolean", "RESTORE_BUILD", (updateKind == "restore").toString())
         manifestPlaceholders["codeIdentity"] = codeIdentity
         manifestPlaceholders["dataContract"] = dataContract
         manifestPlaceholders["updateKind"] = updateKind

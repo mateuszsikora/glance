@@ -119,11 +119,18 @@ class WatchdogService : Service() {
         }, UPDATE_CHECK_INITIAL_DELAY_MS)
     }
 
-    /** Gives the diagnostic journal a memory trend between events; a no-op while it is off. */
+    /**
+     * Feeds the memory trend warning, and gives the diagnostic journal a memory trend between
+     * events while it is on.
+     */
     private fun startMemorySampleLoop() {
         handler.postDelayed(object : Runnable {
             override fun run() {
                 if (destroyed) return
+                GlanceApp.instance.memoryTrend.onSample(
+                    SystemClock.elapsedRealtime(),
+                    android.os.Debug.getNativeHeapAllocatedSize()
+                )
                 Diagnostics.record("Memory sample", includeMemory = true)
                 handler.postDelayed(this, MEMORY_SAMPLE_INTERVAL_MS)
             }
@@ -271,7 +278,7 @@ class WatchdogService : Service() {
         private const val BYTES_PER_MB = 1024L * 1024L
         private const val UPDATE_CHECK_INITIAL_DELAY_MS = 16 * 60 * 1000L
         private const val UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000L
-        private const val MEMORY_SAMPLE_INTERVAL_MS = 15 * 60 * 1000L
+        private const val MEMORY_SAMPLE_INTERVAL_MS = 5 * 60 * 1000L
 
         const val ACTION_RELOAD_WEBVIEW = "com.glance.ACTION_RELOAD_WEBVIEW"
         const val ACTION_HEALTH_CHECK = "com.glance.ACTION_HEALTH_CHECK"

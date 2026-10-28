@@ -43,12 +43,13 @@ class MemorySampleTest {
             appPssKb = 125L * 1024L,
             javaHeapKb = 8L * 1024L,
             nativeHeapKb = 30L * 1024L,
-            graphicsKb = 88L * 1024L
+            graphicsKb = 88L * 1024L,
+            nativeAllocatedBytes = 160L * MIB
         )
 
         assertEquals(
             "system available=383/2748MB threshold=216MB low=no swapUsed=72/512MB; " +
-                "app pss=125MB java=8MB native=30MB graphics=88MB",
+                "app pss=125MB java=8MB native=30MB graphics=88MB nativeAlloc=160MB",
             line
         )
     }
@@ -77,6 +78,7 @@ class MemorySampleTest {
 
         assertTrue(line.startsWith("system available="))
         assertTrue(line.contains("; app pss="))
+        assertTrue(line.contains(" nativeAlloc="))
     }
 
     private companion object {
