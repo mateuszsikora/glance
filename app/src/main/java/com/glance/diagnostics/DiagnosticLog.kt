@@ -2,6 +2,7 @@ package com.glance.diagnostics
 
 import android.util.Log
 import java.io.File
+import java.io.RandomAccessFile
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -73,6 +74,35 @@ class DiagnosticLog(
             .joinToString("") { it.readText() }
     }
 
+    /**
+     * The newest [maxBytes] or so, oldest entry first, starting at a line boundary. Reads no more
+     * than that from storage, for a preview on a device that may be short of memory.
+     */
+    fun readTail(maxBytes: Int): String = onJournalThread {
+        val parts = ArrayDeque<ByteArray>()
+        var remaining = maxBytes.toLong()
+        var cut = false
+        for (file in listOf(current, previous)) {
+            if (!file.exists()) continue
+            if (remaining <= 0) {
+                cut = true
+                continue
+            }
+            RandomAccessFile(file, "r").use { raf ->
+                val take = minOf(remaining, raf.length())
+                if (take < raf.length()) cut = true
+                val bytes = ByteArray(take.toInt())
+                raf.seek(raf.length() - take)
+                raf.readFully(bytes)
+                parts.addFirst(bytes)
+                remaining -= take
+            }
+        }
+        val text = parts.joinToString("") { String(it, Charsets.UTF_8) }
+        // The first line of a cut read is partial; drop it.
+        if (cut) text.substringAfter('\n', "") else text
+    }
+
     /** Waits for queued entries first, so none of them can recreate the file afterwards. */
     fun clear() {
         onJournalThread {
@@ -127,6 +157,8 @@ object Diagnostics {
     }
 
     fun read(): String = log?.read().orEmpty()
+
+    fun readTail(maxBytes: Int): String = log?.readTail(maxBytes).orEmpty()
 
     fun clear() {
         log?.clear()

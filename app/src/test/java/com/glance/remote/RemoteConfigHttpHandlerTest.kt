@@ -709,6 +709,7 @@ class RemoteConfigHttpHandlerTest {
             config,
             { changes++ },
             diagnosticLog = { journal },
+            diagnosticLogTail = { journal },
             clearDiagnosticLog = { journal = "" }
         )
 
@@ -717,7 +718,7 @@ class RemoteConfigHttpHandlerTest {
 
         val cookie = login(handler)
         val page = handler.handle(get("/", cookie)).text()
-        assertTrue(page.contains("2 entries, newest last."))
+        assertTrue(page.contains("Latest 2 entries, newest last."))
         assertTrue(page.contains("&lt;b&gt;escaped&lt;/b&gt;"))
         // Clearing must not be blocked by unrelated, invalid fields in the shared settings form.
         assertTrue(page.contains("formaction=\"/diagnostic-log-clear\" formnovalidate"))
@@ -769,6 +770,41 @@ class RemoteConfigHttpHandlerTest {
     }
 
     @Test
+    fun theWarningGoesOnceRestartsAreAsFrequentAsSuggested() {
+        val maintenance = MaintenanceSettings(ApplicationProvider.getApplicationContext())
+        // About 33 MB a day: every 3 days is suggested.
+        val growing = MemoryTrend.Verdict(1_792_800_000_000L, 22 * 3_600_000L, 30L * 1024L * 1024L, true)
+        val handler = RemoteConfigHttpHandler(config, { changes++ }, memoryTrend = { growing })
+        val cookie = login(handler)
+
+        maintenance.nightlyRestartEnabled = true
+        maintenance.restartIntervalDays = 7
+        assertTrue(handler.handle(get("/", cookie)).text().contains("banner warning"))
+
+        maintenance.restartIntervalDays = 2
+        val covered = handler.handle(get("/", cookie)).text()
+        assertFalse(covered.contains("banner warning"))
+        assertTrue(covered.contains("<dd>Growing: +30 MB in 22 hours"))
+        assertTrue(covered.contains("The scheduled restarts already do.</dd>"))
+    }
+
+    @Test
+    fun aRecoveryBuildDoesNotPresentAnEarlierVerdictAsCurrent() {
+        val growing = MemoryTrend.Verdict(1_792_800_000_000L, 22 * 3_600_000L, 46L * 1024L * 1024L, true)
+        val handler = RemoteConfigHttpHandler(
+            config,
+            { changes++ },
+            nightlyRestartAvailable = false,
+            memoryTrend = { growing }
+        )
+
+        val page = handler.handle(get("/", login(handler))).text()
+
+        assertFalse(page.contains("banner warning"))
+        assertTrue(page.contains("<dt>Memory trend</dt><dd>Not measured by this recovery build.</dd>"))
+    }
+
+    @Test
     fun aStableOrUncheckedHeapShowsOnlyItsStatus() {
         var trend: MemoryTrend.Verdict? = null
         val handler = RemoteConfigHttpHandler(config, { changes++ }, memoryTrend = { trend })
@@ -793,7 +829,7 @@ class RemoteConfigHttpHandlerTest {
         val handler = RemoteConfigHttpHandler(
             config,
             { changes++ },
-            diagnosticLog = { throw java.util.concurrent.TimeoutException("journal busy") }
+            diagnosticLogTail = { throw java.util.concurrent.TimeoutException("journal busy") }
         )
         val cookie = login(handler)
 

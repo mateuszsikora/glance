@@ -206,6 +206,8 @@ internal class RemoteConfigHttpHandler(
         DebugInfoProvider(GlanceApp.instance, config).snapshot()
     },
     private val diagnosticLog: () -> String = Diagnostics::read,
+    /** The panel previews only the newest entries; reading the whole journal costs megabytes. */
+    private val diagnosticLogTail: () -> String = { Diagnostics.readTail(DIAGNOSTIC_PREVIEW_BYTES) },
     private val clearDiagnosticLog: () -> Unit = Diagnostics::clear,
     private val memoryTrend: () -> MemoryTrend.Verdict? = { GlanceApp.instance.memoryTrend.latest() },
     /** False in recovery builds, whose older app code has no nightly restart to configure. */
@@ -648,7 +650,7 @@ internal class RemoteConfigHttpHandler(
                   <h1>Tablet settings</h1>
                   <p>Changes are validated on the tablet and applied as soon as you save.</p>
                 </div>
-                ${memoryTrendWarning(trend)}
+                ${memoryTrendWarning(trend, values)}
                 <form id="remote-settings-form" method="post" action="/save" accept-charset="UTF-8">
                   <input type="hidden" name="csrf" value="${escapeHtml(session.csrfToken)}">
                   <!-- Pressing Enter in a field submits the form's first submit button. Without
@@ -745,7 +747,7 @@ internal class RemoteConfigHttpHandler(
                         ${sectionHeading("05", "Memory", "Spot memory problems and schedule the restarts that clear them.")}
                         <div class="section-body">
                           <p class="hint">On some older tablets the graphics driver keeps a little memory every time a page redraws, for example each photo of an idle-screen slideshow, and only a restart of Glance gives it back. When memory runs out, Android closes Glance, which then starts again. If you notice Glance restarting unexpectedly, or the trend below keeps growing, schedule restarts here.</p>
-                          <dl class="status-list">${statusRow("Memory trend", memoryTrendStatus(trend))}${statusRow("Suggestion", restartSuggestion(trend))}</dl>
+                          <dl class="status-list">${statusRow("Memory trend", memoryTrendStatus(trend))}${statusRow("Suggestion", restartSuggestion(trend, values))}</dl>
                           $restartSettings
                         </div>
                       </section>
@@ -887,29 +889,41 @@ internal class RemoteConfigHttpHandler(
     }
 
     /**
-     * Shown above every section while the latest verdict says the native heap keeps growing:
-     * nothing on the tablet itself tells the owner, until Android closes Glance for lack of memory.
-     * It only points to the Memory section; Glance never schedules restarts by itself.
+     * Shown above every section while the latest verdict says the native heap keeps growing and
+     * no restarts as frequent as suggested are scheduled: nothing on the tablet itself tells the
+     * owner, until Android closes Glance for lack of memory. It only points to the Memory section;
+     * Glance never schedules restarts by itself.
      */
-    private fun memoryTrendWarning(trend: MemoryTrend.Verdict?): String {
-        if (trend == null || !trend.growing) return ""
+    private fun memoryTrendWarning(trend: MemoryTrend.Verdict?, values: RemoteConfigSnapshot): String {
+        if (trend == null || !trend.growing || !nightlyRestartAvailable) return ""
+        if (restartsCover(trend, values)) return ""
         return "<div class=\"banner warning\" role=\"status\"><span aria-hidden=\"true\">!</span>" +
             "<p>Glance's memory keeps growing: ${escapeHtml(describe(trend))}. Android will close " +
             "Glance once memory runs out. See <a href=\"#memory\">Memory</a> for what helps.</p></div>"
     }
 
+    private fun restartsCover(trend: MemoryTrend.Verdict, values: RemoteConfigSnapshot): Boolean {
+        val suggested = MemoryTrend.suggestedRestartIntervalDays(trend) ?: return true
+        return values.nightlyRestartEnabled && values.restartIntervalDays <= suggested
+    }
+
     private fun memoryTrendStatus(trend: MemoryTrend.Verdict?): String = when {
+        // The older app code of a recovery build does not sample the heap; an earlier verdict
+        // would otherwise stay on screen as if it were current.
+        !nightlyRestartAvailable -> "Not measured by this recovery build."
         trend == null -> "Not checked yet. Glance checks after 13 hours of running, then daily."
         trend.growing -> "Growing: ${describe(trend)}"
         else -> "Stable: ${describe(trend)}"
     }
 
-    private fun restartSuggestion(trend: MemoryTrend.Verdict?): String {
+    private fun restartSuggestion(trend: MemoryTrend.Verdict?, values: RemoteConfigSnapshot): String {
+        if (!nightlyRestartAvailable) return "None in a recovery build."
         if (trend == null) return "None yet; it needs the first memory check."
         val days = MemoryTrend.suggestedRestartIntervalDays(trend)
             ?: return "No restarts needed while the memory stays stable."
-        return "Restart ${intervalLabel(days).lowercase(java.util.Locale.US)}. At the current pace " +
-            "that keeps the growth under ${MemoryTrend.RESTART_BUDGET_BYTES / (1024 * 1024)} MB."
+        val advice = "Restart ${intervalLabel(days).lowercase(java.util.Locale.US)}. At the current " +
+            "pace that keeps the growth under ${MemoryTrend.RESTART_BUDGET_BYTES / (1024 * 1024)} MB."
+        return if (restartsCover(trend, values)) "$advice The scheduled restarts already do." else advice
     }
 
     private fun intervalLabel(days: Int): String = when (days) {
@@ -936,18 +950,14 @@ internal class RemoteConfigHttpHandler(
     private fun diagnosticLogPreview(): String {
         // The preview must never take down the settings page, which is also where the journal
         // is switched off.
-        val text = runCatching(diagnosticLog).getOrElse {
+        val text = runCatching(diagnosticLogTail).getOrElse {
             Log.w(TAG, "Diagnostic log unavailable", it)
             return "<p class=\"hint\">The diagnostic log is busy. Reload the page to see it.</p>"
         }
         val lines = text.lines().filter(String::isNotBlank)
         if (lines.isEmpty()) return "<p class=\"hint\">The diagnostic log is empty.</p>"
         val shown = lines.takeLast(DIAGNOSTIC_PREVIEW_LINES)
-        val heading = if (shown.size < lines.size) {
-            "Latest ${shown.size} of ${lines.size} entries, newest last."
-        } else {
-            "${lines.size} entries, newest last."
-        }
+        val heading = "Latest ${shown.size} entries, newest last."
         return """
             <p class="hint">${escapeHtml(heading)}</p>
             <pre class="debug-summary">${escapeHtml(shown.joinToString("\n"))}</pre>
@@ -1177,6 +1187,8 @@ internal class RemoteConfigHttpHandler(
         private const val TAG = "RemoteConfigHttpHandler"
         private const val MAX_SESSIONS = 8
         private const val DIAGNOSTIC_PREVIEW_LINES = 200
+        /** Enough for [DIAGNOSTIC_PREVIEW_LINES] memory samples, the longest entries. */
+        private const val DIAGNOSTIC_PREVIEW_BYTES = 128 * 1024
     }
 }
 

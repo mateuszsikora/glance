@@ -233,9 +233,10 @@ remote panel, shows what it measured and lets you schedule restarts:
 - **Memory trend.** Glance follows its allocated native heap all the time, whether the diagnostic
   log is on or not. After 13 hours of running, then once a day and before each scheduled restart, it
   compares the start and the end of the last day, using hourly minimums and leaving out the first
-  hour after a start. Growth of 20 MB or more is reported as growing, and the remote panel then
-  shows a warning above every section until a later check finds it stable. Only the result is
-  stored; the samples stay in memory.
+  hour after a start. Growth of 20 MB or more that builds up over the day, rather than in one step,
+  is reported as growing. The remote panel then shows a warning above every section, until a later
+  check finds the heap stable or restarts are scheduled at least as often as suggested. Only the
+  result is stored; the samples stay in memory.
 - **Suggestion.** While the heap keeps growing, Glance suggests the longest interval on offer that
   keeps the growth under 100 MB at the measured pace. It is only a suggestion.
 - **Scheduled restart**, off by default: every day, every 2 or 3 days, or once a week. The interval

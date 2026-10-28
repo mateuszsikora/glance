@@ -121,6 +121,24 @@ class DiagnosticLogTest {
     }
 
     @Test
+    fun theTailSpansBothFilesAndStartsAtAWholeEntry() {
+        val log = log(maxFileBytes = 80)
+        listOf("first event", "second event", "third event", "fourth event", "fifth event")
+            .forEach(log::record)
+
+        // Everything fits: the same as a full read.
+        assertEquals(log.read(), log.readTail(1_000))
+
+        // Room for the last entry and part of the one before: the partial line is dropped.
+        val tail = log.readTail(55).lines().filter(String::isNotBlank)
+        assertEquals(listOf("fifth event"), tail.map { it.substringAfter("+00:00 ") })
+
+        // Across the rotation: the end of the previous file and the whole current one.
+        val across = log.readTail(100).lines().filter(String::isNotBlank)
+        assertEquals(listOf("fourth event", "fifth event"), across.map { it.substringAfter("+00:00 ") })
+    }
+
+    @Test
     fun clearRemovesBothFiles() {
         val log = log(maxFileBytes = 80)
         repeat(4) { log.record("event $it") }

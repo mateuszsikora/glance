@@ -137,7 +137,9 @@ class KioskService : Service() {
             return START_NOT_STICKY
         }
         val wasInitialized = initialized
-        ensureInitialized()
+        ensureInitialized(
+            dashboardLaunchedBySender = intent?.getBooleanExtra(EXTRA_DASHBOARD_LAUNCHED, false) == true
+        )
 
         when (intent?.action) {
             ACTION_RELOAD_CONFIG -> if (wasInitialized) reloadConfig()
@@ -189,7 +191,8 @@ class KioskService : Service() {
         super.onDestroy()
     }
 
-    private fun ensureInitialized() {
+    /** @param dashboardLaunchedBySender the starter, such as the boot receiver, opens it itself. */
+    private fun ensureInitialized(dashboardLaunchedBySender: Boolean = false) {
         if (initialized) return
         initialized = true
 
@@ -237,7 +240,7 @@ class KioskService : Service() {
             it.start(applyCurrentState = relaunch == null)
         }
         reconcileRemoteConfigServer()
-        if (relaunch == null && MainActivity.liveInstances.get() == 0) {
+        if (relaunch == null && !dashboardLaunchedBySender && MainActivity.liveInstances.get() == 0) {
             // Android restarts this sticky service after the process died, but not the Activity
             // it lost; Glance is usually not the home app, so the launcher would stay in front.
             Log.i(TAG, "Started without a dashboard in this process, launching it")
@@ -253,7 +256,8 @@ class KioskService : Service() {
                 mainHandler.postDelayed(
                     {
                         displayRestorePending = false
-                        wakeDisplay()
+                        // An OFF from MQTT or the schedule may have arrived in the meantime.
+                        if (config.requestedScreenOn) wakeDisplay()
                     },
                     RELAUNCH_WAKE_DELAY_MS
                 )
@@ -439,7 +443,7 @@ class KioskService : Service() {
         ) {
             Diagnostics.record(
                 if (intervalDays <= 1) "Nightly maintenance skipped; the app started less than an hour ago"
-                else "Nightly maintenance skipped; the app has run for less than $intervalDays days"
+                else "Nightly maintenance skipped; not due yet in its $intervalDays-day interval"
             )
             return
         }
@@ -659,6 +663,9 @@ class KioskService : Service() {
         const val EXTRA_SCREEN_ON = "screen_on"
         /** False when the Activity merely observed the screen state rather than changing it. */
         const val EXTRA_DELIBERATE = "deliberate"
+
+        /** Set by a starter that opens the dashboard itself, so the service does not open it too. */
+        const val EXTRA_DASHBOARD_LAUNCHED = "dashboard_launched"
         const val EXTRA_BRIGHTNESS = "brightness"
     }
 }

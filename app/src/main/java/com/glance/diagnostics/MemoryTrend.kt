@@ -13,7 +13,9 @@ import com.glance.maintenance.MaintenanceSettings
  *
  * Single samples jump by a few megabytes with whatever is being drawn at that moment, so the
  * trend is read from hourly minimums. The first hour of a process is left out, because loading
- * the pages fills caches that then stay at a steady size.
+ * the pages fills caches that then stay at a steady size. A leak also shows halfway through the
+ * window, while a single step, such as a new dashboard filling its caches after a settings change,
+ * puts the middle level next to the start or the end; only the first counts as growing.
  */
 object MemoryTrend {
 
@@ -53,6 +55,12 @@ object MemoryTrend {
     private const val EDGE_BUCKETS = 3
 
     /**
+     * How far from either end the middle level must be. A leak that only runs while the screen is
+     * on, with nights flat, still puts the middle about a third of the way.
+     */
+    private const val MIDDLE_SHARE = 0.2
+
+    /**
      * @param samples one process's samples, oldest first.
      * @param processStartElapsedMs when the process started, on the samples' clock.
      * @return null while the samples after the warm-up span less than [MIN_WINDOW_MS].
@@ -74,12 +82,17 @@ object MemoryTrend {
             .toSortedMap()
             .values
             .map { bucket -> bucket.minOf(Sample::nativeBytes) }
-        val growth = median(floors.takeLast(EDGE_BUCKETS)) - median(floors.take(EDGE_BUCKETS))
+        val start = median(floors.take(EDGE_BUCKETS))
+        val end = median(floors.takeLast(EDGE_BUCKETS))
+        val middleFrom = (floors.size - EDGE_BUCKETS) / 2
+        val middle = median(floors.subList(middleFrom, middleFrom + EDGE_BUCKETS))
+        val growth = end - start
+        val gradual = middle - start >= growth * MIDDLE_SHARE && end - middle >= growth * MIDDLE_SHARE
         return Verdict(
             evaluatedAtEpochMs = nowEpochMs,
             windowMs = windowMs,
             growthBytes = growth,
-            growing = growth >= GROWTH_THRESHOLD_BYTES
+            growing = growth >= GROWTH_THRESHOLD_BYTES && gradual
         )
     }
 

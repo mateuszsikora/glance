@@ -41,6 +41,26 @@ class MemoryTrendTest {
     }
 
     @Test
+    fun aSingleStepIsNotALeak() {
+        // A settings change at 9 h loads a heavier dashboard whose caches then stay put.
+        val verdict = evaluate(hours = 20) { hour -> if (hour < 9.0) BASE else BASE + 30 * MIB }!!
+
+        assertEquals(30 * MIB, verdict.growthBytes)
+        assertFalse(verdict.growing)
+    }
+
+    @Test
+    fun aLeakThatOnlyRunsWhileTheScreenIsOnIsGrowing() {
+        // Started at 23:00 with the screen on 06:25-23:20: dark for 7.4 h, then 3 MB an hour.
+        val verdict = evaluate(hours = 24) { hour ->
+            val litHours = (hour - 7.42).coerceIn(0.0, 16.92)
+            BASE + (litHours * 3 * MIB).toLong()
+        }!!
+
+        assertTrue(verdict.growing)
+    }
+
+    @Test
     fun lessThanHalfADayAfterTheWarmUpGivesNoVerdict() {
         assertNull(evaluate(hours = 12) { hour -> BASE + (hour * 10 * MIB).toLong() })
         assertNull(MemoryTrend.evaluate(emptyList(), START, NOW))

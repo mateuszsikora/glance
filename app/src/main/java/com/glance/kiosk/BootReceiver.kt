@@ -19,7 +19,7 @@ class BootReceiver : BroadcastReceiver() {
             Intent.ACTION_BOOT_COMPLETED,
             Intent.ACTION_MY_PACKAGE_REPLACED -> {
                 Log.i(TAG, "System startup/update received, launching kiosk")
-                startServices(context, reloadConfig = false)
+                startServices(context, reloadConfig = false, dashboardLaunched = true)
                 val launchIntent = Intent(context, MainActivity::class.java).apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
@@ -34,10 +34,13 @@ class BootReceiver : BroadcastReceiver() {
         }
     }
 
-    private fun startServices(context: Context, reloadConfig: Boolean) {
+    private fun startServices(context: Context, reloadConfig: Boolean, dashboardLaunched: Boolean = false) {
         val serviceIntent = Intent(context, KioskService::class.java)
         if (reloadConfig) {
             serviceIntent.action = KioskService.ACTION_RELOAD_CONFIG
+        }
+        if (dashboardLaunched) {
+            serviceIntent.putExtra(KioskService.EXTRA_DASHBOARD_LAUNCHED, true)
         }
         ContextCompat.startForegroundService(
             context,

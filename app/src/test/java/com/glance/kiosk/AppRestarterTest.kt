@@ -24,4 +24,21 @@ class AppRestarterTest {
         assertEquals(AppRestarter.Relaunch(wakeDisplay = true), AppRestarter.consumePendingRelaunch(context))
         assertNull(AppRestarter.consumePendingRelaunch(context))
     }
+
+    @Test
+    fun aMarkerLeftBehindByARebootOrALongGapIsAnOrdinaryStart() {
+        // Power lost between the marker and the new process: the clock restarted from zero.
+        AppRestarter.markRelaunch(context, wakeDisplay = true, nowElapsedMs = 9_000_000L)
+        assertNull(AppRestarter.consumePendingRelaunch(context, nowElapsedMs = 30_000L))
+        assertNull(AppRestarter.consumePendingRelaunch(context, nowElapsedMs = 9_005_000L))
+
+        AppRestarter.markRelaunch(context, wakeDisplay = false, nowElapsedMs = 9_000_000L)
+        assertNull(AppRestarter.consumePendingRelaunch(context, nowElapsedMs = 9_120_000L))
+
+        AppRestarter.markRelaunch(context, wakeDisplay = false, nowElapsedMs = 9_000_000L)
+        assertEquals(
+            AppRestarter.Relaunch(wakeDisplay = false),
+            AppRestarter.consumePendingRelaunch(context, nowElapsedMs = 9_005_000L)
+        )
+    }
 }

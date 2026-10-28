@@ -37,11 +37,14 @@ object AppRestarter {
     private const val PREFS_NAME = "glance_restart_state"
     private const val KEY_RELAUNCH_PENDING = "relaunch_pending"
     private const val KEY_WAKE_DISPLAY = "wake_display"
+    private const val KEY_MARKED_AT = "marked_at_elapsed"
     private const val REQUEST_CODE_RELAUNCH = 2101
     /** Lets the journal thread and pending preference writes reach storage first. */
     private const val KILL_DELAY_MS = 1_000L
     /** Long enough for Android to have cleaned up the old process before the alarm fires. */
     private const val RELAUNCH_DELAY_MS = 4_000L
+    /** A relaunch comes seconds after the marker; anything later is an unrelated start. */
+    private const val MARKER_VALID_MS = 60_000L
 
     /** What the first process after [restart] has to restore. */
     data class Relaunch(val wakeDisplay: Boolean)
@@ -74,13 +77,24 @@ object AppRestarter {
         )
     }
 
-    /** @return the pending relaunch once, in the first process after [restart]; null otherwise. */
-    fun consumePendingRelaunch(context: Context): Relaunch? {
+    /**
+     * @return the pending relaunch once, in the first process after [restart]; null otherwise,
+     * including when the device rebooted or lost power before the new process started: that start
+     * is an ordinary one, which applies the screen schedule.
+     */
+    fun consumePendingRelaunch(
+        context: Context,
+        nowElapsedMs: Long = SystemClock.elapsedRealtime()
+    ): Relaunch? {
         val prefs = context.applicationContext
             .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         if (!prefs.getBoolean(KEY_RELAUNCH_PENDING, false)) return null
+        val markedAt = prefs.getLong(KEY_MARKED_AT, Long.MIN_VALUE)
         val relaunch = Relaunch(wakeDisplay = prefs.getBoolean(KEY_WAKE_DISPLAY, false))
-        prefs.edit().remove(KEY_RELAUNCH_PENDING).remove(KEY_WAKE_DISPLAY).commit()
+        prefs.edit().remove(KEY_RELAUNCH_PENDING).remove(KEY_WAKE_DISPLAY).remove(KEY_MARKED_AT)
+            .commit()
+        // elapsedRealtime restarts from zero on boot, so a marker from before it lies ahead.
+        if (nowElapsedMs < markedAt || nowElapsedMs - markedAt > MARKER_VALID_MS) return null
         return relaunch
     }
 
@@ -96,13 +110,18 @@ object AppRestarter {
         relaunch.cancel()
     }
 
-    internal fun markRelaunch(context: Context, wakeDisplay: Boolean) {
+    internal fun markRelaunch(
+        context: Context,
+        wakeDisplay: Boolean,
+        nowElapsedMs: Long = SystemClock.elapsedRealtime()
+    ) {
         // commit(), not apply(): the marker must be on storage before the process is killed.
         context.applicationContext
             .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
             .putBoolean(KEY_RELAUNCH_PENDING, true)
             .putBoolean(KEY_WAKE_DISPLAY, wakeDisplay)
+            .putLong(KEY_MARKED_AT, nowElapsedMs)
             .commit()
     }
 

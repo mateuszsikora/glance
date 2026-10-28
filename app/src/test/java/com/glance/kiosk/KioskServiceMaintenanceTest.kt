@@ -58,6 +58,21 @@ class KioskServiceMaintenanceTest {
     }
 
     @Test
+    fun anOffArrivingBeforeTheDelayedWakeKeepsTheDisplayDark() {
+        config.requestedScreenOn = true
+        shadowOf(app.getSystemService(PowerManager::class.java)).setIsInteractive(false)
+        AppRestarter.markRelaunch(app, wakeDisplay = true)
+        start()
+
+        // The dashboard turns the screen off on purpose within the first two seconds.
+        reportScreen(isOn = false, deliberate = true)
+        advance(2_000L)
+
+        assertFalse(config.requestedScreenOn)
+        assertNull(ShadowPowerManager.getLatestWakeLock())
+    }
+
+    @Test
     fun theRecreatedDashboardSeeingADarkDisplayDoesNotTurnTheScreenRequestOff() {
         config.requestedScreenOn = true
         shadowOf(app.getSystemService(PowerManager::class.java)).setIsInteractive(false)
@@ -118,6 +133,13 @@ class KioskServiceMaintenanceTest {
         start()
 
         assertEquals(MainActivity::class.java.name, shadowOf(app).nextStartedActivity.component?.className)
+    }
+
+    @Test
+    fun aServiceStartedAtBootLeavesTheDashboardToTheBootReceiver() {
+        start(Intent(app, KioskService::class.java).putExtra(KioskService.EXTRA_DASHBOARD_LAUNCHED, true))
+
+        assertNull(shadowOf(app).nextStartedActivity)
     }
 
     @Test
@@ -215,11 +237,11 @@ class KioskServiceMaintenanceTest {
         assertNull(AppRestarter.consumePendingRelaunch(app))
     }
 
-    private fun start() {
+    private fun start(intent: Intent = Intent(app, KioskService::class.java)) {
         // ContextCompat's API 26 stand-in for RECEIVER_NOT_EXPORTED; merged into the real manifest.
         shadowOf(app).grantPermissions("${app.packageName}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION")
         controller = Robolectric.buildService(KioskService::class.java).create()
-        startCommand(Intent(app, KioskService::class.java))
+        startCommand(intent)
     }
 
     private fun startCommand(intent: Intent) {
