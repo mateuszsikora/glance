@@ -4,7 +4,6 @@ import com.glance.GlanceApp
 import com.glance.config.AppConfig
 import com.glance.content.ContentProfile
 import com.glance.diagnostics.DiagnosticSettings
-import com.glance.maintenance.IdleRendering
 import com.glance.maintenance.MaintenanceSettings
 import com.glance.settings.ConfigValidator
 import com.glance.update.UpdateSummary
@@ -27,7 +26,7 @@ internal data class RemoteConfigSnapshot(
     val screenOffTime: String,
     val nightlyRestartEnabled: Boolean,
     val nightlyRestartTime: String,
-    val idleRendering: IdleRendering,
+    val restartIntervalDays: Int,
     val mqttEnabled: Boolean,
     val mqttBrokerHost: String,
     val mqttBrokerPort: Int,
@@ -76,7 +75,7 @@ internal class RemoteConfigUpdater(
             screenOffTime = config.screenOffTime,
             nightlyRestartEnabled = maintenance.nightlyRestartEnabled,
             nightlyRestartTime = maintenance.quietTime,
-            idleRendering = maintenance.idleRendering,
+            restartIntervalDays = maintenance.restartIntervalDays,
             mqttEnabled = config.mqttEnabled,
             mqttBrokerHost = config.mqttBrokerHost,
             mqttBrokerPort = config.mqttBrokerPort,
@@ -168,10 +167,12 @@ internal class RemoteConfigUpdater(
         if (nightlyRestartAvailable && !ConfigValidator.isValidTime(nightlyRestartTime)) {
             return error("Restart time must use HH:mm (00:00-23:59).")
         }
-        val idleRenderingKey = parameters["idleRendering"]
-        val idleRendering = IdleRendering.entries.firstOrNull { it.key == idleRenderingKey }
-        if (nightlyRestartAvailable && idleRenderingKey != null && idleRendering == null) {
-            return error("Unknown idle screen drawing method.")
+        val restartIntervalField = parameters["restartIntervalDays"]
+        val restartIntervalDays = restartIntervalField?.toIntOrNull()
+        if (nightlyRestartAvailable && restartIntervalField != null &&
+            restartIntervalDays !in MaintenanceSettings.INTERVAL_DAYS
+        ) {
+            return error("Unknown restart interval.")
         }
 
         val mqttEnabled = parameters.hasCheckbox("mqttEnabled")
@@ -263,7 +264,7 @@ internal class RemoteConfigUpdater(
             maintenance.nightlyRestartEnabled = parameters.hasCheckbox("nightlyRestartEnabled")
             maintenance.quietTime = nightlyRestartTime
             // A client that does not know the field keeps the stored choice.
-            if (idleRendering != null) maintenance.idleRendering = idleRendering
+            if (restartIntervalDays != null) maintenance.restartIntervalDays = restartIntervalDays
         }
         diagnostics.enabled = parameters.hasCheckbox("diagnosticLogEnabled")
 

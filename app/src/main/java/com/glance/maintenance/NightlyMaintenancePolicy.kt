@@ -5,13 +5,15 @@ import java.time.LocalDateTime
 import java.time.LocalTime
 
 /**
- * Decides when Glance restarts itself to shed the memory a long-lived WebView accumulates.
+ * Decides when the scheduled restart, which the owner turns on, may run.
  *
- * Measured on a 3 GB tablet, the app process grows by about 40 MB a day in native heap and GL
- * memory that belong to the WebView's browser side. Reloading a page leaves it in place, and so
- * does recreating the Activity with all of its WebViews; only a new process starts from scratch.
- * The restart is also what bounds how long [com.glance.dashboard.IdleMaintenanceReload] can keep
- * deferring the reload of an idle page that stays on screen.
+ * On a 3 GB Huawei tablet with Android 8 the Mali GPU driver keeps part of the memory it takes
+ * whenever the WebView rebuilds its GPU resources, for example for every photo of a slideshow
+ * with a blurred backdrop. Only the end of the process gives it back; reloading pages, recreating
+ * the Activity or destroying the EGL context do not. About 40 MB a day accumulate until Android
+ * closes Glance for lack of memory. The restart is also what bounds how long
+ * [com.glance.dashboard.IdleMaintenanceReload] can keep deferring the reload of an idle page that
+ * stays on screen.
  *
  * The restart is placed where nobody is watching: shortly after the scheduled screen-off, or at a
  * configured quiet time on installations without a screen OFF window. If the screen is on at that
@@ -33,6 +35,12 @@ object NightlyMaintenancePolicy {
 
     /** A younger app has too little accumulated, and its pages are fresh. */
     const val MIN_PROCESS_UPTIME_MS = 60 * 60_000L
+
+    /**
+     * Restarts that are days apart run on the same nightly alarm; this slack keeps a process that
+     * started a few hours after the previous restart from waiting a whole extra interval.
+     */
+    private const val INTERVAL_SLACK_MS = 6 * 60 * 60_000L
 
     enum class Decision { RUN, POSTPONE, GIVE_UP }
 
@@ -78,6 +86,16 @@ object NightlyMaintenancePolicy {
         return if (postponedForMs >= MAX_POSTPONE_MS) Decision.GIVE_UP else Decision.POSTPONE
     }
 
-    fun worthwhile(processUptimeMs: Long): Boolean =
-        processUptimeMs >= MIN_PROCESS_UPTIME_MS
+    /**
+     * The memory a restart releases has built up since the process started, whether that was the
+     * previous scheduled restart, a crash or Android closing Glance; so the interval counts from
+     * the process start.
+     *
+     * @param intervalDays restart at most once in this many days.
+     */
+    fun worthwhile(processUptimeMs: Long, intervalDays: Int = 1): Boolean {
+        val due = if (intervalDays <= 1) MIN_PROCESS_UPTIME_MS
+        else intervalDays * 24 * 60 * 60_000L - INTERVAL_SLACK_MS
+        return processUptimeMs >= due
+    }
 }

@@ -51,7 +51,7 @@ Open that address from a computer or phone, sign in with the tablet's settings P
 - dashboard URLs, allowed login origins, rotation and scheduled content profiles;
 - the idle-screen URL and inactivity timeout;
 - automatic and minimum/maximum brightness;
-- screen wake and turn-off schedules and the nightly maintenance restart;
+- screen wake and turn-off schedules, the memory trend and scheduled restarts;
 - Home Assistant MQTT connection and discovery;
 - remote access and the settings PIN itself.
 
@@ -71,8 +71,8 @@ shows as the step between entries. It works without adb, including on vendor bui
 output. The panel shows the latest entries and can download or clear the full log. Entries contain
 no addresses or credentials. Turn it off once the problem is understood, so the tablet does not
 keep writing to storage. Turning it off keeps the recorded entries readable until **Clear log**.
-The section also shows whether the app's memory keeps growing; see
-[Memory growth warning](#memory-growth-warning).
+Whether the app's memory keeps growing is shown in the **Memory** section; see
+[Memory and scheduled restarts](#memory-and-scheduled-restarts).
 
 Changes are validated and applied immediately without restarting the application. The browser talks
 directly to the tablet—there is no Glance cloud service, account, or separate desktop application.
@@ -219,15 +219,32 @@ Without Device Owner privileges, OFF uses a reversible soft-off (black overlay a
 
 The optional schedule defines a daytime or overnight ON window. A manual MQTT command overrides the current state until the next scheduled transition. On Android 12 and newer, Glance requests exact-alarm access; when approximate alarms are selected, Android may deliver a transition later than its configured minute. Time, time-zone, package-update, and reboot events reschedule these alarms.
 
-### Nightly maintenance restart
+### Memory and scheduled restarts
 
-Android System WebView keeps memory in the app process that neither a page reload nor a new set of
-WebViews gives back; on a 3 GB tablet it grew by about 40 MB a day. Glance therefore restarts itself
-once a day, which also refreshes an idle screen that stays on for days. The restart is on by
-default and can be switched off next to the screen schedule, on the tablet or in the remote panel.
+On some older tablets the graphics driver keeps a little memory every time a page redraws and
+gives it back only when Glance's process ends. Measured on a 3 GB Huawei tablet with Android 8,
+the Mali GPU driver kept about 40 MB a day while a photo slideshow with a blurred backdrop played
+on the idle screen; neither reloading the pages, nor recreating every WebView, nor a fresh EGL
+context released it. Once memory runs out, Android closes Glance, which then starts again.
 
-- With the screen schedule on, it runs 15 minutes after the screen turns off (or halfway through a
-  shorter OFF window), so nobody sees it.
+Glance never restarts itself on its own judgement. The **Memory** section, on the tablet and in the
+remote panel, shows what it measured and lets you schedule restarts:
+
+- **Memory trend.** Glance follows its allocated native heap all the time, whether the diagnostic
+  log is on or not. After 13 hours of running, then once a day and before each scheduled restart, it
+  compares the start and the end of the last day, using hourly minimums and leaving out the first
+  hour after a start. Growth of 20 MB or more is reported as growing, and the remote panel then
+  shows a warning above every section until a later check finds it stable. Only the result is
+  stored; the samples stay in memory.
+- **Suggestion.** While the heap keeps growing, Glance suggests the longest interval on offer that
+  keeps the growth under 100 MB at the measured pace. It is only a suggestion.
+- **Scheduled restart**, off by default: every day, every 2 or 3 days, or once a week. The interval
+  counts from Glance's last start, so a restart that Android forced counts too.
+
+If you notice Glance restarting unexpectedly, or the trend keeps growing, schedule restarts.
+
+- With the screen schedule on, the restart runs 15 minutes after the screen turns off (or halfway
+  through a shorter OFF window), so nobody sees it.
 - Without one, it runs at the configured quiet time, 03:30 by default.
 - If the screen is on at that moment, it waits until the idle screen is showing or nobody has
   used the tablet for 10 minutes, and it is skipped for the night after three hours of use.
@@ -240,24 +257,8 @@ back from the background. Without Device Owner, Glance reloads every page at tha
 idle screen included even while it is on screen; that refreshes the pages but does not release the
 memory.
 
-### Memory growth warning
-
-Glance follows its allocated native heap all the time, whether the diagnostic log is on or not. After
-13 hours of running, then once a day and before each nightly restart, it compares the start and the
-end of the last day, using hourly minimums and leaving out the first hour after a start. If the heap
-grew by 20 MB or more, the remote panel shows a warning above every section until a later check
-finds it stable. The Diagnostic log section always shows the latest result. Only the result is
-stored; the samples stay in memory.
-
-### Idle screen drawing method
-
-On a 3 GB Huawei tablet with Android 8, Glance's native memory grows for as long as an idle photo
-slideshow plays, in what the WebView allocates inside Glance's process, and nothing but a restart
-gives it back.
-Next to the nightly restart you can choose how the idle screen is drawn: with the GPU through an
-offscreen layer (Glance's original behaviour and the default), with the GPU directly, or with the
-CPU. Which method avoids the growth depends on the device's GPU driver; the diagnostic journal's
-`nativeAlloc` figure shows whether it keeps rising.
+The idle screen's WebView is drawn straight onto the window, without an offscreen layer, which would
+add a full-screen texture and a compositing pass to every frame of a slideshow that plays all day.
 
 ### Keeping the battery healthy
 

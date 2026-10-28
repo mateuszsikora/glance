@@ -109,6 +109,18 @@ class NightlyMaintenancePolicyTest {
         )
     }
 
+    @Test
+    fun longerIntervalsCountFromTheProcessStartWithSomeSlack() {
+        val hour = 60 * 60_000L
+        // Restarted two nights ago by the schedule: due again on the second night.
+        assertFalse(NightlyMaintenancePolicy.worthwhile(24 * hour, intervalDays = 2))
+        assertTrue(NightlyMaintenancePolicy.worthwhile(48 * hour, intervalDays = 2))
+        // Closed by Android in the afternoon: a few hours short of two days still counts.
+        assertTrue(NightlyMaintenancePolicy.worthwhile(43 * hour, intervalDays = 2))
+        assertFalse(NightlyMaintenancePolicy.worthwhile(6 * 24 * hour, intervalDays = 7))
+        assertTrue(NightlyMaintenancePolicy.worthwhile(7 * 24 * hour, intervalDays = 7))
+    }
+
     private fun decide(
         screenVisible: Boolean = true,
         dashboardResumed: Boolean = true,

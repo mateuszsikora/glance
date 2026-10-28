@@ -31,8 +31,6 @@ import com.glance.kiosk.AppRestarter
 import com.glance.kiosk.KioskService
 import com.glance.kiosk.LockTaskHelper
 import com.glance.kiosk.ServiceStarter
-import com.glance.maintenance.IdleRendering
-import com.glance.maintenance.MaintenanceSettings
 import com.glance.maintenance.NightlyMaintenanceAttempt
 import com.glance.maintenance.NightlyMaintenancePolicy
 import com.glance.screen.ScreenController
@@ -457,7 +455,6 @@ class MainActivity : AppCompatActivity() {
         }
 
         if (supportFragmentManager.findFragmentByTag(IDLE_SCREEN_FRAGMENT_TAG) == null) {
-            val rendering = MaintenanceSettings(this).idleRendering
             supportFragmentManager.beginTransaction()
                 .add(
                     R.id.idle_screen_container,
@@ -465,24 +462,20 @@ class MainActivity : AppCompatActivity() {
                         config.idleScreenUrl,
                         config.dashboardAllowedOrigins,
                         diagnosticLabel = "idle",
-                        layerType = layerTypeOf(rendering)
+                        // Straight onto the window: an offscreen layer would add a full-screen
+                        // texture and a compositing pass to every frame of an all-day slideshow.
+                        layerType = View.LAYER_TYPE_NONE
                     ),
                     IDLE_SCREEN_FRAGMENT_TAG
                 )
                 .commitNow()
-            Diagnostics.record("Idle page created (rendering ${rendering.key})")
+            Diagnostics.record("Idle page created")
         }
         idleScreenActive = true
         binding.idleScreenLayer.visibility = View.VISIBLE
         idleScreenFragment()?.setWebContentPaused(false)
         Log.i(TAG, "Idle screen shown")
         Diagnostics.record("Idle screen shown")
-    }
-
-    private fun layerTypeOf(rendering: IdleRendering): Int = when (rendering) {
-        IdleRendering.GPU_LAYER -> View.LAYER_TYPE_HARDWARE
-        IdleRendering.GPU -> View.LAYER_TYPE_NONE
-        IdleRendering.SOFTWARE -> View.LAYER_TYPE_SOFTWARE
     }
 
     private fun hideIdleScreen(resetTimer: Boolean) {

@@ -13,7 +13,6 @@ import com.glance.config.AppConfig
 import com.glance.content.ContentProfile
 import com.glance.diagnostics.DiagnosticSettings
 import com.glance.diagnostics.MemoryTrend
-import com.glance.maintenance.IdleRendering
 import com.glance.maintenance.MaintenanceSettings
 import com.glance.settings.DebugInfoProvider
 import com.glance.settings.DebugInfoSnapshot
@@ -628,29 +627,41 @@ class RemoteConfigHttpHandlerTest {
     }
 
     @Test
-    fun theNightlyRestartDefaultsOnAndRoundTripsWithItsTime() {
+    fun scheduledRestartsDefaultOffAndRoundTripWithTheirIntervalAndTime() {
         val maintenance = MaintenanceSettings(ApplicationProvider.getApplicationContext())
         val handler = handler()
         val cookie = login(handler)
         val page = handler.handle(get("/", cookie)).text()
-        assertTrue(page.contains("name=\"nightlyRestartEnabled\" checked"))
+        assertTrue(page.contains("name=\"nightlyRestartEnabled\">"))
+        assertTrue(page.contains("<option value=\"1\" selected>Every day</option>"))
         assertTrue(page.contains("name=\"nightlyRestartTime\" type=\"time\" value=\"03:30\""))
 
-        val disabled = validSettings(csrf(handler, cookie)) + mapOf("nightlyRestartTime" to "04:45")
-        assertEquals(303, handler.handle(post("/save", disabled, cookie)).status)
-        assertFalse(maintenance.nightlyRestartEnabled)
-        assertEquals("04:45", maintenance.quietTime)
-
-        val enabled = validSettings(csrf(handler, cookie)) +
-            mapOf("nightlyRestartEnabled" to "on", "nightlyRestartTime" to "")
+        val enabled = validSettings(csrf(handler, cookie)) + mapOf(
+            "nightlyRestartEnabled" to "on",
+            "restartIntervalDays" to "2",
+            "nightlyRestartTime" to "04:45"
+        )
         assertEquals(303, handler.handle(post("/save", enabled, cookie)).status)
         assertTrue(maintenance.nightlyRestartEnabled)
+        assertEquals(2, maintenance.restartIntervalDays)
+        assertEquals("04:45", maintenance.quietTime)
+        assertTrue(
+            handler.handle(get("/", cookie)).text()
+                .contains("<option value=\"2\" selected>Every 2 days</option>")
+        )
+
+        // A scripted client that predates the interval leaves it alone.
+        val older = validSettings(csrf(handler, cookie)) + mapOf("nightlyRestartTime" to "")
+        assertEquals(303, handler.handle(post("/save", older, cookie)).status)
+        assertFalse(maintenance.nightlyRestartEnabled)
+        assertEquals(2, maintenance.restartIntervalDays)
         assertEquals("03:30", maintenance.quietTime)
     }
 
     @Test
     fun recoveryBuildsHideTheNightlyRestartAndLeaveItsSettingsAlone() {
         val maintenance = MaintenanceSettings(ApplicationProvider.getApplicationContext())
+        maintenance.nightlyRestartEnabled = true
         maintenance.quietTime = "04:45"
         val handler = RemoteConfigHttpHandler(config, { changes++ }, nightlyRestartAvailable = false)
         val cookie = login(handler)
@@ -664,38 +675,15 @@ class RemoteConfigHttpHandlerTest {
     }
 
     @Test
-    fun theIdleRenderingChoiceRoundTripsAndAnOlderFormKeepsIt() {
-        val maintenance = MaintenanceSettings(ApplicationProvider.getApplicationContext())
-        val handler = handler()
-        val cookie = login(handler)
-        assertTrue(
-            handler.handle(get("/", cookie)).text()
-                .contains("<option value=\"gpu_layer\" selected>")
-        )
-
-        val software = validSettings(csrf(handler, cookie)) + mapOf("idleRendering" to "software")
-        assertEquals(303, handler.handle(post("/save", software, cookie)).status)
-        assertEquals(IdleRendering.SOFTWARE, maintenance.idleRendering)
-        assertTrue(
-            handler.handle(get("/", cookie)).text()
-                .contains("<option value=\"software\" selected>")
-        )
-
-        // A scripted client that predates the field leaves the stored choice alone.
-        assertEquals(303, handler.handle(post("/save", validSettings(csrf(handler, cookie)), cookie)).status)
-        assertEquals(IdleRendering.SOFTWARE, maintenance.idleRendering)
-    }
-
-    @Test
-    fun anUnknownIdleRenderingIsRejected() {
+    fun anIntervalThatIsNotOfferedIsRejected() {
         val handler = handler()
         val cookie = login(handler)
 
-        val invalid = validSettings(csrf(handler, cookie)) + mapOf("idleRendering" to "vulkan")
+        val invalid = validSettings(csrf(handler, cookie)) + mapOf("restartIntervalDays" to "5")
         val response = handler.handle(post("/save", invalid, cookie))
 
         assertEquals(400, response.status)
-        assertTrue(response.text().contains("Unknown idle screen drawing method."))
+        assertTrue(response.text().contains("Unknown restart interval."))
     }
 
     @Test
@@ -709,7 +697,7 @@ class RemoteConfigHttpHandlerTest {
 
         assertEquals(400, response.status)
         assertTrue(response.text().contains("Restart time must use HH:mm"))
-        assertTrue(maintenance.nightlyRestartEnabled)
+        assertFalse(maintenance.nightlyRestartEnabled)
         assertEquals("03:30", maintenance.quietTime)
     }
 
@@ -754,12 +742,11 @@ class RemoteConfigHttpHandlerTest {
     }
 
     @Test
-    fun aGrowingNativeHeapIsWarnedAboutAboveEverySection() {
-        MaintenanceSettings(ApplicationProvider.getApplicationContext()).nightlyRestartEnabled = false
+    fun aGrowingNativeHeapIsWarnedAboutAndARestartIntervalSuggested() {
         val growing = MemoryTrend.Verdict(
             evaluatedAtEpochMs = 1_792_800_000_000L,
             windowMs = 22 * 3_600_000L,
-            growthBytes = 46L * 1024L * 1024L,
+            growthBytes = 30L * 1024L * 1024L,
             growing = true
         )
         val handler = RemoteConfigHttpHandler(config, { changes++ }, memoryTrend = { growing })
@@ -768,15 +755,17 @@ class RemoteConfigHttpHandlerTest {
         val page = handler.handle(get("/", cookie)).text()
 
         assertTrue(page.contains("class=\"banner warning\""))
-        assertTrue(page.contains("Glance's memory keeps growing: +46 MB in 22 hours"))
-        assertTrue(page.contains("Turn on the nightly restart"))
+        assertTrue(page.contains("Glance's memory keeps growing: +30 MB in 22 hours"))
+        assertTrue(page.contains("See <a href=\"#memory\">Memory</a>"))
         assertTrue(page.indexOf("banner warning") < page.indexOf("id=\"dashboards\""))
-        assertTrue(page.contains("<dt>Memory trend</dt><dd>Growing: +46 MB in 22 hours"))
-
-        MaintenanceSettings(ApplicationProvider.getApplicationContext()).nightlyRestartEnabled = true
-        val withRestart = handler.handle(get("/", cookie)).text()
-        assertTrue(withRestart.contains("The nightly restart releases it"))
-        assertFalse(withRestart.contains("Turn on the nightly restart"))
+        assertTrue(page.indexOf("id=\"screen\"") < page.indexOf("id=\"memory\""))
+        assertTrue(page.indexOf("id=\"memory\"") < page.indexOf("id=\"mqtt\""))
+        assertTrue(page.contains("<dt>Memory trend</dt><dd>Growing: +30 MB in 22 hours"))
+        // About 33 MB a day: three days stay under the 100 MB budget.
+        assertTrue(page.contains("<dt>Suggestion</dt><dd>Restart every 3 days."))
+        // Only a suggestion: the restart stays off until the owner turns it on.
+        assertTrue(page.contains("name=\"nightlyRestartEnabled\">"))
+        assertFalse(MaintenanceSettings(ApplicationProvider.getApplicationContext()).nightlyRestartEnabled)
     }
 
     @Test
@@ -793,6 +782,7 @@ class RemoteConfigHttpHandlerTest {
         val stable = handler.handle(get("/", cookie)).text()
         assertFalse(stable.contains("banner warning"))
         assertTrue(stable.contains("<dd>Stable: +2 MB in 23 hours"))
+        assertTrue(stable.contains("<dd>No restarts needed while the memory stays stable.</dd>"))
 
         val broken = RemoteConfigHttpHandler(config, { changes++ }, memoryTrend = { error("prefs") })
         assertEquals(200, broken.handle(get("/", login(broken))).status)

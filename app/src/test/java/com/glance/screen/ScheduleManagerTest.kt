@@ -12,6 +12,7 @@ import java.time.ZoneId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -27,6 +28,12 @@ class ScheduleManagerTest {
     private val config = AppConfig(context)
     private val maintenance = MaintenanceSettings(context)
     private val alarms = shadowOf(context.getSystemService(AlarmManager::class.java))
+
+    @Before
+    fun scheduleRestarts() {
+        // Off by default; these tests are about the restart's alarm.
+        maintenance.nightlyRestartEnabled = true
+    }
 
     @Test
     fun nightlyMaintenanceRunsAtTheQuietTimeWithoutAScreenSchedule() {

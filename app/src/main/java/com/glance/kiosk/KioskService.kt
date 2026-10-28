@@ -23,6 +23,7 @@ import com.glance.battery.BatteryMonitor
 import com.glance.battery.BatteryStatus
 import com.glance.config.AppConfig
 import com.glance.diagnostics.Diagnostics
+import com.glance.maintenance.MaintenanceSettings
 import com.glance.maintenance.NightlyMaintenancePolicy
 import com.glance.mqtt.MqttLightCommand
 import com.glance.mqtt.MqttReportedState
@@ -430,8 +431,16 @@ class KioskService : Service() {
 
     private fun startNightlyMaintenance() {
         val now = SystemClock.elapsedRealtime()
-        if (!NightlyMaintenancePolicy.worthwhile(now - GlanceApp.instance.processStartElapsedMs)) {
-            Diagnostics.record("Nightly maintenance skipped; the app started less than an hour ago")
+        val intervalDays = MaintenanceSettings(this).restartIntervalDays
+        if (!NightlyMaintenancePolicy.worthwhile(
+                now - GlanceApp.instance.processStartElapsedMs,
+                intervalDays
+            )
+        ) {
+            Diagnostics.record(
+                if (intervalDays <= 1) "Nightly maintenance skipped; the app started less than an hour ago"
+                else "Nightly maintenance skipped; the app has run for less than $intervalDays days"
+            )
             return
         }
         Diagnostics.record("Nightly maintenance requested")

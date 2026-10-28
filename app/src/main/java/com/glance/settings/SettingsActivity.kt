@@ -24,7 +24,7 @@ import com.glance.MainActivity
 import com.glance.R
 import com.glance.config.AppConfig
 import com.glance.diagnostics.DiagnosticSettings
-import com.glance.maintenance.IdleRendering
+import com.glance.diagnostics.MemoryTrend
 import com.glance.maintenance.MaintenanceSettings
 import com.glance.content.ContentProfile
 import com.glance.content.WeekDays
@@ -70,7 +70,8 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var editScreenOffTime: EditText
     private lateinit var switchNightlyRestart: SwitchCompat
     private lateinit var editNightlyRestartTime: EditText
-    private lateinit var groupIdleRendering: RadioGroup
+    private lateinit var groupRestartInterval: RadioGroup
+    private lateinit var textMemoryTrend: TextView
     private lateinit var switchMqttEnabled: SwitchCompat
     private lateinit var editMqttBrokerHost: EditText
     private lateinit var editMqttBrokerPort: EditText
@@ -225,7 +226,8 @@ class SettingsActivity : AppCompatActivity() {
         editScreenOffTime = findViewById(R.id.editScreenOffTime)
         switchNightlyRestart = findViewById(R.id.switchNightlyRestart)
         editNightlyRestartTime = findViewById(R.id.editNightlyRestartTime)
-        groupIdleRendering = findViewById(R.id.groupIdleRendering)
+        groupRestartInterval = findViewById(R.id.groupRestartInterval)
+        textMemoryTrend = findViewById(R.id.textMemoryTrend)
         switchMqttEnabled = findViewById(R.id.switchMqttEnabled)
         editMqttBrokerHost = findViewById(R.id.editMqttBrokerHost)
         editMqttBrokerPort = findViewById(R.id.editMqttBrokerPort)
@@ -269,13 +271,8 @@ class SettingsActivity : AppCompatActivity() {
         val maintenance = MaintenanceSettings(this)
         switchNightlyRestart.isChecked = maintenance.nightlyRestartEnabled
         editNightlyRestartTime.setText(maintenance.quietTime)
-        groupIdleRendering.check(
-            when (maintenance.idleRendering) {
-                IdleRendering.GPU_LAYER -> R.id.radioIdleRenderingGpuLayer
-                IdleRendering.GPU -> R.id.radioIdleRenderingGpu
-                IdleRendering.SOFTWARE -> R.id.radioIdleRenderingSoftware
-            }
-        )
+        groupRestartInterval.check(intervalButton(maintenance.restartIntervalDays))
+        textMemoryTrend.text = memoryTrendText(GlanceApp.instance.memoryTrend.latest())
         switchMqttEnabled.isChecked = config.mqttEnabled
         editMqttBrokerHost.setText(
             config.mqttBrokerHost.ifBlank {
@@ -541,11 +538,8 @@ class SettingsActivity : AppCompatActivity() {
         MaintenanceSettings(this).apply {
             nightlyRestartEnabled = switchNightlyRestart.isChecked
             quietTime = nightlyRestartTime
-            idleRendering = when (groupIdleRendering.checkedRadioButtonId) {
-                R.id.radioIdleRenderingGpu -> IdleRendering.GPU
-                R.id.radioIdleRenderingSoftware -> IdleRendering.SOFTWARE
-                else -> IdleRendering.GPU_LAYER
-            }
+            restartIntervalDays = INTERVAL_BUTTONS.entries
+                .firstOrNull { it.value == groupRestartInterval.checkedRadioButtonId }?.key ?: 1
         }
         DiagnosticSettings(this).enabled = switchDiagnosticLog.isChecked
 
@@ -812,7 +806,34 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
+    private fun intervalButton(days: Int): Int =
+        INTERVAL_BUTTONS[days] ?: R.id.radioRestartEveryDay
+
+    /** The latest daily memory check and, when the heap keeps growing, a suggested interval. */
+    private fun memoryTrendText(trend: MemoryTrend.Verdict?): String {
+        if (trend == null) return getString(R.string.memory_trend_unknown)
+        val megabytes = (trend.growthBytes / (1024 * 1024)).toInt()
+        val hours = (trend.windowMs / 3_600_000L).toInt()
+        val days = MemoryTrend.suggestedRestartIntervalDays(trend)
+            ?: return getString(R.string.memory_trend_stable, megabytes, hours)
+        val label = getString(
+            when (days) {
+                1 -> R.string.restart_every_day
+                2 -> R.string.restart_every_2_days
+                3 -> R.string.restart_every_3_days
+                else -> R.string.restart_weekly
+            }
+        ).lowercase(java.util.Locale.getDefault())
+        return getString(R.string.memory_trend_growing, megabytes, hours, label)
+    }
+
     companion object {
+        private val INTERVAL_BUTTONS = mapOf(
+            1 to R.id.radioRestartEveryDay,
+            2 to R.id.radioRestartEvery2Days,
+            3 to R.id.radioRestartEvery3Days,
+            7 to R.id.radioRestartWeekly
+        )
         private const val STATE_AWAITING_EXACT_ALARM_ACCESS =
             "awaiting_exact_alarm_access"
         private val DEFAULT_PROFILE_TIME: LocalTime = LocalTime.of(6, 0)

@@ -328,6 +328,39 @@
             android:textSize="12sp"
             android:layout_marginBottom="16dp" />
 
+        <!-- Divider -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#FF404040"
+            android:layout_marginBottom="16dp" />
+
+        <!-- Memory -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/memory_title"
+            android:textColor="#FFFFFFFF"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/memory_help"
+            android:textColor="#FFB0B0B0"
+            android:textSize="12sp"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:id="@+id/textMemoryTrend"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#FFFFFFFF"
+            android:textSize="14sp"
+            android:layout_marginBottom="16dp" />
+
         <androidx.appcompat.widget.SwitchCompat
             android:id="@+id/switchNightlyRestart"
             android:layout_width="match_parent"
@@ -335,6 +368,45 @@
             android:text="@string/nightly_restart_label"
             android:textColor="#FFFFFFFF"
             android:layout_marginBottom="8dp" />
+
+        <RadioGroup
+            android:id="@+id/groupRestartInterval"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="8dp">
+
+            <RadioButton
+                android:id="@+id/radioRestartEveryDay"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/restart_every_day"
+                android:textColor="#FFFFFFFF"
+                android:layout_marginEnd="12dp" />
+
+            <RadioButton
+                android:id="@+id/radioRestartEvery2Days"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/restart_every_2_days"
+                android:textColor="#FFFFFFFF"
+                android:layout_marginEnd="12dp" />
+
+            <RadioButton
+                android:id="@+id/radioRestartEvery3Days"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/restart_every_3_days"
+                android:textColor="#FFFFFFFF"
+                android:layout_marginEnd="12dp" />
+
+            <RadioButton
+                android:id="@+id/radioRestartWeekly"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/restart_weekly"
+                android:textColor="#FFFFFFFF" />
+        </RadioGroup>
 
         <EditText
             android:id="@+id/editNightlyRestartTime"
@@ -352,49 +424,6 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="@string/nightly_restart_help"
-            android:textColor="#FFB0B0B0"
-            android:textSize="12sp"
-            android:layout_marginBottom="16dp" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/idle_rendering_label"
-            android:textColor="#FFFFFFFF"
-            android:layout_marginBottom="4dp" />
-
-        <RadioGroup
-            android:id="@+id/groupIdleRendering"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="8dp">
-
-            <RadioButton
-                android:id="@+id/radioIdleRenderingGpuLayer"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/idle_rendering_gpu_layer"
-                android:textColor="#FFFFFFFF" />
-
-            <RadioButton
-                android:id="@+id/radioIdleRenderingGpu"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/idle_rendering_gpu"
-                android:textColor="#FFFFFFFF" />
-
-            <RadioButton
-                android:id="@+id/radioIdleRenderingSoftware"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/idle_rendering_software"
-                android:textColor="#FFFFFFFF" />
-        </RadioGroup>
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/idle_rendering_help"
             android:textColor="#FFB0B0B0"
             android:textSize="12sp"
             android:layout_marginBottom="16dp" />

@@ -65,6 +65,22 @@ class MemoryTrendTest {
         assertTrue(verdict.growthBytes in 1..MemoryTrend.GROWTH_THRESHOLD_BYTES)
     }
 
+    @Test
+    fun theSuggestedIntervalKeepsADaysGrowthUnderTheBudget() {
+        fun suggest(megabytesPerDay: Long) = MemoryTrend.suggestedRestartIntervalDays(
+            MemoryTrend.Verdict(NOW, 24 * HOUR, megabytesPerDay * MIB, growing = true)
+        )
+        assertEquals(1, suggest(80))
+        assertEquals(2, suggest(45))
+        assertEquals(3, suggest(30))
+        assertEquals(7, suggest(14))
+        // Faster than the budget allows even daily: daily is still the most that is offered.
+        assertEquals(1, suggest(300))
+        assertNull(
+            MemoryTrend.suggestedRestartIntervalDays(MemoryTrend.Verdict(NOW, 24 * HOUR, 2 * MIB, false))
+        )
+    }
+
     /** Samples every 5 minutes from the process start for [hours]. */
     private fun evaluate(
         hours: Int,

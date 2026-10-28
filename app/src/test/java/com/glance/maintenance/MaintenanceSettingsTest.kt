@@ -17,32 +17,27 @@ class MaintenanceSettingsTest {
     private val context = ApplicationProvider.getApplicationContext<Context>()
 
     @Test
-    fun nightlyRestartDefaultsToOnAtTheQuietTimeAndPersists() {
+    fun scheduledRestartsDefaultToOffDailyAtTheQuietTimeAndPersist() {
         val defaults = MaintenanceSettings(context)
-        assertTrue(defaults.nightlyRestartEnabled)
+        assertFalse(defaults.nightlyRestartEnabled)
+        assertEquals(1, defaults.restartIntervalDays)
         assertEquals("03:30", defaults.quietTime)
 
-        defaults.nightlyRestartEnabled = false
+        defaults.nightlyRestartEnabled = true
+        defaults.restartIntervalDays = 3
         defaults.quietTime = "04:45"
 
         val reloaded = MaintenanceSettings(context)
-        assertFalse(reloaded.nightlyRestartEnabled)
+        assertTrue(reloaded.nightlyRestartEnabled)
+        assertEquals(3, reloaded.restartIntervalDays)
         assertEquals("04:45", reloaded.quietTime)
     }
 
     @Test
-    fun idleRenderingDefaultsToTheOriginalGpuLayerAndPersists() {
-        assertEquals(IdleRendering.GPU_LAYER, MaintenanceSettings(context).idleRendering)
+    fun anIntervalThatIsNotOfferedFallsBackToDaily() {
+        MaintenanceSettings(context).restartIntervalDays = 5
 
-        MaintenanceSettings(context).idleRendering = IdleRendering.SOFTWARE
-
-        assertEquals(IdleRendering.SOFTWARE, MaintenanceSettings(context).idleRendering)
-    }
-
-    @Test
-    fun anUnknownStoredRenderingFallsBackToTheDefault() {
-        assertEquals(IdleRendering.GPU_LAYER, IdleRendering.fromKey("vulkan"))
-        assertEquals(IdleRendering.GPU_LAYER, IdleRendering.fromKey(null))
+        assertEquals(1, MaintenanceSettings(context).restartIntervalDays)
     }
 
     @Test

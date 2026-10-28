@@ -1,12 +1,15 @@
 package com.glance.diagnostics
 
+import com.glance.maintenance.MaintenanceSettings
+
 /**
  * Tells whether Glance's native heap keeps growing, from samples taken during one process.
  *
- * On some tablets the WebView keeps a few kilobytes of native memory every time a page draws an
- * image again, for example a slideshow on the idle screen, and frees it only when the process
- * ends. Over days that grows to hundreds of megabytes until Android kills the app. The allocated
- * native heap is the figure that shows it: it does not move with swapping, unlike PSS.
+ * On some tablets the GPU driver keeps a few kilobytes of native memory every time the WebView
+ * rebuilds its GPU resources, for example for each photo of a slideshow on the idle screen, and
+ * frees it only when the process ends. Over days that grows to hundreds of megabytes until
+ * Android kills the app. The allocated native heap is the figure that shows it: it does not move
+ * with swapping, unlike PSS.
  *
  * Single samples jump by a few megabytes with whatever is being drawn at that moment, so the
  * trend is read from hourly minimums. The first hour of a process is left out, because loading
@@ -39,6 +42,13 @@ object MemoryTrend {
      */
     const val GROWTH_THRESHOLD_BYTES = 20L * 1024L * 1024L
 
+    /**
+     * Growth a restart should keep the heap under. On the 3 GB tablet where the leak was found,
+     * Android began closing Glance once its native heap had grown by about 150 MB.
+     */
+    const val RESTART_BUDGET_BYTES = 100L * 1024L * 1024L
+
+    private const val DAY_MS = 24 * 60 * 60_000L
     private const val BUCKET_MS = 60 * 60_000L
     private const val EDGE_BUCKETS = 3
 
@@ -71,6 +81,19 @@ object MemoryTrend {
             growthBytes = growth,
             growing = growth >= GROWTH_THRESHOLD_BYTES
         )
+    }
+
+    /**
+     * The longest restart interval on offer that keeps the growth under [RESTART_BUDGET_BYTES]
+     * at the verdict's pace; null when the heap does not keep growing and no restart is needed.
+     * Glance only suggests it: the owner decides whether to schedule restarts.
+     */
+    fun suggestedRestartIntervalDays(verdict: Verdict): Int? {
+        if (!verdict.growing || verdict.windowMs <= 0) return null
+        val perDay = verdict.growthBytes.toDouble() * DAY_MS / verdict.windowMs
+        val days = (RESTART_BUDGET_BYTES / perDay).toInt()
+        return MaintenanceSettings.INTERVAL_DAYS.lastOrNull { it <= days }
+            ?: MaintenanceSettings.INTERVAL_DAYS.first()
     }
 
     private fun median(values: List<Long>): Long {

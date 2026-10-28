@@ -6,7 +6,7 @@ import com.glance.config.AppConfig
 import com.glance.content.WeekDays
 import com.glance.diagnostics.Diagnostics
 import com.glance.diagnostics.MemoryTrend
-import com.glance.maintenance.IdleRendering
+import com.glance.maintenance.MaintenanceSettings
 import com.glance.settings.ContentProfileDraft
 import com.glance.settings.DebugInfoProvider
 import com.glance.settings.DebugInfoSnapshot
@@ -599,28 +599,25 @@ internal class RemoteConfigHttpHandler(
             values.mqttPasswordConfigured -> "A password is stored. Leave blank to keep it."
             else -> "No password is stored."
         }
-        val selectedIdleRendering = submittedValues?.get("idleRendering") ?: values.idleRendering.key
-        val idleRenderingOptions = listOf(
-            IdleRendering.GPU_LAYER to "With the GPU, through an offscreen layer (default)",
-            IdleRendering.GPU to "With the GPU, directly",
-            IdleRendering.SOFTWARE to "With the CPU"
-        ).joinToString("") { (rendering, label) ->
-            "<option value=\"${rendering.key}\"" +
-                (if (rendering.key == selectedIdleRendering) " selected" else "") +
-                ">${escapeHtml(label)}</option>"
-        }
-        // Indented to match the screen-schedule section it is placed in.
-        val nightlyRestartSettings = if (!nightlyRestartAvailable) "" else """<div class="subsection">
-                            ${checkbox("nightlyRestartEnabled", "Restart Glance nightly to free WebView memory", checked("nightlyRestartEnabled", values.nightlyRestartEnabled))}
-                            <div class="field compact-field"><label for="nightlyRestartTime">Restart at <small>without a screen schedule</small></label>
-                              <input id="nightlyRestartTime" name="nightlyRestartTime" type="time" value="${value("nightlyRestartTime", values.nightlyRestartTime)}" required></div>
-                            <p class="hint">The WebView's memory keeps growing while Glance runs, and only a restart releases it. With the screen schedule on, the restart runs 15 minutes after the screen turns off (halfway through a shorter OFF window) and this time is not used. If the screen is on, it waits until the idle screen is showing or nobody has used the tablet for 10 minutes. The display goes dark for a few seconds and Home Assistant briefly sees the tablet as unavailable. Without Device Owner every page, including the idle screen, is reloaded instead.</p>
-                            <div class="field compact-field"><label for="idleRendering">Draw the idle screen</label>
-                              <select id="idleRendering" name="idleRendering">${idleRenderingOptions}</select></div>
-                            <p class="hint">Some tablets' GPU drivers keep a little memory for every photo an idle slideshow shows, until Glance restarts. A different drawing method may avoid that; the CPU method uses no GPU memory per photo but costs more CPU. Saving recreates the idle screen.</p>
-                          </div>"""
         // Like the journal preview, a broken verdict must not take down the settings page.
         val trend = runCatching(memoryTrend).getOrNull()
+        val selectedInterval = submittedValues?.get("restartIntervalDays") ?: values.restartIntervalDays.toString()
+        val intervalOptions = MaintenanceSettings.INTERVAL_DAYS.joinToString("") { days ->
+            "<option value=\"$days\"" + (if (days.toString() == selectedInterval) " selected" else "") +
+                ">${escapeHtml(intervalLabel(days))}</option>"
+        }
+        // Indented to match the section it is placed in. Recovery builds show the explanation and
+        // the trend, but their older app code cannot restart on a schedule.
+        val restartSettings = if (!nightlyRestartAvailable) "" else """<div class="subsection">
+                            ${checkbox("nightlyRestartEnabled", "Restart Glance on a schedule", checked("nightlyRestartEnabled", values.nightlyRestartEnabled))}
+                            <div class="grid two">
+                              <div class="field"><label for="restartIntervalDays">How often</label>
+                                <select id="restartIntervalDays" name="restartIntervalDays">$intervalOptions</select></div>
+                              <div class="field"><label for="nightlyRestartTime">Restart at <small>without a screen schedule</small></label>
+                                <input id="nightlyRestartTime" name="nightlyRestartTime" type="time" value="${value("nightlyRestartTime", values.nightlyRestartTime)}" required></div>
+                            </div>
+                            <p class="hint">Off unless you turn it on. With the screen schedule on, the restart runs 15 minutes after the screen turns off (halfway through a shorter OFF window) and this time is not used. The interval counts from Glance's last start, so a restart Android forced also counts. If the screen is on, it waits until the idle screen is showing or nobody has used the tablet for 10 minutes. The display goes dark for a few seconds and Home Assistant briefly sees the tablet as unavailable. Without Device Owner every page, including the idle screen, is reloaded instead, which does not release the memory.</p>
+                          </div>"""
         val updateStatus = buildString {
             append(statusRow("Installed version", values.update.installedVersion))
             append(statusRow("Code identity", com.glance.BuildConfig.CODE_IDENTITY))
@@ -651,7 +648,7 @@ internal class RemoteConfigHttpHandler(
                   <h1>Tablet settings</h1>
                   <p>Changes are validated on the tablet and applied as soon as you save.</p>
                 </div>
-                ${memoryTrendWarning(trend, values.nightlyRestartEnabled)}
+                ${memoryTrendWarning(trend)}
                 <form id="remote-settings-form" method="post" action="/save" accept-charset="UTF-8">
                   <input type="hidden" name="csrf" value="${escapeHtml(session.csrfToken)}">
                   <!-- Pressing Enter in a field submits the form's first submit button. Without
@@ -665,6 +662,7 @@ internal class RemoteConfigHttpHandler(
                       <a href="#content">Scheduled content</a>
                       <a href="#brightness">Brightness</a>
                       <a href="#screen">Screen schedule</a>
+                      <a href="#memory">Memory</a>
                       <a href="#mqtt">Home Assistant MQTT</a>
                       <a href="#updates">Self-hosted updates</a>
                       <a href="#access">Remote access &amp; PIN</a>
@@ -740,12 +738,20 @@ internal class RemoteConfigHttpHandler(
                               <input id="screenOffTime" name="screenOffTime" type="time" value="${value("screenOffTime", values.screenOffTime)}" required></div>
                           </div>
                           <p class="hint">Exact timing requires exact-alarm access on the tablet.</p>
-                          $nightlyRestartSettings
+                        </div>
+                      </section>
+
+                      <section id="memory" class="card settings-card">
+                        ${sectionHeading("05", "Memory", "Spot memory problems and schedule the restarts that clear them.")}
+                        <div class="section-body">
+                          <p class="hint">On some older tablets the graphics driver keeps a little memory every time a page redraws, for example each photo of an idle-screen slideshow, and only a restart of Glance gives it back. When memory runs out, Android closes Glance, which then starts again. If you notice Glance restarting unexpectedly, or the trend below keeps growing, schedule restarts here.</p>
+                          <dl class="status-list">${statusRow("Memory trend", memoryTrendStatus(trend))}${statusRow("Suggestion", restartSuggestion(trend))}</dl>
+                          $restartSettings
                         </div>
                       </section>
 
                       <section id="mqtt" class="card settings-card">
-                        ${sectionHeading("05", "Home Assistant MQTT", "Connect Glance to Home Assistant discovery and controls.")}
+                        ${sectionHeading("06", "Home Assistant MQTT", "Connect Glance to Home Assistant discovery and controls.")}
                         <div class="section-body">
                           ${checkbox("mqttEnabled", "Enable MQTT and automatic HA discovery", checked("mqttEnabled", values.mqttEnabled))}
                           <div class="grid two">
@@ -770,7 +776,7 @@ internal class RemoteConfigHttpHandler(
                       </section>
 
                       <section id="updates" class="card settings-card">
-                        ${sectionHeading("06", "Self-hosted updates", "Point Glance at an update manifest you publish yourself.")}
+                        ${sectionHeading("07", "Self-hosted updates", "Point Glance at an update manifest you publish yourself.")}
                         <div class="section-body">
                           <dl class="status-list">$updateStatus</dl>
                           <div class="field"><label for="updateUrl">Update manifest URL <small>blank disables updates</small></label>
@@ -808,7 +814,7 @@ internal class RemoteConfigHttpHandler(
                       </section>
 
                       <section id="access" class="card settings-card">
-                        ${sectionHeading("07", "Remote access &amp; PIN", "Control access to this page and rotate its PIN.")}
+                        ${sectionHeading("08", "Remote access &amp; PIN", "Control access to this page and rotate its PIN.")}
                         <div class="section-body">
                           ${checkbox("remoteConfigEnabled", "Keep remote configuration enabled", checked("remoteConfigEnabled", values.remoteConfigEnabled))}
                           <div class="inline-warning"><span aria-hidden="true">!</span><p>Turning this off closes the panel after saving. It can only be re-enabled on the tablet.</p></div>
@@ -822,7 +828,7 @@ internal class RemoteConfigHttpHandler(
                       </section>
 
                       <section id="debug-info" class="card settings-card">
-                        ${sectionHeading("08", "Debug Info", "Read-only diagnostics from the saved configuration and current runtime.")}
+                        ${sectionHeading("09", "Debug Info", "Read-only diagnostics from the saved configuration and current runtime.")}
                         <div class="section-body">
                           <p class="hint">Reload this page for a fresh sample. Reloading discards unsaved edits and does not change the tablet's display.</p>
                           <pre class="debug-summary">${escapeHtml(debugInfo().asText())}</pre>
@@ -831,9 +837,8 @@ internal class RemoteConfigHttpHandler(
                       </section>
 
                       <section id="diagnostic-log" class="card settings-card">
-                        ${sectionHeading("09", "Diagnostic log", "An opt-in journal of reloads and memory pressure, kept on the tablet.")}
+                        ${sectionHeading("10", "Diagnostic log", "An opt-in journal of reloads and memory pressure, kept on the tablet.")}
                         <div class="section-body">
-                          <dl class="status-list">${statusRow("Memory trend", memoryTrendStatus(trend))}</dl>
                           ${checkbox("diagnosticLogEnabled", "Record diagnostic event log", checked("diagnosticLogEnabled", values.diagnosticLogEnabled))}
                           <p class="hint">Journals reloads with their cause, idle-screen changes, page load failures, charger and display events, and a memory sample every 5 minutes; every entry carries the app's native heap. It never records addresses or credentials. Saving applies the switch. Leave it off when not investigating a problem to avoid needless storage writes.</p>
                           ${diagnosticLogPreview()}
@@ -884,24 +889,33 @@ internal class RemoteConfigHttpHandler(
     /**
      * Shown above every section while the latest verdict says the native heap keeps growing:
      * nothing on the tablet itself tells the owner, until Android closes Glance for lack of memory.
+     * It only points to the Memory section; Glance never schedules restarts by itself.
      */
-    private fun memoryTrendWarning(trend: MemoryTrend.Verdict?, nightlyRestartEnabled: Boolean): String {
+    private fun memoryTrendWarning(trend: MemoryTrend.Verdict?): String {
         if (trend == null || !trend.growing) return ""
-        val remedy = when {
-            !nightlyRestartAvailable -> "Restarting Glance releases it."
-            nightlyRestartEnabled -> "The nightly restart releases it; if Android still closes Glance for lack of memory, make the page lighter."
-            else -> "Turn on the nightly restart in <a href=\"#screen\">Screen schedule</a> to release it every night."
-        }
         return "<div class=\"banner warning\" role=\"status\"><span aria-hidden=\"true\">!</span>" +
-            "<p>Glance's memory keeps growing: ${escapeHtml(describe(trend))}. A page shown for a " +
-            "long time, often a slideshow on the idle screen, can leave memory behind in this " +
-            "tablet's WebView until Glance restarts. $remedy</p></div>"
+            "<p>Glance's memory keeps growing: ${escapeHtml(describe(trend))}. Android will close " +
+            "Glance once memory runs out. See <a href=\"#memory\">Memory</a> for what helps.</p></div>"
     }
 
     private fun memoryTrendStatus(trend: MemoryTrend.Verdict?): String = when {
         trend == null -> "Not checked yet. Glance checks after 13 hours of running, then daily."
         trend.growing -> "Growing: ${describe(trend)}"
         else -> "Stable: ${describe(trend)}"
+    }
+
+    private fun restartSuggestion(trend: MemoryTrend.Verdict?): String {
+        if (trend == null) return "None yet; it needs the first memory check."
+        val days = MemoryTrend.suggestedRestartIntervalDays(trend)
+            ?: return "No restarts needed while the memory stays stable."
+        return "Restart ${intervalLabel(days).lowercase(java.util.Locale.US)}. At the current pace " +
+            "that keeps the growth under ${MemoryTrend.RESTART_BUDGET_BYTES / (1024 * 1024)} MB."
+    }
+
+    private fun intervalLabel(days: Int): String = when (days) {
+        1 -> "Every day"
+        7 -> "Once a week"
+        else -> "Every $days days"
     }
 
     private fun describe(trend: MemoryTrend.Verdict): String = String.format(
