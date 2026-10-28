@@ -41,8 +41,11 @@ class WebViewFragment : Fragment() {
 
     var onHealthCheckCallback: ((Boolean) -> Unit)? = null
 
-    /** A `View.LAYER_TYPE_*` constant; a hardware layer unless the caller chose otherwise. */
-    val layerType: Int
+    /**
+     * A `View.LAYER_TYPE_*` constant; a hardware layer unless the caller chose otherwise. Not
+     * called `layerType`: inside the WebView's `apply` block that name is the WebView's own.
+     */
+    val requestedLayerType: Int
         get() = arguments?.getInt(ARG_LAYER_TYPE, View.LAYER_TYPE_HARDWARE)
             ?: View.LAYER_TYPE_HARDWARE
 
@@ -97,7 +100,7 @@ class WebViewFragment : Fragment() {
                 @Suppress("DEPRECATION")
                 setRenderPriority(WebSettings.RenderPriority.HIGH)
             }
-            setLayerType(layerType, null)
+            setLayerType(requestedLayerType, null)
 
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(
