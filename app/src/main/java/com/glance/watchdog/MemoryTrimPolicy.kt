@@ -7,11 +7,11 @@ import android.content.ComponentCallbacks2
  *
  * All `TRIM_MEMORY_RUNNING_*` levels describe the device as a whole, not the WebViews. On a small
  * tablet they arrive whenever the charger is connected and the system starts a burst of
- * power-event receivers. [ComponentCallbacks2.TRIM_MEMORY_RUNNING_MODERATE] and
- * [ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW] are ignored to cut down needless reloads. This is
- * noise reduction only: [ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL] usually follows within
- * seconds and still reloads. What keeps such a reload off the idle page on screen is
- * [com.glance.dashboard.IdleMaintenanceReload].
+ * power-event receivers, so none of them reloads, not even
+ * [ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL]. On a 3 GB tablet that level arrived 33-74
+ * times a day; none of its 80 reloads over 62 hours lowered the native heap, and each one restarted
+ * every dashboard. Only [ComponentCallbacks2.TRIM_MEMORY_MODERATE] and above, which mean the
+ * process itself is on the low-memory killer's list, still reload.
  */
 object MemoryTrimPolicy {
 
@@ -19,7 +19,6 @@ object MemoryTrimPolicy {
     // Android 15 deprecated the legacy trim levels for newer platform behavior.
     @Suppress("DEPRECATION")
     fun requiresReload(level: Int): Boolean {
-        return level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL ||
-            level >= ComponentCallbacks2.TRIM_MEMORY_MODERATE
+        return level >= ComponentCallbacks2.TRIM_MEMORY_MODERATE
     }
 }

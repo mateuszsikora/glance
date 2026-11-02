@@ -9,11 +9,14 @@ import org.junit.Test
 class MemoryTrimPolicyTest {
 
     @Test
-    fun deviceWideLowMemoryDoesNotReloadPages() {
+    fun deviceWideRunningLevelsDoNotReloadPages() {
         // Sent to the foreground app on every charger connection on small tablets.
         assertFalse(MemoryTrimPolicy.requiresReload(ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW))
         assertFalse(
             MemoryTrimPolicy.requiresReload(ComponentCallbacks2.TRIM_MEMORY_RUNNING_MODERATE)
+        )
+        assertFalse(
+            MemoryTrimPolicy.requiresReload(ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL)
         )
     }
 
@@ -24,10 +27,7 @@ class MemoryTrimPolicyTest {
     }
 
     @Test
-    fun criticalAndProcessThreateningLevelsReloadPages() {
-        assertTrue(
-            MemoryTrimPolicy.requiresReload(ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL)
-        )
+    fun processThreateningLevelsReloadPages() {
         assertTrue(MemoryTrimPolicy.requiresReload(ComponentCallbacks2.TRIM_MEMORY_MODERATE))
         assertTrue(MemoryTrimPolicy.requiresReload(ComponentCallbacks2.TRIM_MEMORY_COMPLETE))
     }
