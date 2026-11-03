@@ -109,6 +109,7 @@ class ColdStartGateTest {
         val gate = ColdStartGate(start)
         gate.at(1_000, pressure = true)
 
+        // MainActivity does not report the old Activity's onStop as a stop during a recreation.
         gate.onLaunch(start + MAX_MEMORY_WAIT_MS - 1_000)
 
         assertEquals(

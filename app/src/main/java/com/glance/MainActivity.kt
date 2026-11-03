@@ -235,8 +235,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onStop() {
-        // onStart replaces any pending check, which would then never see the stop.
-        coldStart?.gate?.onStopped()
+        // onStart replaces any pending check, which would then never see the stop. A recreation
+        // is not a stop: the new Activity inherits the gate and its time limit.
+        if (!isChangingConfigurations) coldStart?.gate?.onStopped()
         if (::brightnessController.isInitialized) {
             brightnessController.stop()
         }
