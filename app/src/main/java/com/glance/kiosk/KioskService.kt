@@ -33,6 +33,7 @@ import com.glance.screen.PowerWakePolicy
 import com.glance.screen.ScheduleManager
 import com.glance.update.UpdateChecker
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Foreground owner of all control-plane work: MQTT, screen commands and scheduling.
@@ -129,6 +130,7 @@ class KioskService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        startCommandsHandled.incrementAndGet()
         startForeground(NOTIFICATION_ID, buildNotification())
         if (config.isKioskSuspended) {
             Log.i(TAG, "Kiosk is suspended; ignoring service start")
@@ -663,6 +665,9 @@ class KioskService : Service() {
         const val EXTRA_SCREEN_ON = "screen_on"
         /** False when the Activity merely observed the screen state rather than changing it. */
         const val EXTRA_DELIBERATE = "deliberate"
+
+        /** Start commands run in this process; the first dashboard WebView waits for its own. */
+        internal val startCommandsHandled = AtomicInteger()
 
         /** Set by a starter that opens the dashboard itself, so the service does not open it too. */
         const val EXTRA_DASHBOARD_LAUNCHED = "dashboard_launched"

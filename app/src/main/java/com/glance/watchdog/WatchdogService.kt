@@ -18,6 +18,7 @@ import com.glance.R
 import com.glance.diagnostics.Diagnostics
 import com.glance.update.UpdateChecker
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Foreground service monitoring WebView health and app stability.
@@ -42,6 +43,7 @@ class WatchdogService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        startCommandsHandled.incrementAndGet()
         startForeground(NOTIFICATION_ID, buildNotification())
         if (GlanceApp.instance.appConfig.isKioskSuspended) {
             Log.i(TAG, "Kiosk is suspended; stopping watchdog")
@@ -279,6 +281,9 @@ class WatchdogService : Service() {
         private const val UPDATE_CHECK_INITIAL_DELAY_MS = 16 * 60 * 1000L
         private const val UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000L
         private const val MEMORY_SAMPLE_INTERVAL_MS = 5 * 60 * 1000L
+
+        /** Start commands run in this process; the first dashboard WebView waits for its own. */
+        internal val startCommandsHandled = AtomicInteger()
 
         const val ACTION_RELOAD_WEBVIEW = "com.glance.ACTION_RELOAD_WEBVIEW"
         const val ACTION_HEALTH_CHECK = "com.glance.ACTION_HEALTH_CHECK"

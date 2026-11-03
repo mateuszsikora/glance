@@ -1,5 +1,6 @@
 package com.glance
 
+import android.app.ActivityManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -22,8 +23,10 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.glance.brightness.BrightnessController
 import com.glance.content.ContentSchedulePolicy
 import com.glance.content.IdleTimeoutTracker
+import com.glance.dashboard.ColdStartGate
 import com.glance.dashboard.DashboardPagerAdapter
 import com.glance.dashboard.IdleMaintenanceReload
+import com.glance.dashboard.MemoryPressure
 import com.glance.dashboard.WebViewFragment
 import com.glance.databinding.ActivityMainBinding
 import com.glance.diagnostics.Diagnostics
@@ -38,6 +41,7 @@ import com.glance.settings.SettingsActivity
 import com.glance.watchdog.WatchdogService
 import com.glance.watchdog.WebViewHealthChecker
 import com.glance.watchdog.WebViewReachabilityChecker
+import java.io.File
 import java.time.LocalDateTime
 
 class MainActivity : AppCompatActivity() {
@@ -70,6 +74,12 @@ class MainActivity : AppCompatActivity() {
     private var consumeIdleDismissGesture = false
     private var idleTimeoutTracker: IdleTimeoutTracker? = null
     private var lastUserActivityElapsedMs: Long? = null
+
+    /** Set until the first dashboard WebView of this process may be created. */
+    private var coldStart: ColdStart? = null
+    private var savedStateDiscarded = false
+
+    private val coldStartRunnable = Runnable { checkColdStart() }
 
     private val contentScheduleRunnable = object : Runnable {
         override fun run() {
@@ -155,7 +165,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
+        val coldWebView = !ColdStartGate.webViewStarted
+        // Fragments restored from the previous process would create their WebViews in onStart,
+        // before the cold start gate could hold them back. A kiosk dashboard restores nothing.
+        savedStateDiscarded = coldWebView && savedInstanceState != null
+        super.onCreate(if (coldWebView) null else savedInstanceState)
+        // Before the lock task request and the service starts, whose handling it waits for.
+        if (coldWebView) coldStart = ColdStart(SystemClock.elapsedRealtime())
 
         // An explicit launch is the opt-in path back into kiosk mode after "Exit Kiosk Mode".
         GlanceApp.instance.appConfig.isKioskSuspended = false
@@ -188,6 +204,11 @@ class MainActivity : AppCompatActivity() {
         scheduleNextContentCheck()
         scheduleAutoRotate()
         recordUserActivity()
+    }
+
+    override fun onRestoreInstanceState(savedInstanceState: Bundle) {
+        // Would hand the pager the state of fragments that onCreate did not restore.
+        if (!savedStateDiscarded) super.onRestoreInstanceState(savedInstanceState)
     }
 
     override fun onPause() {
@@ -242,8 +263,12 @@ class MainActivity : AppCompatActivity() {
                 stayAwakeWhilePlugged = GlanceApp.instance.appConfig.requestedScreenOn
             )
 
+            val enteringLockTask = getSystemService(ActivityManager::class.java)
+                .lockTaskModeState == ActivityManager.LOCK_TASK_MODE_NONE
             try {
                 startLockTask()
+                // A task still locked from the previous process gets no broadcast.
+                coldStart?.work?.lockTaskBroadcastExpected = enteringLockTask
                 Log.i(TAG, "LockTask mode started")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start LockTask", e)
@@ -257,6 +282,10 @@ class MainActivity : AppCompatActivity() {
     // --- Dashboard setup ---
 
     private fun setupDashboard() {
+        if (coldStart != null) {
+            handler.postDelayed(coldStartRunnable, ColdStartGate.START_WORK_POLL_MS)
+            return
+        }
         val config = GlanceApp.instance.appConfig
         val urls = ContentSchedulePolicy.activeUrls(
             now = LocalDateTime.now(),
@@ -265,6 +294,41 @@ class MainActivity : AppCompatActivity() {
             profiles = config.contentProfiles
         )
         installDashboardUrls(urls)
+    }
+
+    /** Holds back the first WebView of this process; see [ColdStartGate]. */
+    private fun checkColdStart() {
+        val pending = coldStart ?: return
+        val now = SystemClock.elapsedRealtime()
+        var reading: MemoryPressure.Reading? = null
+        val decision = pending.gate.check(now, pending.work.settled) {
+            pending.pressure.read(now).also { reading = it }.high
+        }
+        when (decision) {
+            is ColdStartGate.Decision.WaitForStartWork -> {
+                handler.postDelayed(coldStartRunnable, decision.delayMs)
+            }
+            is ColdStartGate.Decision.WaitForMemory -> {
+                val message = "First dashboard page held back while memory is short " +
+                    "($reading); next check in ${decision.delayMs / 1000} s"
+                Log.w(TAG, message)
+                Diagnostics.record(message, includeMemory = !pending.heldForMemory)
+                pending.heldForMemory = true
+                handler.postDelayed(coldStartRunnable, decision.delayMs)
+            }
+            is ColdStartGate.Decision.Open -> {
+                coldStart = null
+                ColdStartGate.webViewStarted = true
+                val message = "Creating the first dashboard page after " +
+                    "${(now - pending.createdAtMs) / 1000} s" +
+                    (if (decision.gaveUp) ", no longer waiting" else "") + " ($reading)"
+                Log.i(TAG, message)
+                Diagnostics.record(message, includeMemory = pending.heldForMemory)
+                setupDashboard()
+                // The idle timeout counts from the dashboard appearing, not from the black screen.
+                recordUserActivity()
+            }
+        }
     }
 
     private fun installDashboardUrls(urls: List<String>) {
@@ -290,7 +354,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun applyActiveContentProfile() {
-        if (!::binding.isInitialized) return
+        if (!::binding.isInitialized || coldStart != null) return
         val config = GlanceApp.instance.appConfig
         installDashboardUrls(
             ContentSchedulePolicy.activeUrls(
@@ -447,6 +511,7 @@ class MainActivity : AppCompatActivity() {
     private fun showIdleScreen() {
         val config = GlanceApp.instance.appConfig
         if (idleScreenActive ||
+            coldStart != null ||
             !dashboardResumed ||
             !config.idleScreenEnabled ||
             config.idleScreenUrl.isBlank() ||
@@ -714,6 +779,40 @@ class MainActivity : AppCompatActivity() {
         if (::brightnessController.isInitialized) brightnessController.stop()
         if (::screenController.isInitialized) screenController.release()
         super.onDestroy()
+    }
+
+    private inner class ColdStart(val createdAtMs: Long) {
+        val gate = ColdStartGate(createdAtMs)
+        val work = LaunchWork()
+        val pressure = MemoryPressure(
+            lowMemory = {
+                ActivityManager.MemoryInfo()
+                    .also { getSystemService(ActivityManager::class.java).getMemoryInfo(it) }
+                    .lowMemory
+            },
+            swapIns = {
+                runCatching { MemoryPressure.swapIns(File("/proc/vmstat").readText()) }.getOrNull()
+            },
+            nowMs = createdAtMs
+        )
+        var heldForMemory = false
+    }
+
+    /**
+     * Main-thread work with an ANR deadline that this launch queues: the start commands of both
+     * services and the admin receiver's lock task broadcast. Each handler counts its own runs.
+     */
+    private class LaunchWork {
+        private val kioskStarts = KioskService.startCommandsHandled.get()
+        private val watchdogStarts = WatchdogService.startCommandsHandled.get()
+        private val lockTaskEntries = AdminReceiver.lockTaskEntriesHandled.get()
+        var lockTaskBroadcastExpected = false
+
+        val settled: Boolean
+            get() = KioskService.startCommandsHandled.get() > kioskStarts &&
+                WatchdogService.startCommandsHandled.get() > watchdogStarts &&
+                (!lockTaskBroadcastExpected ||
+                    AdminReceiver.lockTaskEntriesHandled.get() > lockTaskEntries)
     }
 
     companion object {
