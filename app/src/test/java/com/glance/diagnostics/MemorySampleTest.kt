@@ -40,6 +40,15 @@ class MemorySampleTest {
     }
 
     @Test
+    fun readsSwapInsFromZramStatistics() {
+        val stat = " 2945774        0 23566192     4004  3779348        0 30234784    51200" +
+            "        0    20500    55204\n"
+
+        assertEquals(2945774L, MemorySample.zramSwapIns(stat))
+        assertNull(MemorySample.zramSwapIns(""))
+    }
+
+    @Test
     fun swapInRateIsPagesPerSecondBetweenTwoReadings() {
         assertEquals(1_500L, MemorySample.swapInRate(10_000L, 13_000L, elapsedMs = 2_000L))
         assertNull(MemorySample.swapInRate(null, 13_000L, elapsedMs = 2_000L))

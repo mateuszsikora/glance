@@ -849,7 +849,7 @@ class MainActivity : AppCompatActivity() {
         if (!swapInsUnreadableRecorded) {
             swapInsUnreadableRecorded = true
             // Without it the gate relies on the low-memory flag alone.
-            val message = "Swap-in rate unavailable (${e.javaClass.simpleName} reading /proc/vmstat)"
+            val message = "Swap-in rate unavailable (${e.javaClass.simpleName})"
             Log.w(TAG, message, e)
             Diagnostics.record(message)
         }

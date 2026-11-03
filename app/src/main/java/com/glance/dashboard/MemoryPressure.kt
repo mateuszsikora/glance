@@ -4,18 +4,20 @@ import com.glance.diagnostics.MemorySample
 
 /**
  * Whether the system is short of memory: Android's low-memory flag is set, or pages are coming
- * back from swap faster than [SWAP_IN_LIMIT_PAGES_PER_S]. The flag follows free memory only; a
- * tablet swapping to zram can thrash, with kswapd taking half a CPU, while it is still clear.
+ * back from swap faster than [SWAP_IN_LIMIT_PAGES_PER_S]. The flag alone is not enough: on a 3 GB
+ * tablet it stayed clear in all 5,026 journal samples over 18 days, including every low-memory
+ * kill, and through a forced thrash with kswapd above half a CPU. There the swap-in rate is what
+ * tells the two states apart; binder latency, main-thread lateness and the trim level did not.
  *
  * The swap-in rate is measured from the newest mark at least [WINDOW_MS] before the reading,
  * or the oldest one when none is that old, so that a long wait between two checks neither holds
  * on to a burst that ended long ago nor dilutes one that has just begun. A caller that reads after
  * a long pause calls [startWindow] [WINDOW_MS] before the reading; one that polls calls [mark] on
- * every poll. The rate is unknown when the `pswpin` counter cannot be read.
+ * every poll. The rate is unknown when the swap-in counter cannot be read.
  */
 class MemoryPressure(
     private val lowMemory: () -> Boolean,
-    /** The `pswpin` counter of `/proc/vmstat`: pages swapped in since boot. */
+    /** Pages swapped in since boot; see [MemorySample.readSwapIns]. */
     private val swapIns: () -> Long?,
     nowMs: Long
 ) {
@@ -28,7 +30,7 @@ class MemoryPressure(
             "low=${if (lowMemory) "yes" else "no"} swapIn=${swapInPagesPerSecond ?: "?"}/s"
     }
 
-    /** When each mark was taken and the `pswpin` counter then, oldest first. */
+    /** When each mark was taken and the swap-in counter then, oldest first. */
     private val marks = ArrayDeque<Pair<Long, Long?>>().apply { addLast(nowMs to swapIns()) }
 
     /** Adds a possible start for the window the next [read] measures. */
@@ -59,7 +61,10 @@ class MemoryPressure(
     }
 
     companion object {
-        /** About 4 MB/s with 4 KiB pages: far more than a settled tablet moves back from swap. */
+        /**
+         * About 4 MB/s with 4 KiB pages. The 3 GB test tablet moved up to 190 pages a second while
+         * settled and 9,000-25,000 during a forced thrash.
+         */
         const val SWAP_IN_LIMIT_PAGES_PER_S = 1_000L
         const val WINDOW_MS = 1_000L
     }
