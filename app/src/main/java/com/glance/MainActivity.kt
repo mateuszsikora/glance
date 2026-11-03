@@ -109,6 +109,10 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private val delayedIdleReloadRunnable = Runnable {
+        if (idleMaintenanceReload.onDelayElapsed()) reloadDeferredIdlePage()
+    }
+
     private val reloadReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == WatchdogService.ACTION_RELOAD_WEBVIEW) {
@@ -191,7 +195,7 @@ class MainActivity : AppCompatActivity() {
         handler.removeCallbacks(contentScheduleRunnable)
         handler.removeCallbacks(autoRotateRunnable)
         handler.removeCallbacks(idleTimeoutRunnable)
-        hideIdleScreen(resetTimer = false)
+        hideIdleScreen(byTouch = false)
         super.onPause()
     }
 
@@ -361,7 +365,7 @@ class MainActivity : AppCompatActivity() {
                     recordUserActivity()
                 } else {
                     handler.removeCallbacks(idleTimeoutRunnable)
-                    hideIdleScreen(resetTimer = false)
+                    hideIdleScreen(byTouch = false)
                 }
             }
         })
@@ -384,7 +388,7 @@ class MainActivity : AppCompatActivity() {
                 .commitNow()
         }
         binding.idleScreenTouchOverlay.setOnClickListener {
-            hideIdleScreen(resetTimer = true)
+            hideIdleScreen(byTouch = true)
         }
         if (!config.idleScreenEnabled || config.idleScreenUrl.isBlank()) return
 
@@ -395,7 +399,7 @@ class MainActivity : AppCompatActivity() {
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_DOWN && idleScreenActive) {
             consumeIdleDismissGesture = true
-            hideIdleScreen(resetTimer = true)
+            hideIdleScreen(byTouch = true)
         }
 
         if (consumeIdleDismissGesture) {
@@ -472,27 +476,49 @@ class MainActivity : AppCompatActivity() {
             Diagnostics.record("Idle page created")
         }
         idleScreenActive = true
+        handler.removeCallbacks(delayedIdleReloadRunnable)
+        idleMaintenanceReload.onIdleShown()
         binding.idleScreenLayer.visibility = View.VISIBLE
         idleScreenFragment()?.setWebContentPaused(false)
         Log.i(TAG, "Idle screen shown")
         Diagnostics.record("Idle screen shown")
     }
 
-    private fun hideIdleScreen(resetTimer: Boolean) {
+    /** @param byTouch false for the screen turning off or the Activity pausing. */
+    private fun hideIdleScreen(byTouch: Boolean) {
         if (idleScreenActive) {
             idleScreenFragment()?.setWebContentPaused(true)
             binding.idleScreenLayer.visibility = View.GONE
             idleScreenActive = false
-            if (idleMaintenanceReload.onIdleHidden()) {
-                Log.i(TAG, "Running the idle page reload deferred during playback")
-                Diagnostics.record("Running the idle page reload deferred during playback")
-                idleScreenFragment()?.reload()
-            }
             applyActiveContentProfile()
             Log.i(TAG, "Idle screen hidden")
             Diagnostics.record("Idle screen hidden")
         }
-        if (resetTimer) recordUserActivity()
+        // Also when already hidden: screen-off or pause runs a touch dismissal's delayed reload.
+        when (idleMaintenanceReload.onIdleHidden(byTouch)) {
+            IdleMaintenanceReload.Action.NONE -> Unit
+            IdleMaintenanceReload.Action.RELOAD_NOW -> {
+                handler.removeCallbacks(delayedIdleReloadRunnable)
+                reloadDeferredIdlePage()
+            }
+            IdleMaintenanceReload.Action.RELOAD_AFTER_DELAY -> {
+                // A stale runnable left by a settled request must not cut this delay short.
+                handler.removeCallbacks(delayedIdleReloadRunnable)
+                val delayMs = IdleMaintenanceReload.TOUCH_DISMISS_DELAY_MS
+                handler.postDelayed(delayedIdleReloadRunnable, delayMs)
+                val message =
+                    "Idle page reload deferred during playback runs in ${delayMs / 1000} s"
+                Log.i(TAG, message)
+                Diagnostics.record(message)
+            }
+        }
+        if (byTouch) recordUserActivity()
+    }
+
+    private fun reloadDeferredIdlePage() {
+        Log.i(TAG, "Running the idle page reload deferred during playback")
+        Diagnostics.record("Running the idle page reload deferred during playback")
+        idleScreenFragment()?.reload()
     }
 
     // --- Reload WebViews ---
