@@ -235,6 +235,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onStop() {
+        // onStart replaces any pending check, which would then never see the stop.
+        coldStart?.gate?.onStopped()
         if (::brightnessController.isInitialized) {
             brightnessController.stop()
         }

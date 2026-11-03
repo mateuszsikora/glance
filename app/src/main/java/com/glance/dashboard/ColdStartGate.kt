@@ -44,6 +44,11 @@ class ColdStartGate(val createdAtMs: Long) {
         startWorkTimedOut = false
     }
 
+    /** The Activity stopped; the memory time limit starts over at its next check while started. */
+    fun onStopped() {
+        stopped = true
+    }
+
     /** @param memoryPressure asked only once the Activity is started and the start work settled. */
     fun check(
         nowMs: Long,
@@ -52,7 +57,7 @@ class ColdStartGate(val createdAtMs: Long) {
         memoryPressure: () -> Boolean
     ): Decision {
         if (!started) {
-            stopped = true
+            onStopped()
             return Decision.WaitForStart
         }
         if (stopped) {

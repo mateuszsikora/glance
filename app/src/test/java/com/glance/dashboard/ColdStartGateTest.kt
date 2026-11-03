@@ -129,6 +129,20 @@ class ColdStartGateTest {
     }
 
     @Test
+    fun stopBetweenTwoChecksAlsoRestartsTheTimeLimit() {
+        val gate = ColdStartGate(start)
+        gate.at(1_000, pressure = true)
+
+        // Stopped and started again before any check ran.
+        gate.onStopped()
+
+        assertEquals(
+            Decision.WaitForMemory(2_000L),
+            gate.at(MAX_MEMORY_WAIT_MS - 500L, pressure = true)
+        )
+    }
+
+    @Test
     fun timeLimitStartsOverOnceAStoppedActivityStartsAgain() {
         val gate = ColdStartGate(start)
         gate.at(1_000, pressure = true)
