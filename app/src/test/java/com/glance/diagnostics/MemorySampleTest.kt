@@ -41,7 +41,7 @@ class MemorySampleTest {
 
     @Test
     fun readsSwapInsFromZramStatistics() {
-        val stat = " 2945774        0 23566192     4004  3779348        0 30234784    51200" +
+        val stat = "     123        0 23566192     4004  3779348        0 30234784    51200" +
             "        0    20500    55204\n"
 
         assertEquals(2945774L, MemorySample.zramSwapIns(stat))
