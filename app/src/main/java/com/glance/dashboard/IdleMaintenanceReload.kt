@@ -25,14 +25,14 @@ class IdleMaintenanceReload {
      * Records a maintenance reload request.
      *
      * @return true when the idle page may be reloaded right away, false when the reload has been
-     * deferred until [onIdleHidden].
+     * deferred until [onIdleHidden] (and, after a touch dismissal, [onDelayElapsed]).
      */
     fun onMaintenanceReload(idleOnScreen: Boolean): Boolean {
         state = if (idleOnScreen) State.DEFERRED else State.NONE
         return !idleOnScreen
     }
 
-    /** Playback resumes; a delayed reload that has not run yet goes back to waiting for dismissal. */
+    /** Playback resumes; a delayed reload that has not run yet waits for dismissal again. */
     fun onIdleShown() {
         if (state == State.DELAYED) state = State.DEFERRED
     }

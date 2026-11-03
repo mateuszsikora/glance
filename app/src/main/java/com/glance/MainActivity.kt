@@ -502,11 +502,14 @@ class MainActivity : AppCompatActivity() {
                 reloadDeferredIdlePage()
             }
             IdleMaintenanceReload.Action.RELOAD_AFTER_DELAY -> {
-                handler.postDelayed(
-                    delayedIdleReloadRunnable,
-                    IdleMaintenanceReload.TOUCH_DISMISS_DELAY_MS
-                )
-                Diagnostics.record("Idle page reload deferred during playback runs after a delay")
+                // A stale runnable left by a settled request must not cut this delay short.
+                handler.removeCallbacks(delayedIdleReloadRunnable)
+                val delayMs = IdleMaintenanceReload.TOUCH_DISMISS_DELAY_MS
+                handler.postDelayed(delayedIdleReloadRunnable, delayMs)
+                val message =
+                    "Idle page reload deferred during playback runs in ${delayMs / 1000} s"
+                Log.i(TAG, message)
+                Diagnostics.record(message)
             }
         }
         if (byTouch) recordUserActivity()
