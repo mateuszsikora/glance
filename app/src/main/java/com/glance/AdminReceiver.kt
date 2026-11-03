@@ -34,7 +34,7 @@ class AdminReceiver : DeviceAdminReceiver() {
     companion object {
         private const val TAG = "AdminReceiver"
 
-        /** Lock task broadcasts run in this process; the first dashboard WebView waits for its own. */
+        /** Lock task entries handled in this process; see [com.glance.dashboard.LaunchWork]. */
         internal val lockTaskEntriesHandled = AtomicInteger()
 
         fun getComponentName(context: Context): ComponentName {

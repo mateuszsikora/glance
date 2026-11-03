@@ -10,6 +10,17 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
+    <!-- Shown while the first dashboard page waits for the system to free memory. -->
+    <TextView
+        android:id="@+id/cold_start_status"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:text="@string/cold_start_waiting_for_memory"
+        android:textColor="#AAAAAA"
+        android:textSize="14sp"
+        android:visibility="gone" />
+
     <!-- Tap overlay for settings gesture (5x tap) -->
     <View
         android:id="@+id/settings_tap_overlay"

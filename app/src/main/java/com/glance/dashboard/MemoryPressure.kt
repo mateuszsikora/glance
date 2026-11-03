@@ -1,12 +1,16 @@
 package com.glance.dashboard
 
+import com.glance.diagnostics.MemorySample
+
 /**
  * Whether the system is short of memory: Android's low-memory flag is set, or pages are coming
  * back from swap faster than [SWAP_IN_LIMIT_PAGES_PER_S]. The flag follows free memory only; a
  * tablet swapping to zram can thrash, with kswapd taking half a CPU, while it is still clear.
  *
- * The swap-in rate is measured between two readings, so the first one after construction covers
- * the time since then. It is unknown when `/proc/vmstat` cannot be read.
+ * The swap-in rate is the average since the last [mark] or [read], or since construction. A
+ * caller marks [WINDOW_MS] before it reads, so that a long wait between two checks neither
+ * holds on to a burst that ended long ago nor dilutes one that has just begun. The rate is
+ * unknown when the `pswpin` counter cannot be read.
  */
 class MemoryPressure(
     private val lowMemory: () -> Boolean,
@@ -23,32 +27,26 @@ class MemoryPressure(
             "low=${if (lowMemory) "yes" else "no"} swapIn=${swapInPagesPerSecond ?: "?"}/s"
     }
 
-    private var lastSwapIns: Long? = swapIns()
-    private var lastAtMs = nowMs
+    private var baseline: Long? = swapIns()
+    private var baselineAtMs = nowMs
+
+    /** Starts the window the next [read] measures. */
+    fun mark(nowMs: Long) {
+        baseline = swapIns()
+        baselineAtMs = nowMs
+    }
 
     fun read(nowMs: Long): Reading {
         val swapIns = swapIns()
-        val previous = lastSwapIns
-        val elapsedMs = nowMs - lastAtMs
-        val rate = if (swapIns != null && previous != null && swapIns >= previous && elapsedMs > 0) {
-            (swapIns - previous) * 1000L / elapsedMs
-        } else {
-            null
-        }
-        lastSwapIns = swapIns
-        lastAtMs = nowMs
+        val rate = MemorySample.swapInRate(baseline, swapIns, nowMs - baselineAtMs)
+        baseline = swapIns
+        baselineAtMs = nowMs
         return Reading(lowMemory = lowMemory(), swapInPagesPerSecond = rate)
     }
 
     companion object {
         /** About 4 MB/s with 4 KiB pages: far more than a settled tablet moves back from swap. */
         const val SWAP_IN_LIMIT_PAGES_PER_S = 1_000L
-
-        /** @return the `pswpin` counter, or null when [vmstat] lacks it. */
-        fun swapIns(vmstat: String): Long? = vmstat.lineSequence()
-            .firstOrNull { it.startsWith("pswpin ") }
-            ?.substringAfter(' ')
-            ?.trim()
-            ?.toLongOrNull()
+        const val WINDOW_MS = 1_000L
     }
 }

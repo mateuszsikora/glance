@@ -20,16 +20,19 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
 import com.glance.brightness.BrightnessController
 import com.glance.content.ContentSchedulePolicy
 import com.glance.content.IdleTimeoutTracker
 import com.glance.dashboard.ColdStartGate
 import com.glance.dashboard.DashboardPagerAdapter
 import com.glance.dashboard.IdleMaintenanceReload
+import com.glance.dashboard.LaunchWork
 import com.glance.dashboard.MemoryPressure
 import com.glance.dashboard.WebViewFragment
 import com.glance.databinding.ActivityMainBinding
 import com.glance.diagnostics.Diagnostics
+import com.glance.diagnostics.MemorySample
 import com.glance.kiosk.AppRestarter
 import com.glance.kiosk.KioskService
 import com.glance.kiosk.LockTaskHelper
@@ -41,7 +44,6 @@ import com.glance.settings.SettingsActivity
 import com.glance.watchdog.WatchdogService
 import com.glance.watchdog.WebViewHealthChecker
 import com.glance.watchdog.WebViewReachabilityChecker
-import java.io.File
 import java.time.LocalDateTime
 
 class MainActivity : AppCompatActivity() {
@@ -80,6 +82,9 @@ class MainActivity : AppCompatActivity() {
     private var savedStateDiscarded = false
 
     private val coldStartRunnable = Runnable { checkColdStart() }
+    private val coldStartMarkRunnable = Runnable {
+        coldStart?.pressure?.mark(SystemClock.elapsedRealtime())
+    }
 
     private val contentScheduleRunnable = object : Runnable {
         override fun run() {
@@ -222,6 +227,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        // A stopped Activity lays nothing out, so the gate waits for this.
+        if (coldStart != null) scheduleColdStartCheck(0L, measureMemory = true)
         if (::brightnessController.isInitialized) {
             brightnessController.start(window)
         }
@@ -282,10 +289,8 @@ class MainActivity : AppCompatActivity() {
     // --- Dashboard setup ---
 
     private fun setupDashboard() {
-        if (coldStart != null) {
-            handler.postDelayed(coldStartRunnable, ColdStartGate.START_WORK_POLL_MS)
-            return
-        }
+        // onStart begins the checks.
+        if (coldStart != null) return
         val config = GlanceApp.instance.appConfig
         val urls = ContentSchedulePolicy.activeUrls(
             now = LocalDateTime.now(),
@@ -301,12 +306,17 @@ class MainActivity : AppCompatActivity() {
         val pending = coldStart ?: return
         val now = SystemClock.elapsedRealtime()
         var reading: MemoryPressure.Reading? = null
-        val decision = pending.gate.check(now, pending.work.settled) {
+        val decision = pending.gate.check(
+            nowMs = now,
+            started = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED),
+            startWorkSettled = pending.work.settled
+        ) {
             pending.pressure.read(now).also { reading = it }.high
         }
         when (decision) {
+            ColdStartGate.Decision.WaitForStart -> Unit
             is ColdStartGate.Decision.WaitForStartWork -> {
-                handler.postDelayed(coldStartRunnable, decision.delayMs)
+                scheduleColdStartCheck(decision.delayMs, measureMemory = false)
             }
             is ColdStartGate.Decision.WaitForMemory -> {
                 val message = "First dashboard page held back while memory is short " +
@@ -314,13 +324,15 @@ class MainActivity : AppCompatActivity() {
                 Log.w(TAG, message)
                 Diagnostics.record(message, includeMemory = !pending.heldForMemory)
                 pending.heldForMemory = true
-                handler.postDelayed(coldStartRunnable, decision.delayMs)
+                binding.coldStartStatus.visibility = View.VISIBLE
+                scheduleColdStartCheck(decision.delayMs, measureMemory = true)
             }
             is ColdStartGate.Decision.Open -> {
                 coldStart = null
-                ColdStartGate.webViewStarted = true
+                pendingColdStartGate = null
+                binding.coldStartStatus.visibility = View.GONE
                 val message = "Creating the first dashboard page after " +
-                    "${(now - pending.createdAtMs) / 1000} s" +
+                    "${(now - pending.gate.createdAtMs) / 1000} s" +
                     (if (decision.gaveUp) ", no longer waiting" else "") + " ($reading)"
                 Log.i(TAG, message)
                 Diagnostics.record(message, includeMemory = pending.heldForMemory)
@@ -329,6 +341,22 @@ class MainActivity : AppCompatActivity() {
                 recordUserActivity()
             }
         }
+    }
+
+    /**
+     * @param measureMemory the check may read memory pressure, so the swap-in window starts
+     * [MemoryPressure.WINDOW_MS] before it, which also delays it by at least that much.
+     */
+    private fun scheduleColdStartCheck(delayMs: Long, measureMemory: Boolean) {
+        handler.removeCallbacks(coldStartMarkRunnable)
+        handler.removeCallbacks(coldStartRunnable)
+        if (!measureMemory) {
+            handler.postDelayed(coldStartRunnable, delayMs)
+            return
+        }
+        val checkDelayMs = maxOf(delayMs, MemoryPressure.WINDOW_MS)
+        handler.postDelayed(coldStartMarkRunnable, checkDelayMs - MemoryPressure.WINDOW_MS)
+        handler.postDelayed(coldStartRunnable, checkDelayMs)
     }
 
     private fun installDashboardUrls(urls: List<String>) {
@@ -750,8 +778,13 @@ class MainActivity : AppCompatActivity() {
     // --- Services ---
 
     private fun startServices() {
-        ServiceStarter.startFromForeground(this, Intent(this, KioskService::class.java))
-        ServiceStarter.startFromForeground(this, Intent(this, WatchdogService::class.java))
+        val token = coldStart?.work?.token ?: 0
+        listOf(KioskService::class.java, WatchdogService::class.java).forEach { service ->
+            ServiceStarter.startFromForeground(
+                this,
+                Intent(this, service).putExtra(LaunchWork.EXTRA_LAUNCH_TOKEN, token)
+            )
+        }
     }
 
     // --- Block back button ---
@@ -766,6 +799,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         liveInstances.decrementAndGet()
+        // Only a recreation takes over the wait; a later launch starts its own time limit.
+        if (isFinishing) pendingColdStartGate = null
         handler.removeCallbacksAndMessages(null)
         webViewHealthChecker.reset()
         webViewReachabilityChecker.destroy()
@@ -781,43 +816,48 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
-    private inner class ColdStart(val createdAtMs: Long) {
-        val gate = ColdStartGate(createdAtMs)
-        val work = LaunchWork()
+    private inner class ColdStart(nowMs: Long) {
+        // A recreation during the wait keeps the process's gate and its time limit.
+        val gate = pendingColdStartGate?.also { it.onLaunch(nowMs) }
+            ?: ColdStartGate(nowMs).also { pendingColdStartGate = it }
+        val work = LaunchWork(
+            token = LaunchWork.nextToken(),
+            kioskTokenHandled = KioskService.launchTokenHandled::get,
+            watchdogTokenHandled = WatchdogService.launchTokenHandled::get,
+            lockTaskEntries = AdminReceiver.lockTaskEntriesHandled::get
+        )
         val pressure = MemoryPressure(
             lowMemory = {
                 ActivityManager.MemoryInfo()
                     .also { getSystemService(ActivityManager::class.java).getMemoryInfo(it) }
                     .lowMemory
             },
-            swapIns = {
-                runCatching { MemoryPressure.swapIns(File("/proc/vmstat").readText()) }.getOrNull()
-            },
-            nowMs = createdAtMs
+            swapIns = ::readSwapIns,
+            nowMs = nowMs
         )
         var heldForMemory = false
     }
 
-    /**
-     * Main-thread work with an ANR deadline that this launch queues: the start commands of both
-     * services and the admin receiver's lock task broadcast. Each handler counts its own runs.
-     */
-    private class LaunchWork {
-        private val kioskStarts = KioskService.startCommandsHandled.get()
-        private val watchdogStarts = WatchdogService.startCommandsHandled.get()
-        private val lockTaskEntries = AdminReceiver.lockTaskEntriesHandled.get()
-        var lockTaskBroadcastExpected = false
-
-        val settled: Boolean
-            get() = KioskService.startCommandsHandled.get() > kioskStarts &&
-                WatchdogService.startCommandsHandled.get() > watchdogStarts &&
-                (!lockTaskBroadcastExpected ||
-                    AdminReceiver.lockTaskEntriesHandled.get() > lockTaskEntries)
+    private fun readSwapIns(): Long? = try {
+        MemorySample.readSwapIns()
+    } catch (e: Exception) {
+        if (!swapInsUnreadableRecorded) {
+            swapInsUnreadableRecorded = true
+            // Without it the gate relies on the low-memory flag alone.
+            val message = "Swap-in rate unavailable (${e.javaClass.simpleName} reading /proc/vmstat)"
+            Log.w(TAG, message, e)
+            Diagnostics.record(message)
+        }
+        null
     }
 
     companion object {
         /** Dashboards alive in this process; a service restarted in a new process sees none. */
         internal val liveInstances = java.util.concurrent.atomic.AtomicInteger()
+
+        /** Outlives a recreation during the wait; see [ColdStartGate]. */
+        private var pendingColdStartGate: ColdStartGate? = null
+        private var swapInsUnreadableRecorded = false
         private const val TAG = "MainActivity"
         private const val TAPS_TO_SETTINGS = 5
         private const val TAP_TIMEOUT_MS = 2000L

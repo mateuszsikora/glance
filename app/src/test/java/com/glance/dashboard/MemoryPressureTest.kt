@@ -10,18 +10,6 @@ import org.junit.Test
 class MemoryPressureTest {
 
     @Test
-    fun readsTheSwapInCounter() {
-        val vmstat = "nr_free_pages 12345\npswpout 777\npswpin 4321\npgmajfault 99\n"
-
-        assertEquals(4321L, MemoryPressure.swapIns(vmstat))
-    }
-
-    @Test
-    fun swapInCounterIsUnknownWhenMissing() {
-        assertNull(MemoryPressure.swapIns("nr_free_pages 12345\npswpout 777\n"))
-    }
-
-    @Test
     fun measuresTheSwapInRateSinceThePreviousReading() {
         var counter = 10_000L
         val pressure = MemoryPressure(lowMemory = { false }, swapIns = { counter }, nowMs = 0L)
@@ -30,6 +18,19 @@ class MemoryPressureTest {
         assertEquals(1_500L, pressure.read(nowMs = 2_000L).swapInPagesPerSecond)
         counter += 100L
         assertEquals(50L, pressure.read(nowMs = 4_000L).swapInPagesPerSecond)
+    }
+
+    @Test
+    fun markLimitsTheRateToTheWindowBeforeTheReading() {
+        var counter = 0L
+        val pressure = MemoryPressure(lowMemory = { false }, swapIns = { counter }, nowMs = 0L)
+
+        // A burst long before the check must not hold the dashboard back.
+        counter += 60_000L
+        pressure.mark(nowMs = 29_000L)
+        counter += 200L
+
+        assertEquals(200L, pressure.read(nowMs = 30_000L).swapInPagesPerSecond)
     }
 
     @Test

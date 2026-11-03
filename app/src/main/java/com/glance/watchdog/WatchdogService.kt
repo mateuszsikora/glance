@@ -15,6 +15,7 @@ import androidx.core.app.NotificationCompat
 import com.glance.GlanceApp
 import com.glance.MainActivity
 import com.glance.R
+import com.glance.dashboard.LaunchWork
 import com.glance.diagnostics.Diagnostics
 import com.glance.update.UpdateChecker
 import java.util.concurrent.Executors
@@ -43,7 +44,10 @@ class WatchdogService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startCommandsHandled.incrementAndGet()
+        LaunchWork.recordHandled(
+            launchTokenHandled,
+            intent?.getIntExtra(LaunchWork.EXTRA_LAUNCH_TOKEN, 0) ?: 0
+        )
         startForeground(NOTIFICATION_ID, buildNotification())
         if (GlanceApp.instance.appConfig.isKioskSuspended) {
             Log.i(TAG, "Kiosk is suspended; stopping watchdog")
@@ -282,8 +286,8 @@ class WatchdogService : Service() {
         private const val UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000L
         private const val MEMORY_SAMPLE_INTERVAL_MS = 5 * 60 * 1000L
 
-        /** Start commands run in this process; the first dashboard WebView waits for its own. */
-        internal val startCommandsHandled = AtomicInteger()
+        /** The newest [LaunchWork] token this service has run in this process. */
+        internal val launchTokenHandled = AtomicInteger()
 
         const val ACTION_RELOAD_WEBVIEW = "com.glance.ACTION_RELOAD_WEBVIEW"
         const val ACTION_HEALTH_CHECK = "com.glance.ACTION_HEALTH_CHECK"

@@ -7,6 +7,7 @@
     <string name="notification_watchdog_running">Watchdog monitoring active</string>
     <string name="webview_error_title">Connection Error</string>
     <string name="webview_error_message">Unable to load dashboard. Retrying…</string>
+    <string name="cold_start_waiting_for_memory">Waiting for the system to free memory…</string>
     <string name="settings_title">Glance Settings</string>
     <string name="dashboard_urls_label">Dashboard URLs (one per line)</string>
     <string name="dashboard_allowed_origins_label">Allowed login origins (optional, one URL per line)</string>

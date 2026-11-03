@@ -22,6 +22,7 @@ import com.glance.R
 import com.glance.battery.BatteryMonitor
 import com.glance.battery.BatteryStatus
 import com.glance.config.AppConfig
+import com.glance.dashboard.LaunchWork
 import com.glance.diagnostics.Diagnostics
 import com.glance.maintenance.MaintenanceSettings
 import com.glance.maintenance.NightlyMaintenancePolicy
@@ -130,7 +131,10 @@ class KioskService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startCommandsHandled.incrementAndGet()
+        LaunchWork.recordHandled(
+            launchTokenHandled,
+            intent?.getIntExtra(LaunchWork.EXTRA_LAUNCH_TOKEN, 0) ?: 0
+        )
         startForeground(NOTIFICATION_ID, buildNotification())
         if (config.isKioskSuspended) {
             Log.i(TAG, "Kiosk is suspended; ignoring service start")
@@ -666,8 +670,8 @@ class KioskService : Service() {
         /** False when the Activity merely observed the screen state rather than changing it. */
         const val EXTRA_DELIBERATE = "deliberate"
 
-        /** Start commands run in this process; the first dashboard WebView waits for its own. */
-        internal val startCommandsHandled = AtomicInteger()
+        /** The newest [LaunchWork] token this service has run in this process. */
+        internal val launchTokenHandled = AtomicInteger()
 
         /** Set by a starter that opens the dashboard itself, so the service does not open it too. */
         const val EXTRA_DASHBOARD_LAUNCHED = "dashboard_launched"

@@ -12,11 +12,16 @@ class ColdStartGateTest {
 
     private val start = 1_000_000L
 
+    private fun ColdStartGate.at(
+        offsetMs: Long,
+        started: Boolean = true,
+        settled: Boolean = true,
+        pressure: Boolean = false
+    ): Decision = check(start + offsetMs, started, settled) { pressure }
+
     @Test
     fun opensOnceTheStartWorkHasRunOnAnUnstrainedSystem() {
-        val gate = ColdStartGate(start)
-
-        assertEquals(Decision.Open(gaveUp = false), gate.check(start + 200, true) { false })
+        assertEquals(Decision.Open(gaveUp = false), ColdStartGate(start).at(1_000))
     }
 
     @Test
@@ -24,7 +29,7 @@ class ColdStartGateTest {
         val gate = ColdStartGate(start)
         var memoryAsked = false
 
-        val decision = gate.check(start + 200, false) { memoryAsked = true; false }
+        val decision = gate.check(start + 1_000, true, false) { memoryAsked = true; false }
 
         assertEquals(Decision.WaitForStartWork(START_WORK_POLL_MS), decision)
         assertFalse(memoryAsked)
@@ -33,31 +38,39 @@ class ColdStartGateTest {
     @Test
     fun stopsWaitingForStartWorkThatNeverRuns() {
         val gate = ColdStartGate(start)
-        gate.check(start + START_WORK_TIMEOUT_MS - 1, false) { false }
+        gate.at(START_WORK_TIMEOUT_MS - 1, settled = false)
 
-        assertEquals(
-            Decision.Open(gaveUp = true),
-            gate.check(start + START_WORK_TIMEOUT_MS, false) { false }
-        )
+        assertEquals(Decision.Open(gaveUp = true), gate.at(START_WORK_TIMEOUT_MS, settled = false))
     }
 
     @Test
     fun startWorkThatTimedOutStillWaitsForMemory() {
-        val gate = ColdStartGate(start)
-
         assertEquals(
             Decision.WaitForMemory(2_000L),
-            gate.check(start + START_WORK_TIMEOUT_MS, false) { true }
+            ColdStartGate(start).at(START_WORK_TIMEOUT_MS, settled = false, pressure = true)
+        )
+    }
+
+    @Test
+    fun newActivityWaitsForItsOwnStartWork() {
+        val gate = ColdStartGate(start)
+        gate.at(START_WORK_TIMEOUT_MS, settled = false, pressure = true)
+
+        gate.onLaunch(start + 20_000)
+
+        assertEquals(
+            Decision.WaitForStartWork(START_WORK_POLL_MS),
+            gate.at(20_200, settled = false)
         )
     }
 
     @Test
     fun backsOffWhileMemoryIsShort() {
         val gate = ColdStartGate(start)
-        var now = start + 200
+        var offset = 1_000L
         val delays = List(7) {
-            val decision = gate.check(now, true) { true } as Decision.WaitForMemory
-            now += decision.delayMs
+            val decision = gate.at(offset, pressure = true) as Decision.WaitForMemory
+            offset += decision.delayMs
             decision.delayMs
         }
 
@@ -70,28 +83,62 @@ class ColdStartGateTest {
     @Test
     fun opensWhenMemoryRecovers() {
         val gate = ColdStartGate(start)
-        gate.check(start + 200, true) { true }
+        gate.at(1_000, pressure = true)
 
-        assertEquals(Decision.Open(gaveUp = false), gate.check(start + 2_200, true) { false })
+        assertEquals(Decision.Open(gaveUp = false), gate.at(3_000))
     }
 
     @Test
     fun lastMemoryWaitEndsAtTheLimit() {
-        val gate = ColdStartGate(start)
-
         assertEquals(
             Decision.WaitForMemory(1_000L),
-            gate.check(start + MAX_MEMORY_WAIT_MS - 1_000L, true) { true }
+            ColdStartGate(start).at(MAX_MEMORY_WAIT_MS - 1_000L, pressure = true)
         )
     }
 
     @Test
     fun opensAnywayOnceMemoryStaysShortTooLong() {
+        assertEquals(
+            Decision.Open(gaveUp = true),
+            ColdStartGate(start).at(MAX_MEMORY_WAIT_MS, pressure = true)
+        )
+    }
+
+    @Test
+    fun recreatedActivityKeepsTheTimeLimit() {
         val gate = ColdStartGate(start)
+        gate.at(1_000, pressure = true)
+
+        gate.onLaunch(start + MAX_MEMORY_WAIT_MS - 1_000)
 
         assertEquals(
             Decision.Open(gaveUp = true),
-            gate.check(start + MAX_MEMORY_WAIT_MS, true) { true }
+            gate.at(MAX_MEMORY_WAIT_MS, pressure = true)
+        )
+    }
+
+    @Test
+    fun stoppedActivityWaitsWithoutAskingAboutMemory() {
+        val gate = ColdStartGate(start)
+        var memoryAsked = false
+
+        val decision = gate.check(start + 1_000, false, true) { memoryAsked = true; false }
+
+        assertEquals(Decision.WaitForStart, decision)
+        assertFalse(memoryAsked)
+    }
+
+    @Test
+    fun timeLimitStartsOverOnceAStoppedActivityStartsAgain() {
+        val gate = ColdStartGate(start)
+        gate.at(1_000, pressure = true)
+        gate.at(3_000, started = false)
+
+        val later = 2 * MAX_MEMORY_WAIT_MS
+        assertEquals(Decision.WaitForMemory(2_000L), gate.at(later, pressure = true))
+        assertEquals(
+            Decision.Open(gaveUp = true),
+            gate.at(later + MAX_MEMORY_WAIT_MS, pressure = true)
         )
     }
 }

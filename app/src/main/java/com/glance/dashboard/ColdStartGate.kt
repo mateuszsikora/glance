@@ -8,35 +8,65 @@ package com.glance.dashboard
  * The service start commands and the lock task broadcast that the same launch had queued behind
  * it timed out, Android killed the new process as well, and the next relaunch repeated it.
  *
- * The gate opens once both hold:
- * - the work with a deadline that the launch queued on the main thread has run: the start
- *   commands of both services and, when entering lock task mode, the admin receiver's broadcast.
- *   Each normally takes milliseconds; after [START_WORK_TIMEOUT_MS] the gate stops waiting.
+ * The gate opens once all of these hold:
+ * - the Activity is started. A stopped one lays nothing out, so the WebView would only appear
+ *   at the next start, at a moment nobody checked; the gate checks again then instead.
+ * - the work with a deadline that the launch queued on the main thread has run ([LaunchWork]).
+ *   It normally takes milliseconds; after [START_WORK_TIMEOUT_MS] the gate stops waiting.
  * - the system is not short of memory ([MemoryPressure]). While it is, the gate checks again
  *   with a growing delay, and after [MAX_MEMORY_WAIT_MS] it opens anyway: the dashboard comes
- *   back late rather than never.
+ *   back late rather than never. The limit bounds a black screen someone can see, so it starts
+ *   over when a stopped Activity starts again, but not when a new Activity takes over the wait.
  *
+ * One gate serves the whole process: a recreated Activity calls [onLaunch] on the same one.
  * Elapsed-realtime milliseconds. Main-thread API.
  */
-class ColdStartGate(private val createdAtMs: Long) {
+class ColdStartGate(val createdAtMs: Long) {
 
     sealed class Decision {
         /** @param gaveUp a condition was still unmet when its time limit ran out. */
         data class Open(val gaveUp: Boolean) : Decision()
         data class WaitForStartWork(val delayMs: Long) : Decision()
         data class WaitForMemory(val delayMs: Long) : Decision()
+        /** Check again once the Activity starts. */
+        object WaitForStart : Decision()
     }
 
+    private var startWorkSinceMs = createdAtMs
     private var startWorkTimedOut = false
+    private var memoryWaitSinceMs = createdAtMs
     private var memoryWaits = 0
+    private var stopped = false
 
-    /** @param memoryPressure asked only once the start work has settled. */
-    fun check(nowMs: Long, startWorkSettled: Boolean, memoryPressure: () -> Boolean): Decision {
-        val waitedMs = nowMs - createdAtMs
+    /** A new Activity took over the wait; the start work it queues is awaited afresh. */
+    fun onLaunch(nowMs: Long) {
+        startWorkSinceMs = nowMs
+        startWorkTimedOut = false
+    }
+
+    /** @param memoryPressure asked only once the Activity is started and the start work settled. */
+    fun check(
+        nowMs: Long,
+        started: Boolean,
+        startWorkSettled: Boolean,
+        memoryPressure: () -> Boolean
+    ): Decision {
+        if (!started) {
+            stopped = true
+            return Decision.WaitForStart
+        }
+        if (stopped) {
+            stopped = false
+            memoryWaitSinceMs = nowMs
+            memoryWaits = 0
+        }
         if (!startWorkSettled && !startWorkTimedOut) {
-            if (waitedMs < START_WORK_TIMEOUT_MS) return Decision.WaitForStartWork(START_WORK_POLL_MS)
+            if (nowMs - startWorkSinceMs < START_WORK_TIMEOUT_MS) {
+                return Decision.WaitForStartWork(START_WORK_POLL_MS)
+            }
             startWorkTimedOut = true
         }
+        val waitedMs = nowMs - memoryWaitSinceMs
         val pressure = memoryPressure()
         if (pressure && waitedMs < MAX_MEMORY_WAIT_MS) {
             val backoffMs = (MEMORY_FIRST_DELAY_MS shl memoryWaits.coerceAtMost(MAX_DOUBLINGS))
@@ -49,8 +79,8 @@ class ColdStartGate(private val createdAtMs: Long) {
 
     companion object {
         /**
-         * Set once the first dashboard WebView of this process is about to be created; Chromium
-         * then stays initialised, so later Activities, such as a recreation, skip the gate.
+         * Set once the first dashboard WebView of this process is created; Chromium then stays
+         * initialised, so later Activities, such as a recreation, skip the gate.
          */
         @Volatile
         var webViewStarted = false
