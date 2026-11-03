@@ -34,7 +34,7 @@ import com.glance.screen.PowerWakePolicy
 import com.glance.screen.ScheduleManager
 import com.glance.update.UpdateChecker
 import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Foreground owner of all control-plane work: MQTT, screen commands and scheduling.
@@ -133,7 +133,7 @@ class KioskService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         LaunchWork.recordHandled(
             launchTokenHandled,
-            intent?.getIntExtra(LaunchWork.EXTRA_LAUNCH_TOKEN, 0) ?: 0
+            intent?.getLongExtra(LaunchWork.EXTRA_LAUNCH_TOKEN, 0L) ?: 0L
         )
         startForeground(NOTIFICATION_ID, buildNotification())
         if (config.isKioskSuspended) {
@@ -671,7 +671,7 @@ class KioskService : Service() {
         const val EXTRA_DELIBERATE = "deliberate"
 
         /** The newest [LaunchWork] token this service has run in this process. */
-        internal val launchTokenHandled = AtomicInteger()
+        internal val launchTokenHandled = AtomicLong()
 
         /** Set by a starter that opens the dashboard itself, so the service does not open it too. */
         const val EXTRA_DASHBOARD_LAUNCHED = "dashboard_launched"

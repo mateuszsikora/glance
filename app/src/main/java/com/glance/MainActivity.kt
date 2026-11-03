@@ -82,8 +82,8 @@ class MainActivity : AppCompatActivity() {
     private var savedStateDiscarded = false
 
     private val coldStartRunnable = Runnable { checkColdStart() }
-    private val coldStartMarkRunnable = Runnable {
-        coldStart?.pressure?.mark(SystemClock.elapsedRealtime())
+    private val coldStartWindowRunnable = Runnable {
+        coldStart?.pressure?.startWindow(SystemClock.elapsedRealtime())
     }
 
     private val contentScheduleRunnable = object : Runnable {
@@ -316,6 +316,8 @@ class MainActivity : AppCompatActivity() {
         when (decision) {
             ColdStartGate.Decision.WaitForStart -> Unit
             is ColdStartGate.Decision.WaitForStartWork -> {
+                // The check that finds the work settled measures swap-in over the last second.
+                pending.pressure.mark(now)
                 scheduleColdStartCheck(decision.delayMs, measureMemory = false)
             }
             is ColdStartGate.Decision.WaitForMemory -> {
@@ -348,14 +350,14 @@ class MainActivity : AppCompatActivity() {
      * [MemoryPressure.WINDOW_MS] before it, which also delays it by at least that much.
      */
     private fun scheduleColdStartCheck(delayMs: Long, measureMemory: Boolean) {
-        handler.removeCallbacks(coldStartMarkRunnable)
+        handler.removeCallbacks(coldStartWindowRunnable)
         handler.removeCallbacks(coldStartRunnable)
         if (!measureMemory) {
             handler.postDelayed(coldStartRunnable, delayMs)
             return
         }
         val checkDelayMs = maxOf(delayMs, MemoryPressure.WINDOW_MS)
-        handler.postDelayed(coldStartMarkRunnable, checkDelayMs - MemoryPressure.WINDOW_MS)
+        handler.postDelayed(coldStartWindowRunnable, checkDelayMs - MemoryPressure.WINDOW_MS)
         handler.postDelayed(coldStartRunnable, checkDelayMs)
     }
 
@@ -778,7 +780,7 @@ class MainActivity : AppCompatActivity() {
     // --- Services ---
 
     private fun startServices() {
-        val token = coldStart?.work?.token ?: 0
+        val token = coldStart?.work?.token ?: 0L
         listOf(KioskService::class.java, WatchdogService::class.java).forEach { service ->
             ServiceStarter.startFromForeground(
                 this,
@@ -800,7 +802,7 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         liveInstances.decrementAndGet()
         // Only a recreation takes over the wait; a later launch starts its own time limit.
-        if (isFinishing) pendingColdStartGate = null
+        if (!isChangingConfigurations) pendingColdStartGate = null
         handler.removeCallbacksAndMessages(null)
         webViewHealthChecker.reset()
         webViewReachabilityChecker.destroy()

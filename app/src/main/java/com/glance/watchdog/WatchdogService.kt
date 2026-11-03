@@ -19,7 +19,7 @@ import com.glance.dashboard.LaunchWork
 import com.glance.diagnostics.Diagnostics
 import com.glance.update.UpdateChecker
 import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Foreground service monitoring WebView health and app stability.
@@ -46,7 +46,7 @@ class WatchdogService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         LaunchWork.recordHandled(
             launchTokenHandled,
-            intent?.getIntExtra(LaunchWork.EXTRA_LAUNCH_TOKEN, 0) ?: 0
+            intent?.getLongExtra(LaunchWork.EXTRA_LAUNCH_TOKEN, 0L) ?: 0L
         )
         startForeground(NOTIFICATION_ID, buildNotification())
         if (GlanceApp.instance.appConfig.isKioskSuspended) {
@@ -287,7 +287,7 @@ class WatchdogService : Service() {
         private const val MEMORY_SAMPLE_INTERVAL_MS = 5 * 60 * 1000L
 
         /** The newest [LaunchWork] token this service has run in this process. */
-        internal val launchTokenHandled = AtomicInteger()
+        internal val launchTokenHandled = AtomicLong()
 
         const val ACTION_RELOAD_WEBVIEW = "com.glance.ACTION_RELOAD_WEBVIEW"
         const val ACTION_HEALTH_CHECK = "com.glance.ACTION_HEALTH_CHECK"

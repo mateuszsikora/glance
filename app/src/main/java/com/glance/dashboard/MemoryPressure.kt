@@ -7,10 +7,11 @@ import com.glance.diagnostics.MemorySample
  * back from swap faster than [SWAP_IN_LIMIT_PAGES_PER_S]. The flag follows free memory only; a
  * tablet swapping to zram can thrash, with kswapd taking half a CPU, while it is still clear.
  *
- * The swap-in rate is the average since the last [mark] or [read], or since construction. A
- * caller marks [WINDOW_MS] before it reads, so that a long wait between two checks neither
- * holds on to a burst that ended long ago nor dilutes one that has just begun. The rate is
- * unknown when the `pswpin` counter cannot be read.
+ * The swap-in rate is measured from the newest mark at least [WINDOW_MS] before the reading,
+ * or the oldest one when none is that old, so that a long wait between two checks neither holds
+ * on to a burst that ended long ago nor dilutes one that has just begun. A caller that reads after
+ * a long pause calls [startWindow] [WINDOW_MS] before the reading; one that polls calls [mark] on
+ * every poll. The rate is unknown when the `pswpin` counter cannot be read.
  */
 class MemoryPressure(
     private val lowMemory: () -> Boolean,
@@ -27,21 +28,34 @@ class MemoryPressure(
             "low=${if (lowMemory) "yes" else "no"} swapIn=${swapInPagesPerSecond ?: "?"}/s"
     }
 
-    private var baseline: Long? = swapIns()
-    private var baselineAtMs = nowMs
+    /** When each mark was taken and the `pswpin` counter then, oldest first. */
+    private val marks = ArrayDeque<Pair<Long, Long?>>().apply { addLast(nowMs to swapIns()) }
 
-    /** Starts the window the next [read] measures. */
+    /** Adds a possible start for the window the next [read] measures. */
     fun mark(nowMs: Long) {
-        baseline = swapIns()
-        baselineAtMs = nowMs
+        marks.addLast(nowMs to swapIns())
+        dropOutdatedMarks(nowMs)
+    }
+
+    /** Forgets earlier marks: the next [read] measures from here. */
+    fun startWindow(nowMs: Long) {
+        marks.clear()
+        mark(nowMs)
     }
 
     fun read(nowMs: Long): Reading {
+        dropOutdatedMarks(nowMs)
+        val (baselineAtMs, baseline) = marks.first()
         val swapIns = swapIns()
         val rate = MemorySample.swapInRate(baseline, swapIns, nowMs - baselineAtMs)
-        baseline = swapIns
-        baselineAtMs = nowMs
+        marks.clear()
+        marks.addLast(nowMs to swapIns)
         return Reading(lowMemory = lowMemory(), swapInPagesPerSecond = rate)
+    }
+
+    /** Keeps the newest mark at least [WINDOW_MS] old and everything after it. */
+    private fun dropOutdatedMarks(nowMs: Long) {
+        while (marks.size > 1 && nowMs - marks[1].first >= WINDOW_MS) marks.removeFirst()
     }
 
     companion object {
