@@ -15,6 +15,7 @@ import androidx.core.app.NotificationCompat
 import com.glance.GlanceApp
 import com.glance.MainActivity
 import com.glance.R
+import com.glance.dashboard.ColdStartGate
 import com.glance.dashboard.LaunchWork
 import com.glance.diagnostics.Diagnostics
 import com.glance.update.UpdateChecker
@@ -90,7 +91,7 @@ class WatchdogService : Service() {
                     Log.i(TAG, "Periodic WebView reload triggered")
                     Diagnostics.record("Periodic reload requested")
                     triggerWebViewReload()
-                } else {
+                } else if (ColdStartGate.webViewStarted) {
                     reloadPendingUntilScreenOn = true
                     Log.i(TAG, "Periodic reload deferred until the screen wakes")
                     Diagnostics.record("Periodic reload deferred until the screen wakes")
@@ -145,7 +146,10 @@ class WatchdogService : Service() {
 
     private fun performHealthCheck() {
         if (!powerManager.isInteractive) {
-            stalePolicy.onScreenOff(SystemClock.elapsedRealtime())
+            stalePolicy.onScreenOff(
+                SystemClock.elapsedRealtime(),
+                pageExists = ColdStartGate.webViewStarted
+            )
             Log.d(TAG, "Screen is off; skipping WebView health check")
             return
         }
@@ -221,9 +225,12 @@ class WatchdogService : Service() {
 
     private fun requestMemoryRecovery(reason: String) {
         if (!powerManager.isInteractive) {
-            reloadPendingUntilScreenOn = true
-            Log.w(TAG, "Memory recovery deferred while screen is off ($reason)")
-            Diagnostics.record("Memory reload deferred until the screen wakes ($reason)")
+            // Before the first WebView there is nothing to reload, now or after the wake.
+            if (ColdStartGate.webViewStarted) {
+                reloadPendingUntilScreenOn = true
+                Log.w(TAG, "Memory recovery deferred while screen is off ($reason)")
+                Diagnostics.record("Memory reload deferred until the screen wakes ($reason)")
+            }
             return
         }
         val now = SystemClock.elapsedRealtime()

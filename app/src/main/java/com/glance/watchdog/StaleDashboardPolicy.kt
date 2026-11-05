@@ -36,9 +36,14 @@ class StaleDashboardPolicy(
         return nowMs - unreachableSince >= minUnreachableMs
     }
 
-    /** Records that the screen went dark. Probing is suspended for as long as it stays dark. */
-    fun onScreenOff(nowMs: Long) {
-        if (screenOffSinceMs == null) screenOffSinceMs = nowMs
+    /**
+     * Records that the screen went dark. Probing is suspended for as long as it stays dark.
+     *
+     * @param pageExists false while no WebView exists yet, as after a restart with the display
+     * off: a page created after the wake has slept through nothing.
+     */
+    fun onScreenOff(nowMs: Long, pageExists: Boolean = true) {
+        if (pageExists && screenOffSinceMs == null) screenOffSinceMs = nowMs
     }
 
     /**

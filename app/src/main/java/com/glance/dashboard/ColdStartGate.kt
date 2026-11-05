@@ -38,7 +38,7 @@ class ColdStartGate(createdAtMs: Long) {
     private var memoryWaits = 0
     private var stopped = false
 
-    /** @return the time since the gate was created or, after a stop, the Activity started again. */
+    /** @return the time since the gate was created or, after a stop, its first check since then. */
     fun visibleWaitMs(nowMs: Long): Long = nowMs - memoryWaitSinceMs
 
     /** A new Activity took over the wait; the start work it queues is awaited afresh. */

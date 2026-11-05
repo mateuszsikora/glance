@@ -23,7 +23,7 @@ import java.io.File
  */
 internal object MemorySample {
 
-    /** The previous `pswpin` reading and when it was taken; touched by the journal thread only. */
+    /** The previous swap-in reading and when it was taken; touched by the journal thread only. */
     private var lastSwapIns: Long? = null
     private var lastSwapInsAtMs = 0L
 
@@ -121,7 +121,7 @@ internal object MemorySample {
         ?.toLongOrNull()
 
     /**
-     * @return pages a second between two `pswpin` readings [elapsedMs] apart, or null when one is
+     * @return pages a second between two swap-in readings [elapsedMs] apart, or null when one is
      * missing or the counter went backwards.
      */
     fun swapInRate(previous: Long?, current: Long?, elapsedMs: Long): Long? =

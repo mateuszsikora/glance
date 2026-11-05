@@ -12,6 +12,27 @@ class StaleDashboardPolicyTest {
     )
 
     @Test
+    fun screenOffWindowWithoutAPageIsNotStale() {
+        val policy = policy()
+
+        policy.onScreenOff(0L, pageExists = false)
+
+        assertFalse(policy.onScreenOn(120_000L))
+    }
+
+    @Test
+    fun screenOffWindowStartsOnceAPageExists() {
+        val policy = policy()
+        policy.onScreenOff(0L, pageExists = false)
+
+        policy.onScreenOff(100_000L, pageExists = true)
+
+        assertFalse(policy.onScreenOn(150_000L))
+        policy.onScreenOff(200_000L, pageExists = true)
+        assertTrue(policy.onScreenOn(260_000L))
+    }
+
+    @Test
     fun reachableHostNeverAsksForAReload() {
         val policy = policy()
         assertFalse(policy.onProbeResult(0L, reachable = true))
