@@ -119,6 +119,17 @@ class ColdStartGateTest {
     }
 
     @Test
+    fun visibleWaitLeavesOutTimeTheActivityWasStopped() {
+        val gate = ColdStartGate(start)
+        assertEquals(1_000L, gate.visibleWaitMs(start + 1_000))
+
+        gate.at(1_000, started = false)
+        gate.at(25_000_000, pressure = true)
+
+        assertEquals(6_000L, gate.visibleWaitMs(start + 25_006_000))
+    }
+
+    @Test
     fun stoppedActivityWaitsWithoutAskingAboutMemory() {
         val gate = ColdStartGate(start)
         var memoryAsked = false

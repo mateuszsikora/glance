@@ -82,6 +82,9 @@ class MainActivity : AppCompatActivity() {
     private var savedStateDiscarded = false
 
     private val coldStartRunnable = Runnable { checkColdStart() }
+    private val coldStartNoteRunnable = Runnable {
+        binding.coldStartStatus.visibility = View.VISIBLE
+    }
     private val coldStartWindowRunnable = Runnable {
         coldStart?.pressure?.startWindow(SystemClock.elapsedRealtime())
     }
@@ -238,6 +241,10 @@ class MainActivity : AppCompatActivity() {
         // onStart replaces any pending check, which would then never see the stop. A recreation
         // is not a stop: the new Activity inherits the gate and its time limit.
         if (!isChangingConfigurations) coldStart?.gate?.onStopped()
+        // The note describes the wait in progress, not one from before the display went off.
+        coldStart?.noteScheduled = false
+        handler.removeCallbacks(coldStartNoteRunnable)
+        if (::binding.isInitialized) binding.coldStartStatus.visibility = View.GONE
         if (::brightnessController.isInitialized) {
             brightnessController.stop()
         }
@@ -329,15 +336,19 @@ class MainActivity : AppCompatActivity() {
                 Log.w(TAG, message)
                 Diagnostics.record(message, includeMemory = !pending.heldForMemory)
                 pending.heldForMemory = true
-                binding.coldStartStatus.visibility = View.VISIBLE
+                if (!pending.noteScheduled) {
+                    pending.noteScheduled = true
+                    handler.postDelayed(coldStartNoteRunnable, ColdStartGate.MEMORY_NOTE_DELAY_MS)
+                }
                 scheduleColdStartCheck(decision.delayMs, measureMemory = true)
             }
             is ColdStartGate.Decision.Open -> {
                 coldStart = null
                 pendingColdStartGate = null
+                handler.removeCallbacks(coldStartNoteRunnable)
                 binding.coldStartStatus.visibility = View.GONE
                 val message = "Creating the first dashboard page after " +
-                    "${(now - pending.gate.createdAtMs) / 1000} s" +
+                    "${pending.gate.visibleWaitMs(now) / 1000} s" +
                     (if (decision.gaveUp) ", no longer waiting" else "") + " ($reading)"
                 Log.i(TAG, message)
                 Diagnostics.record(message, includeMemory = pending.heldForMemory)
@@ -841,6 +852,7 @@ class MainActivity : AppCompatActivity() {
             nowMs = nowMs
         )
         var heldForMemory = false
+        var noteScheduled = false
     }
 
     private fun readSwapIns(): Long? = try {

@@ -21,7 +21,7 @@ package com.glance.dashboard
  * One gate serves the whole process: a recreated Activity calls [onLaunch] on the same one.
  * Elapsed-realtime milliseconds. Main-thread API.
  */
-class ColdStartGate(val createdAtMs: Long) {
+class ColdStartGate(createdAtMs: Long) {
 
     sealed class Decision {
         /** @param gaveUp a condition was still unmet when its time limit ran out. */
@@ -37,6 +37,9 @@ class ColdStartGate(val createdAtMs: Long) {
     private var memoryWaitSinceMs = createdAtMs
     private var memoryWaits = 0
     private var stopped = false
+
+    /** @return how long a black screen has been up, not counting time the Activity was stopped. */
+    fun visibleWaitMs(nowMs: Long): Long = nowMs - memoryWaitSinceMs
 
     /** A new Activity took over the wait; the start work it queues is awaited afresh. */
     fun onLaunch(nowMs: Long) {
@@ -96,6 +99,9 @@ class ColdStartGate(val createdAtMs: Long) {
         const val MEMORY_FIRST_DELAY_MS = 2_000L
         const val MEMORY_MAX_DELAY_MS = 30_000L
         const val MAX_MEMORY_WAIT_MS = 3 * 60_000L
+
+        /** Waking the display alone swaps hard for seconds, which does not need an explanation. */
+        const val MEMORY_NOTE_DELAY_MS = 15_000L
         private const val MAX_DOUBLINGS = 4
     }
 }

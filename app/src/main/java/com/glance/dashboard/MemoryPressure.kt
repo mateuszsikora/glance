@@ -62,8 +62,11 @@ class MemoryPressure(
 
     companion object {
         /**
-         * About 4 MB/s with 4 KiB pages. The 3 GB test tablet moved up to 190 pages a second while
-         * settled and 9,000-25,000 during a forced thrash.
+         * About 4 MB/s with 4 KiB pages. On the 3 GB test tablet the five-minute average stayed
+         * under 100 pages a second on most of a normal day and reached 9,000-25,000 during a forced
+         * thrash. Normal use can pass the limit too: waking the display moved about 35,000 for a
+         * second or two, and one night's burst averaged 5,375 with over 1.5 GB available. That only
+         * delays a first WebView, by at most [ColdStartGate.MAX_MEMORY_WAIT_MS].
          */
         const val SWAP_IN_LIMIT_PAGES_PER_S = 1_000L
         const val WINDOW_MS = 1_000L
