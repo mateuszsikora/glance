@@ -38,7 +38,7 @@ class ColdStartGate(createdAtMs: Long) {
     private var memoryWaits = 0
     private var stopped = false
 
-    /** @return how long a black screen has been up, not counting time the Activity was stopped. */
+    /** @return the time since the gate was created or, after a stop, the Activity started again. */
     fun visibleWaitMs(nowMs: Long): Long = nowMs - memoryWaitSinceMs
 
     /** A new Activity took over the wait; the start work it queues is awaited afresh. */
