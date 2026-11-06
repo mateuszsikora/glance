@@ -100,7 +100,10 @@ class ColdStartGate(createdAtMs: Long) {
         const val MEMORY_MAX_DELAY_MS = 30_000L
         const val MAX_MEMORY_WAIT_MS = 3 * 60_000L
 
-        /** Waking the display alone swaps hard for seconds, which does not need an explanation. */
+        /**
+         * Waking the display swaps hard for seconds. With little memory available that holds the
+         * page back too, which does not need an explanation.
+         */
         const val MEMORY_NOTE_DELAY_MS = 15_000L
         private const val MAX_DOUBLINGS = 4
     }

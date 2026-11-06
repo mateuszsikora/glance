@@ -75,11 +75,20 @@ class MemoryPressureTest {
     @Test
     fun readsTheFlagAndAvailableMemoryAtTheEndOfTheWindow() {
         var system = plenty
-        val pressure = MemoryPressure(systemMemory = { system }, swapIns = { 0L }, nowMs = 0L)
+        var systemReads = 0
+        val pressure = MemoryPressure(
+            systemMemory = { systemReads++; system },
+            swapIns = { 0L },
+            nowMs = 0L
+        )
+        pressure.mark(nowMs = 200L)
+        pressure.startWindow(nowMs = 500L)
+        assertEquals(0, systemReads)
 
         system = MemoryPressure.SystemMemory(lowMemory = true, availableBytes = 300 * MIB)
-        val reading = pressure.read(nowMs = 1_000L)
+        val reading = pressure.read(nowMs = 1_500L)
 
+        assertEquals(1, systemReads)
         assertTrue(reading.lowMemory)
         assertEquals(300 * MIB, reading.availableBytes)
         assertEquals("low=yes available=300MB swapIn=0/s", reading.toString())

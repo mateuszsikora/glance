@@ -87,9 +87,8 @@ class MemoryPressure(
          * About 4 MB/s with 4 KiB pages. On the 3 GB test tablet the five-minute average stayed
          * under 100 pages a second on most of a normal day and reached 9,000-25,000 during a forced
          * thrash. Normal use can pass the limit too: waking the display moved about 35,000 for a
-         * second or two, and one night's burst averaged 5,375 with over 1.5 GB available. That only
-         * delays a first WebView, by at most [ColdStartGate.MAX_MEMORY_WAIT_MS], and only while
-         * less than [AVAILABLE_LIMIT_BYTES] is available.
+         * second or two, and one night's burst averaged 5,375 with over 1.5 GB available. With
+         * that much memory available it does not count; see [AVAILABLE_LIMIT_BYTES].
          */
         const val SWAP_IN_LIMIT_PAGES_PER_S = 1_000L
 
@@ -101,6 +100,10 @@ class MemoryPressure(
          * recorded happened with 286-396 MB available. Before the reboot that released the
          * kernel's unreclaimable memory, available memory never passed 519 MB in 4,164 samples
          * over 13 days, so a thrash in that state is still caught.
+         *
+         * The figure suits a 3 GB device. With much less RAM, available memory stays below it and
+         * the swap-in rate decides alone, as before; with much more, the low-memory killer's
+         * thresholds grow and a thrash could start above it.
          */
         const val AVAILABLE_LIMIT_BYTES = 800L * MIB
 
