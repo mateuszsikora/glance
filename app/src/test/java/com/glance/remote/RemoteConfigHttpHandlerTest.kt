@@ -12,6 +12,7 @@ import com.glance.R
 import com.glance.config.AppConfig
 import com.glance.content.ContentProfile
 import com.glance.diagnostics.DiagnosticSettings
+import com.glance.diagnostics.KernelMemoryTrend
 import com.glance.diagnostics.MemoryTrend
 import com.glance.maintenance.MaintenanceSettings
 import com.glance.settings.DebugInfoProvider
@@ -830,6 +831,77 @@ class RemoteConfigHttpHandlerTest {
     }
 
     @Test
+    fun theKernelsMemoryIsShownWithItsTrendAndTheUptime() {
+        var kernel: KernelMemoryTrend.Status? = KernelMemoryTrend.Status(
+            unreclaimableBytes = 420L * MIB,
+            totalBytes = 2748L * MIB,
+            uptimeMs = 41 * DAY + 5 * HOUR,
+            growth = KernelMemoryTrend.Growth(6 * MIB, spanDays = 7)
+        )
+        val handler = RemoteConfigHttpHandler(
+            config,
+            { changes++ },
+            memoryTrend = { null },
+            kernelMemory = { kernel },
+            uptimeMs = { 41 * DAY + 5 * HOUR }
+        )
+        val cookie = login(handler)
+
+        val page = handler.handle(get("/", cookie)).text()
+        assertFalse(page.contains("banner warning"))
+        assertTrue(page.indexOf("id=\"memory\"") < page.indexOf("<dt>Kernel memory</dt>"))
+        assertTrue(page.contains("<dt>Kernel memory</dt><dd>420 MB, 15% of the RAM, unreclaimable. Warning at 1099 MB.</dd>"))
+        assertTrue(page.contains("<dt>Kernel trend</dt><dd>+6.0 MB a day over the last 7 days</dd>"))
+        assertTrue(page.contains("<dt>Device uptime</dt><dd>41 days, 5 hours</dd>"))
+        // (1099 - 420) / 6 = 113 days.
+        assertTrue(page.contains("<dt>Tablet reboot</dt><dd>Not needed yet. At this pace the warning level is about 113 days away.</dd>"))
+
+        kernel = kernel!!.copy(unreclaimableBytes = 950L * MIB)
+        val soon = handler.handle(get("/", cookie)).text()
+        assertFalse(soon.contains("banner warning"))
+        assertTrue(soon.contains("<dd>Reboot the tablet within about 24 days, before the warning level."))
+
+        kernel = kernel!!.copy(unreclaimableBytes = 1506L * MIB, growth = null)
+        val due = handler.handle(get("/", cookie)).text()
+        assertTrue(due.contains("class=\"banner warning\""))
+        assertTrue(due.contains("The system holds 1506 MB of memory that only a tablet reboot releases, 54% of the RAM."))
+        assertTrue(due.contains("<dt>Kernel trend</dt><dd>Not measured yet. It needs 3 days"))
+        assertTrue(due.contains("<dt>Tablet reboot</dt><dd>Reboot the tablet. Restarting Glance does not release this memory.</dd>"))
+
+        kernel = KernelMemoryTrend.Status(1098L * MIB, 2748L * MIB, 41 * DAY, KernelMemoryTrend.Growth(6 * MIB, 7))
+        assertTrue(handler.handle(get("/", cookie)).text().contains("<dd>Reboot the tablet within about 1 day, before"))
+
+        kernel = null
+        val unavailable = handler.handle(get("/", cookie)).text()
+        assertTrue(unavailable.contains("<dt>Kernel memory</dt><dd>Unavailable on this tablet.</dd>"))
+        assertTrue(unavailable.contains("<dt>Device uptime</dt><dd>41 days, 5 hours</dd>"))
+        assertFalse(unavailable.contains("<dt>Tablet reboot</dt>"))
+
+        val broken = RemoteConfigHttpHandler(config, { changes++ }, memoryTrend = { null }, kernelMemory = { error("procfs") })
+        assertTrue(broken.handle(get("/", login(broken))).text().contains("<dd>Unavailable on this tablet.</dd>"))
+    }
+
+    @Test
+    fun aRecoveryBuildDoesNotJudgeTheKernelsMemory() {
+        val due = KernelMemoryTrend.Status(1506L * MIB, 2748L * MIB, 236 * DAY, growth = null)
+        val handler = RemoteConfigHttpHandler(
+            config,
+            { changes++ },
+            nightlyRestartAvailable = false,
+            memoryTrend = { null },
+            kernelMemory = { due }
+        )
+
+        val page = handler.handle(get("/", login(handler))).text()
+
+        assertFalse(page.contains("banner warning"))
+        assertTrue(page.contains("<dt>Kernel memory</dt><dd>Not measured by this recovery build.</dd>"))
+        assertFalse(page.contains("<dt>Tablet reboot</dt>"))
+        assertTrue(page.contains("only rebooting the tablet does.</p>"))
+        assertFalse(page.contains("Glance warns once it reaches"))
+    }
+
+    @Test
     fun anUnreadableDiagnosticLogDoesNotTakeDownTheSettingsPage() {
         val handler = RemoteConfigHttpHandler(
             config,
@@ -1080,6 +1152,9 @@ class RemoteConfigHttpHandlerTest {
     companion object {
         private const val PREFS_NAME = "glance_config"
         private const val PIN = "583902"
+        private const val MIB = 1024L * 1024L
+        private const val HOUR = 3_600_000L
+        private const val DAY = 24 * HOUR
 
         /** Comfortably longer than the server's own idle timeout, so the close is what ends the read. */
         private const val SOCKET_READ_TIMEOUT_MS = 15_000

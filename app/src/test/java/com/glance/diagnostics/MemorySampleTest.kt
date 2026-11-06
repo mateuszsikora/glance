@@ -32,6 +32,30 @@ class MemorySampleTest {
     }
 
     @Test
+    fun readsTheKernelsUnreclaimableMemoryFromProcMeminfo() {
+        val meminfo = """
+            MemTotal:        2814028 kB
+            MemAvailable:     392148 kB
+            Slab:            1612344 kB
+            SReclaimable:      70120 kB
+            SUnreclaim:      1542224 kB
+        """.trimIndent()
+
+        assertEquals(1542224L, MemorySample.meminfoKb(meminfo, "SUnreclaim"))
+        assertEquals(2814028L, MemorySample.meminfoKb(meminfo, "MemTotal"))
+    }
+
+    @Test
+    fun missingOrMalformedMeminfoFieldsYieldNothing() {
+        // A prefix of another field's name must not match it.
+        assertNull(MemorySample.meminfoKb("SUnreclaimable:   1234 kB\n", "SUnreclaim"))
+        assertNull(MemorySample.meminfoKb("MemTotal:        2814028 kB\n", "SUnreclaim"))
+        assertNull(MemorySample.meminfoKb("SUnreclaim:\n", "SUnreclaim"))
+        assertNull(MemorySample.meminfoKb("SUnreclaim:      lots kB\n", "SUnreclaim"))
+        assertNull(MemorySample.meminfoKb("", "SUnreclaim"))
+    }
+
+    @Test
     fun readsTheSwapInCounterFromProcVmstat() {
         val vmstat = "nr_free_pages 12345\npswpout 777\npswpin 4321\npgmajfault 99\n"
 
@@ -66,6 +90,7 @@ class MemorySampleTest {
             swapTotalKb = 512L * 1024L,
             swapFreeKb = 440L * 1024L,
             swapInPagesPerSecond = 37L,
+            kernelUnreclaimableKb = 1506L * 1024L,
             appPssKb = 125L * 1024L,
             javaHeapKb = 8L * 1024L,
             nativeHeapKb = 30L * 1024L,
@@ -74,7 +99,8 @@ class MemorySampleTest {
         )
 
         assertEquals(
-            "system available=383/2748MB threshold=216MB low=no swapUsed=72/512MB swapIn=37/s; " +
+            "system available=383/2748MB threshold=216MB low=no swapUsed=72/512MB swapIn=37/s " +
+                "slabUnreclaim=1506MB; " +
                 "app pss=125MB java=8MB native=30MB graphics=88MB nativeAlloc=160MB",
             line
         )

@@ -20,6 +20,9 @@ import java.io.File
  *
  * `swapIn` is the rate pages came back from swap since the previous sample, the figure that
  * tells a tablet thrashing in zram from one that merely holds a lot in it.
+ *
+ * `slabUnreclaim` is the kernel's unreclaimable slab memory, `SUnreclaim` in `/proc/meminfo`. No
+ * app can get it back and only a reboot releases it; see [KernelMemoryTrend].
  */
 internal object MemorySample {
 
@@ -32,7 +35,8 @@ internal object MemorySample {
             context.getSystemService(ActivityManager::class.java).getMemoryInfo(it)
         }
         val app = Debug.MemoryInfo().also(Debug::getMemoryInfo)
-        val swap = runCatching { swapKb(File("/proc/meminfo").readText()) }.getOrNull()
+        val meminfo = runCatching { File(MEMINFO_PATH).readText() }.getOrNull()
+        val swap = meminfo?.let(::swapKb)
         val swapIns = runCatching { readSwapIns() }.getOrNull()
         val now = SystemClock.elapsedRealtime()
         val swapInRate = swapInRate(lastSwapIns, swapIns, now - lastSwapInsAtMs)
@@ -46,6 +50,7 @@ internal object MemorySample {
             swapTotalKb = swap?.first,
             swapFreeKb = swap?.second,
             swapInPagesPerSecond = swapInRate,
+            kernelUnreclaimableKb = meminfo?.let { meminfoKb(it, "SUnreclaim") },
             appPssKb = app.totalPss.toLong(),
             javaHeapKb = app.getMemoryStat("summary.java-heap")?.toLongOrNull(),
             nativeHeapKb = app.getMemoryStat("summary.native-heap")?.toLongOrNull(),
@@ -62,6 +67,7 @@ internal object MemorySample {
         swapTotalKb: Long?,
         swapFreeKb: Long?,
         swapInPagesPerSecond: Long? = null,
+        kernelUnreclaimableKb: Long? = null,
         appPssKb: Long,
         javaHeapKb: Long?,
         nativeHeapKb: Long?,
@@ -75,6 +81,7 @@ internal object MemorySample {
             append(" swapUsed=${(swapTotalKb - swapFreeKb) / KIB}/${swapTotalKb / KIB}MB")
         }
         swapInPagesPerSecond?.let { append(" swapIn=$it/s") }
+        kernelUnreclaimableKb?.let { append(" slabUnreclaim=${it / KIB}MB") }
         append("; app pss=${appPssKb / KIB}MB")
         javaHeapKb?.let { append(" java=${it / KIB}MB") }
         nativeHeapKb?.let { append(" native=${it / KIB}MB") }
@@ -84,16 +91,18 @@ internal object MemorySample {
 
     /** @return SwapTotal and SwapFree in KiB, or null when `/proc/meminfo` lacks them. */
     fun swapKb(meminfo: String): Pair<Long, Long>? {
-        fun field(name: String): Long? = meminfo.lineSequence()
-            .firstOrNull { it.startsWith("$name:") }
-            ?.substringAfter(':')
-            ?.trim()
-            ?.substringBefore(' ')
-            ?.toLongOrNull()
-        val total = field("SwapTotal") ?: return null
-        val free = field("SwapFree") ?: return null
+        val total = meminfoKb(meminfo, "SwapTotal") ?: return null
+        val free = meminfoKb(meminfo, "SwapFree") ?: return null
         return total to free
     }
+
+    /** @return the field [name] of `/proc/meminfo` in KiB, or null when [meminfo] lacks it. */
+    fun meminfoKb(meminfo: String, name: String): Long? = meminfo.lineSequence()
+        .firstOrNull { it.startsWith("$name:") }
+        ?.substringAfter(':')
+        ?.trim()
+        ?.substringBefore(' ')
+        ?.toLongOrNull()
 
     /**
      * `pswpin` in `/proc/vmstat` covers every swap device, but Android 8 on EMUI closes that file
@@ -130,6 +139,9 @@ internal object MemorySample {
         } else {
             null
         }
+
+    /** Readable by apps on every supported Android version, including Android 8 on EMUI. */
+    const val MEMINFO_PATH = "/proc/meminfo"
 
     private const val SECTORS_PER_PAGE = 8L
     private const val KIB = 1024L

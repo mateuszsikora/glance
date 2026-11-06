@@ -8,6 +8,7 @@ import com.glance.config.AppConfig
 import com.glance.diagnostics.DiagnosticLog
 import com.glance.diagnostics.DiagnosticSettings
 import com.glance.diagnostics.Diagnostics
+import com.glance.diagnostics.KernelMemoryMonitor
 import com.glance.diagnostics.MemorySample
 import com.glance.diagnostics.MemoryTrendMonitor
 import com.glance.watchdog.CrashLogger
@@ -30,11 +31,16 @@ class GlanceApp : Application() {
     lateinit var memoryTrend: MemoryTrendMonitor
         private set
 
+    /** Tells when the kernel holds so much memory that only a tablet reboot helps. */
+    lateinit var kernelMemory: KernelMemoryMonitor
+        private set
+
     override fun onCreate() {
         super.onCreate()
         instance = this
         processStartElapsedMs = SystemClock.elapsedRealtime()
         memoryTrend = MemoryTrendMonitor(this, processStartElapsedMs)
+        kernelMemory = KernelMemoryMonitor(this)
         appConfig = AppConfig(this)
         appConfig.clearSettledUpdateAttempts(BuildConfig.VERSION_CODE)
         com.glance.update.RestoreState(this).apply {

@@ -127,8 +127,8 @@ class WatchdogService : Service() {
     }
 
     /**
-     * Feeds the memory trend warning, and gives the diagnostic journal a memory trend between
-     * events while it is on.
+     * Feeds the memory trend warning and the kernel memory trend, and gives the diagnostic journal
+     * a memory trend between events while it is on.
      */
     private fun startMemorySampleLoop() {
         handler.postDelayed(object : Runnable {
@@ -138,6 +138,7 @@ class WatchdogService : Service() {
                     SystemClock.elapsedRealtime(),
                     android.os.Debug.getNativeHeapAllocatedSize()
                 )
+                GlanceApp.instance.kernelMemory.onSample(SystemClock.elapsedRealtime())
                 Diagnostics.record("Memory sample", includeMemory = true)
                 handler.postDelayed(this, MEMORY_SAMPLE_INTERVAL_MS)
             }
