@@ -790,6 +790,98 @@ class RemoteConfigHttpHandlerTest {
     }
 
     @Test
+    fun aDeviceOwnerCanScheduleRebootsWithTheirInterval() {
+        val maintenance = MaintenanceSettings(ApplicationProvider.getApplicationContext())
+        val handler = RemoteConfigHttpHandler(config, { changes++ }, deviceOwner = { true })
+        val cookie = login(handler)
+        val page = handler.handle(get("/", cookie)).text()
+        assertTrue(page.contains("name=\"tabletRebootEnabled\">"))
+        assertTrue(page.contains("<option value=\"7\" selected>Once a week</option>"))
+        assertTrue(page.contains("only rebooting the tablet does, which you can schedule below."))
+
+        val enabled = validSettings(csrf(handler, cookie)) + mapOf(
+            "tabletRebootEnabled" to "on",
+            "rebootIntervalDays" to "14"
+        )
+        assertEquals(303, handler.handle(post("/save", enabled, cookie)).status)
+        assertTrue(maintenance.tabletRebootEnabled)
+        assertEquals(14, maintenance.rebootIntervalDays)
+        assertTrue(
+            handler.handle(get("/", cookie)).text()
+                .contains("<option value=\"14\" selected>Every 2 weeks</option>")
+        )
+
+        val invalid = validSettings(csrf(handler, cookie)) + mapOf("rebootIntervalDays" to "1")
+        val response = handler.handle(post("/save", invalid, cookie))
+        assertEquals(400, response.status)
+        assertTrue(response.text().contains("Unknown reboot interval."))
+
+        // A client that does not know the reboot leaves its interval alone and turns it off.
+        assertEquals(303, handler.handle(post("/save", validSettings(csrf(handler, cookie)), cookie)).status)
+        assertFalse(maintenance.tabletRebootEnabled)
+        assertEquals(14, maintenance.rebootIntervalDays)
+    }
+
+    @Test
+    fun withoutDeviceOwnerTheRebootIsExplainedAndItsSettingsLeftAlone() {
+        val maintenance = MaintenanceSettings(ApplicationProvider.getApplicationContext())
+        maintenance.tabletRebootEnabled = true
+        val handler = RemoteConfigHttpHandler(config, { changes++ }, deviceOwner = { false })
+        val cookie = login(handler)
+
+        val page = handler.handle(get("/", cookie)).text()
+        assertFalse(page.contains("tabletRebootEnabled"))
+        assertTrue(page.contains("A scheduled tablet reboot needs Device Owner"))
+        val saved = validSettings(csrf(handler, cookie)) + mapOf("rebootIntervalDays" to "1")
+        assertEquals(303, handler.handle(post("/save", saved, cookie)).status)
+
+        assertTrue(maintenance.tabletRebootEnabled)
+        assertEquals(7, maintenance.rebootIntervalDays)
+    }
+
+    @Test
+    fun theKernelWarningGoesOnceAScheduledRebootIsAboutToRun() {
+        val maintenance = MaintenanceSettings(ApplicationProvider.getApplicationContext())
+        var uptime = 6 * DAY + 12 * HOUR
+        val handler = RemoteConfigHttpHandler(
+            config,
+            { changes++ },
+            memoryTrend = { null },
+            kernelMemory = { KernelMemoryTrend.Status(1506L * MIB, 2748L * MIB, uptime, growth = null) },
+            deviceOwner = { true }
+        )
+        val cookie = login(handler)
+        assertTrue(handler.handle(get("/", cookie)).text().contains("class=\"banner warning\""))
+
+        maintenance.tabletRebootEnabled = true
+        val covered = handler.handle(get("/", cookie)).text()
+        assertFalse(covered.contains("banner warning"))
+        assertTrue(covered.contains("<dd>Reboot the tablet. Restarting Glance does not release this memory. The scheduled reboots already do.</dd>"))
+
+        // Up for days past the interval: the scheduled reboots are not happening.
+        uptime = 9 * DAY
+        assertTrue(handler.handle(get("/", cookie)).text().contains("class=\"banner warning\""))
+    }
+
+    @Test
+    fun weeklyRebootsAlsoCoverAWeeklyRestartSuggestion() {
+        val maintenance = MaintenanceSettings(ApplicationProvider.getApplicationContext())
+        // About 10 MB a day: once a week is suggested.
+        val growing = MemoryTrend.Verdict(1_792_800_000_000L, 22 * 3_600_000L, 9L * 1024L * 1024L, true)
+        val handler = RemoteConfigHttpHandler(
+            config,
+            { changes++ },
+            memoryTrend = { growing },
+            deviceOwner = { true }
+        )
+        val cookie = login(handler)
+        assertTrue(handler.handle(get("/", cookie)).text().contains("banner warning"))
+
+        maintenance.tabletRebootEnabled = true
+        assertFalse(handler.handle(get("/", cookie)).text().contains("banner warning"))
+    }
+
+    @Test
     fun aRecoveryBuildDoesNotPresentAnEarlierVerdictAsCurrent() {
         val growing = MemoryTrend.Verdict(1_792_800_000_000L, 22 * 3_600_000L, 46L * 1024L * 1024L, true)
         val handler = RemoteConfigHttpHandler(

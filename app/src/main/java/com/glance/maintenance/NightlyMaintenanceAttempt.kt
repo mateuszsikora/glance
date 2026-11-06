@@ -9,6 +9,9 @@ import com.glance.maintenance.NightlyMaintenancePolicy.Decision
  * Restarting the process is the only way to release the WebView's native memory, but it needs
  * Device Owner to bring the dashboard back. Without it every page is reloaded, the idle page
  * included even on screen, so it is at least refreshed once a day.
+ *
+ * [restart] ends the process either way: by restarting Glance, or by rebooting the tablet on the
+ * nights a scheduled reboot is due.
  */
 class NightlyMaintenanceAttempt(
     private val deviceOwner: Boolean,

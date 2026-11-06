@@ -72,6 +72,8 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var switchNightlyRestart: SwitchCompat
     private lateinit var editNightlyRestartTime: EditText
     private lateinit var groupRestartInterval: RadioGroup
+    private lateinit var switchTabletReboot: SwitchCompat
+    private lateinit var groupRebootInterval: RadioGroup
     private lateinit var textMemoryTrend: TextView
     private lateinit var textKernelMemory: TextView
     private lateinit var switchMqttEnabled: SwitchCompat
@@ -229,10 +231,14 @@ class SettingsActivity : AppCompatActivity() {
         switchNightlyRestart = findViewById(R.id.switchNightlyRestart)
         editNightlyRestartTime = findViewById(R.id.editNightlyRestartTime)
         groupRestartInterval = findViewById(R.id.groupRestartInterval)
+        switchTabletReboot = findViewById(R.id.switchTabletReboot)
+        groupRebootInterval = findViewById(R.id.groupRebootInterval)
         textMemoryTrend = findViewById(R.id.textMemoryTrend)
         textKernelMemory = findViewById(R.id.textKernelMemory)
         findViewById<TextView>(R.id.textKernelMemoryHelp).text = getString(
-            R.string.kernel_memory_help,
+            // Without Device Owner the reboot below cannot be scheduled.
+            if (LockTaskHelper.isDeviceOwner(this)) R.string.kernel_memory_help
+            else R.string.kernel_memory_help_manual,
             (KernelMemoryTrend.WARNING_SHARE * 100).toInt()
         )
         switchMqttEnabled = findViewById(R.id.switchMqttEnabled)
@@ -279,8 +285,18 @@ class SettingsActivity : AppCompatActivity() {
         switchNightlyRestart.isChecked = maintenance.nightlyRestartEnabled
         editNightlyRestartTime.setText(maintenance.quietTime)
         groupRestartInterval.check(intervalButton(maintenance.restartIntervalDays))
+        switchTabletReboot.isChecked = maintenance.tabletRebootEnabled
+        groupRebootInterval.check(
+            REBOOT_INTERVAL_BUTTONS[maintenance.rebootIntervalDays] ?: R.id.radioRebootWeekly
+        )
+        if (!LockTaskHelper.isDeviceOwner(this)) {
+            // Shown, not hidden, so the owner learns why the kernel memory cannot be scheduled away.
+            switchTabletReboot.isEnabled = false
+            for (i in 0 until groupRebootInterval.childCount) groupRebootInterval.getChildAt(i).isEnabled = false
+            findViewById<TextView>(R.id.textTabletRebootHelp).setText(R.string.tablet_reboot_unavailable)
+        }
         textMemoryTrend.text = memoryTrendText(GlanceApp.instance.memoryTrend.latest())
-        textKernelMemory.text = kernelMemoryText(GlanceApp.instance.kernelMemory.status())
+        textKernelMemory.text = kernelMemoryText(GlanceApp.instance.kernelMemory.status(), maintenance)
         switchMqttEnabled.isChecked = config.mqttEnabled
         editMqttBrokerHost.setText(
             config.mqttBrokerHost.ifBlank {
@@ -548,6 +564,11 @@ class SettingsActivity : AppCompatActivity() {
             quietTime = nightlyRestartTime
             restartIntervalDays = INTERVAL_BUTTONS.entries
                 .firstOrNull { it.value == groupRestartInterval.checkedRadioButtonId }?.key ?: 1
+            // A disabled switch keeps what it shows, so saving without Device Owner changes nothing.
+            tabletRebootEnabled = switchTabletReboot.isChecked
+            rebootIntervalDays = REBOOT_INTERVAL_BUTTONS.entries
+                .firstOrNull { it.value == groupRebootInterval.checkedRadioButtonId }?.key
+                ?: MaintenanceSettings.DEFAULT_REBOOT_INTERVAL_DAYS
         }
         DiagnosticSettings(this).enabled = switchDiagnosticLog.isChecked
 
@@ -839,10 +860,20 @@ class SettingsActivity : AppCompatActivity() {
         return getString(R.string.memory_trend_growing, megabytes, hours, label)
     }
 
-    /** The kernel's unreclaimable memory, its daily trend, the uptime, and whether to reboot. */
-    private fun kernelMemoryText(kernel: KernelMemoryTrend.Status?): String {
+    /**
+     * The kernel's unreclaimable memory, its daily trend, the uptime, and whether to reboot; like
+     * the remote panel, it says so when the scheduled reboots come in time.
+     */
+    private fun kernelMemoryText(
+        kernel: KernelMemoryTrend.Status?,
+        maintenance: MaintenanceSettings
+    ): String {
         if (kernel == null) return getString(R.string.kernel_memory_unavailable)
         val growth = kernel.growth
+        val covered = kernel.advice !is KernelMemoryTrend.Advice.None &&
+            maintenance.tabletRebootEnabled &&
+            LockTaskHelper.isDeviceOwner(this) &&
+            KernelMemoryTrend.rebootsCover(kernel.advice, maintenance.rebootIntervalDays, kernel.uptimeMs)
         val advice = when (val advice = kernel.advice) {
             KernelMemoryTrend.Advice.RebootNow -> getString(R.string.kernel_memory_reboot_now)
             is KernelMemoryTrend.Advice.RebootSoon -> getString(
@@ -852,7 +883,7 @@ class SettingsActivity : AppCompatActivity() {
             is KernelMemoryTrend.Advice.None -> advice.daysToWarning
                 ?.let { getString(R.string.kernel_memory_reboot_later, it) }
                 ?: getString(R.string.kernel_memory_reboot_none)
-        }
+        }.let { if (covered) it + " " + getString(R.string.kernel_memory_reboots_cover) else it }
         return listOf(
             getString(
                 R.string.kernel_memory_level,
@@ -890,6 +921,11 @@ class SettingsActivity : AppCompatActivity() {
             2 to R.id.radioRestartEvery2Days,
             3 to R.id.radioRestartEvery3Days,
             7 to R.id.radioRestartWeekly
+        )
+        private val REBOOT_INTERVAL_BUTTONS = mapOf(
+            7 to R.id.radioRebootWeekly,
+            14 to R.id.radioRebootEvery2Weeks,
+            30 to R.id.radioRebootEvery30Days
         )
         private const val STATE_AWAITING_EXACT_ALARM_ACCESS =
             "awaiting_exact_alarm_access"

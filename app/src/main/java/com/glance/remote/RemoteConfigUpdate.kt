@@ -27,6 +27,8 @@ internal data class RemoteConfigSnapshot(
     val nightlyRestartEnabled: Boolean,
     val nightlyRestartTime: String,
     val restartIntervalDays: Int,
+    val tabletRebootEnabled: Boolean,
+    val rebootIntervalDays: Int,
     val mqttEnabled: Boolean,
     val mqttBrokerHost: String,
     val mqttBrokerPort: Int,
@@ -52,7 +54,9 @@ internal class RemoteConfigUpdater(
     private val config: AppConfig,
     private val diagnostics: DiagnosticSettings = DiagnosticSettings(GlanceApp.instance),
     private val maintenance: MaintenanceSettings = MaintenanceSettings(GlanceApp.instance),
-    private val nightlyRestartAvailable: Boolean = true
+    private val nightlyRestartAvailable: Boolean = true,
+    /** Only a Device Owner can reboot the tablet; asked on every save, since that can change. */
+    private val tabletRebootAvailable: () -> Boolean = { nightlyRestartAvailable }
 ) {
 
     fun snapshot(): RemoteConfigSnapshot {
@@ -76,6 +80,8 @@ internal class RemoteConfigUpdater(
             nightlyRestartEnabled = maintenance.nightlyRestartEnabled,
             nightlyRestartTime = maintenance.quietTime,
             restartIntervalDays = maintenance.restartIntervalDays,
+            tabletRebootEnabled = maintenance.tabletRebootEnabled,
+            rebootIntervalDays = maintenance.rebootIntervalDays,
             mqttEnabled = config.mqttEnabled,
             mqttBrokerHost = config.mqttBrokerHost,
             mqttBrokerPort = config.mqttBrokerPort,
@@ -174,6 +180,14 @@ internal class RemoteConfigUpdater(
         ) {
             return error("Unknown restart interval.")
         }
+        val rebootAvailable = nightlyRestartAvailable && tabletRebootAvailable()
+        val rebootIntervalField = parameters["rebootIntervalDays"]
+        val rebootIntervalDays = rebootIntervalField?.toIntOrNull()
+        if (rebootAvailable && rebootIntervalField != null &&
+            rebootIntervalDays !in MaintenanceSettings.REBOOT_INTERVAL_DAYS
+        ) {
+            return error("Unknown reboot interval.")
+        }
 
         val mqttEnabled = parameters.hasCheckbox("mqttEnabled")
         val mqttHost = parameters["mqttBrokerHost"].orEmpty().trim()
@@ -265,6 +279,11 @@ internal class RemoteConfigUpdater(
             maintenance.quietTime = nightlyRestartTime
             // A client that does not know the field keeps the stored choice.
             if (restartIntervalDays != null) maintenance.restartIntervalDays = restartIntervalDays
+        }
+        // Without Device Owner the panel does not offer the reboot, so its form cannot turn it off.
+        if (rebootAvailable) {
+            maintenance.tabletRebootEnabled = parameters.hasCheckbox("tabletRebootEnabled")
+            if (rebootIntervalDays != null) maintenance.rebootIntervalDays = rebootIntervalDays
         }
         diagnostics.enabled = parameters.hasCheckbox("diagnosticLogEnabled")
 

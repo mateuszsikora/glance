@@ -3,7 +3,9 @@ package com.glance.diagnostics
 import com.glance.diagnostics.KernelMemoryTrend.Advice
 import com.glance.diagnostics.KernelMemoryTrend.Floor
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class KernelMemoryTrendTest {
@@ -116,6 +118,22 @@ class KernelMemoryTrendTest {
             Advice.None(null),
             status(warning - 600 * MIB, KernelMemoryTrend.Growth(-2 * MIB, spanDays = 6)).advice
         )
+    }
+
+    @Test
+    fun scheduledRebootsCoverTheAdviceOnlyWhenTheNextOneComesInTime() {
+        val day = KernelMemoryTrend.DAY_MS
+        // Weekly reboots, two days after the last one: the next is five days away.
+        assertTrue(KernelMemoryTrend.rebootsCover(Advice.RebootSoon(24), 7, 2 * day))
+        assertFalse(KernelMemoryTrend.rebootsCover(Advice.RebootSoon(3), 7, 2 * day))
+        assertFalse(KernelMemoryTrend.rebootsCover(Advice.RebootNow, 7, 2 * day))
+        // Half a day past a monthly interval: tonight's reboot is due.
+        assertTrue(KernelMemoryTrend.rebootsCover(Advice.RebootNow, 30, 30 * day + day / 2))
+        // A day or more past the interval, such as reboots just turned on after 236 days, the
+        // scheduled reboot has not happened yet.
+        assertFalse(KernelMemoryTrend.rebootsCover(Advice.RebootNow, 30, 236 * day))
+        assertFalse(KernelMemoryTrend.rebootsCover(Advice.RebootSoon(24), 7, 9 * day))
+        assertTrue(KernelMemoryTrend.rebootsCover(Advice.None(100), 30, 2 * day))
     }
 
     /** Hourly minimums for the screen-on hours 6:00-23:00 of each day since boot. */

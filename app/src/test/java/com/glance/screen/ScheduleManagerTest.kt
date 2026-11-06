@@ -71,6 +71,22 @@ class ScheduleManagerTest {
     }
 
     @Test
+    fun aScheduledRebootAloneKeepsTheMaintenanceAlarm() {
+        maintenance.nightlyRestartEnabled = false
+        maintenance.tabletRebootEnabled = true
+        config.scheduleEnabled = false
+
+        ScheduleManager(context, config, maintenance).start()
+        assertEquals(ScheduleManager.ACTION_NIGHTLY_MAINTENANCE, alarms.scheduledAlarms.single().action())
+
+        ScheduleManager(context, config, maintenance).handleAlarm(ScheduleManager.ACTION_NIGHTLY_MAINTENANCE)
+        assertEquals(
+            KioskService.ACTION_NIGHTLY_MAINTENANCE,
+            shadowOf(context as android.app.Application).nextStartedService?.action
+        )
+    }
+
+    @Test
     fun stoppingTheScheduleCancelsTheRestartToo() {
         val manager = ScheduleManager(context, config, maintenance).also { it.start() }
 

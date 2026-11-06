@@ -444,6 +444,54 @@
             android:textSize="12sp"
             android:layout_marginBottom="16dp" />
 
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/switchTabletReboot"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/tablet_reboot_label"
+            android:textColor="#FFFFFFFF"
+            android:layout_marginBottom="8dp" />
+
+        <RadioGroup
+            android:id="@+id/groupRebootInterval"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="8dp">
+
+            <RadioButton
+                android:id="@+id/radioRebootWeekly"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/reboot_weekly"
+                android:textColor="#FFFFFFFF"
+                android:layout_marginEnd="12dp" />
+
+            <RadioButton
+                android:id="@+id/radioRebootEvery2Weeks"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/reboot_every_2_weeks"
+                android:textColor="#FFFFFFFF"
+                android:layout_marginEnd="12dp" />
+
+            <RadioButton
+                android:id="@+id/radioRebootEvery30Days"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/reboot_every_30_days"
+                android:textColor="#FFFFFFFF" />
+        </RadioGroup>
+
+        <TextView
+            android:id="@+id/textTabletRebootHelp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/tablet_reboot_help"
+            android:textColor="#FFB0B0B0"
+            android:textSize="12sp"
+            android:layout_marginBottom="16dp" />
+
         <!-- Divider -->
         <View
             android:layout_width="match_parent"

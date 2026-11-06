@@ -215,6 +215,8 @@ internal class RemoteConfigHttpHandler(
     private val uptimeMs: () -> Long = android.os.SystemClock::elapsedRealtime,
     /** False in recovery builds, whose older app code has no nightly restart to configure. */
     private val nightlyRestartAvailable: Boolean = !com.glance.BuildConfig.RESTORE_BUILD,
+    /** A tablet reboot needs Device Owner. */
+    private val deviceOwner: () -> Boolean = { com.glance.kiosk.LockTaskHelper.isDeviceOwner(GlanceApp.instance) },
     private val recoveryState: com.glance.update.RestoreState = com.glance.update.RestoreState(com.glance.GlanceApp.instance),
     private val onRecoveryRequested: (String, Int, String) -> Unit = { action, version, hash ->
         Thread({
@@ -239,7 +241,11 @@ internal class RemoteConfigHttpHandler(
         var notice: String? = null
     )
 
-    private val updater = RemoteConfigUpdater(config, nightlyRestartAvailable = nightlyRestartAvailable)
+    private val updater = RemoteConfigUpdater(
+        config,
+        nightlyRestartAvailable = nightlyRestartAvailable,
+        tabletRebootAvailable = { runCatching(deviceOwner).getOrDefault(false) }
+    )
     private val secureRandom = SecureRandom()
     private val loginLock = Any()
     private val updateLock = Any()
@@ -614,8 +620,24 @@ internal class RemoteConfigHttpHandler(
             "<option value=\"$days\"" + (if (days.toString() == selectedInterval) " selected" else "") +
                 ">${escapeHtml(intervalLabel(days))}</option>"
         }
+        val rebootAvailable = nightlyRestartAvailable && runCatching(deviceOwner).getOrDefault(false)
+        val selectedRebootInterval = submittedValues?.get("rebootIntervalDays") ?: values.rebootIntervalDays.toString()
+        val rebootIntervalOptions = MaintenanceSettings.REBOOT_INTERVAL_DAYS.joinToString("") { days ->
+            "<option value=\"$days\"" + (if (days.toString() == selectedRebootInterval) " selected" else "") +
+                ">${escapeHtml(rebootIntervalLabel(days))}</option>"
+        }
+        val rebootSettings = if (!rebootAvailable) {
+            """<p class="hint">A scheduled tablet reboot needs Device Owner, so it is not available on this tablet. Reboot the tablet by hand when the kernel memory above calls for it.</p>"""
+        } else {
+            """${checkbox("tabletRebootEnabled", "Reboot the tablet on a schedule", checked("tabletRebootEnabled", values.tabletRebootEnabled))}
+                            <div class="grid two">
+                              <div class="field"><label for="rebootIntervalDays">How often</label>
+                                <select id="rebootIntervalDays" name="rebootIntervalDays">$rebootIntervalOptions</select></div>
+                            </div>
+                            <p class="hint">Off unless you turn it on. A reboot releases the kernel memory above, which restarting Glance cannot, and also restarts Glance. It runs at the same time and under the same conditions as the restart, instead of it on the nights both are due; the interval counts from the tablet's last start. The tablet comes back to the dashboard in lock task mode on its own after about a minute, with the screen off again if it is meant to be off, and a screen turned on manually during the OFF window stays on. Home Assistant sees the tablet unavailable meanwhile. If Android refuses, for example during a call, Glance restarts instead. A screen lock that asks for a PIN after a reboot keeps the tablet from coming back.</p>"""
+        }
         // Indented to match the section it is placed in. Recovery builds show the explanation and
-        // the trend, but their older app code cannot restart on a schedule.
+        // the trend, but their older app code cannot restart or reboot on a schedule.
         val restartSettings = if (!nightlyRestartAvailable) "" else """<div class="subsection">
                             ${checkbox("nightlyRestartEnabled", "Restart Glance on a schedule", checked("nightlyRestartEnabled", values.nightlyRestartEnabled))}
                             <div class="grid two">
@@ -625,6 +647,9 @@ internal class RemoteConfigHttpHandler(
                                 <input id="nightlyRestartTime" name="nightlyRestartTime" type="time" value="${value("nightlyRestartTime", values.nightlyRestartTime)}" required></div>
                             </div>
                             <p class="hint">Off unless you turn it on. With the screen schedule on, the restart runs 15 minutes after the screen turns off (halfway through a shorter OFF window) and this time is not used. The interval counts from Glance's last start, so a restart Android forced also counts. If the screen is on, it waits until the idle screen is showing or nobody has used the tablet for 10 minutes. The display goes dark for a few seconds and Home Assistant briefly sees the tablet as unavailable. Without Device Owner every page, including the idle screen, is reloaded instead, which does not release the memory.</p>
+                          </div>
+                          <div class="subsection">
+                            $rebootSettings
                           </div>"""
         val updateStatus = buildString {
             append(statusRow("Installed version", values.update.installedVersion))
@@ -656,8 +681,8 @@ internal class RemoteConfigHttpHandler(
                   <h1>Tablet settings</h1>
                   <p>Changes are validated on the tablet and applied as soon as you save.</p>
                 </div>
-                ${memoryTrendWarning(trend, values)}
-                ${kernelMemoryWarning(kernel)}
+                ${memoryTrendWarning(trend, values, rebootAvailable)}
+                ${kernelMemoryWarning(kernel, values, rebootAvailable)}
                 <form id="remote-settings-form" method="post" action="/save" accept-charset="UTF-8">
                   <input type="hidden" name="csrf" value="${escapeHtml(session.csrfToken)}">
                   <!-- Pressing Enter in a field submits the form's first submit button. Without
@@ -751,12 +776,12 @@ internal class RemoteConfigHttpHandler(
                       </section>
 
                       <section id="memory" class="card settings-card">
-                        ${sectionHeading("05", "Memory", "Spot memory problems and schedule the restarts that clear them.")}
+                        ${sectionHeading("05", "Memory", "Spot memory problems and schedule the restarts and reboots that clear them.")}
                         <div class="section-body">
                           <p class="hint">On some older tablets the graphics driver keeps a little memory every time a page redraws, for example each photo of an idle-screen slideshow, and only a restart of Glance gives it back. When memory runs out, Android closes Glance, which then starts again. If you notice Glance restarting unexpectedly, or the trend below keeps growing, schedule restarts here.</p>
-                          <dl class="status-list">${statusRow("Memory trend", memoryTrendStatus(trend))}${statusRow("Suggestion", restartSuggestion(trend, values))}</dl>
-                          <p class="hint">The system itself can also keep memory that no app gets back. On a 3 GB test tablet the kernel's unreclaimable memory grew by a few megabytes a day; after 236 days without a reboot it held over half of the RAM, and Android began closing Glance even while it was on screen. Restarting Glance does not release it; only rebooting the tablet does.${if (nightlyRestartAvailable) " Glance warns once it reaches ${(KernelMemoryTrend.WARNING_SHARE * 100).toInt()}% of the RAM." else ""}</p>
-                          <dl class="status-list">${kernelMemoryRows(kernel)}</dl>
+                          <dl class="status-list">${statusRow("Memory trend", memoryTrendStatus(trend))}${statusRow("Suggestion", restartSuggestion(trend, values, rebootAvailable))}</dl>
+                          <p class="hint">The system itself can also keep memory that no app gets back. On a 3 GB test tablet the kernel's unreclaimable memory grew by a few megabytes a day; after 236 days without a reboot it held over half of the RAM, and Android began closing Glance even while it was on screen. Restarting Glance does not release it; only rebooting the tablet does${if (rebootAvailable) ", which you can schedule below" else ""}.${if (nightlyRestartAvailable) " Glance warns once it reaches ${(KernelMemoryTrend.WARNING_SHARE * 100).toInt()}% of the RAM." else ""}</p>
+                          <dl class="status-list">${kernelMemoryRows(kernel, values, rebootAvailable)}</dl>
                           $restartSettings
                         </div>
                       </section>
@@ -903,20 +928,30 @@ internal class RemoteConfigHttpHandler(
      * owner, until Android closes Glance for lack of memory. It only points to the Memory section;
      * Glance never schedules restarts by itself.
      */
-    private fun memoryTrendWarning(trend: MemoryTrend.Verdict?, values: RemoteConfigSnapshot): String {
+    private fun memoryTrendWarning(
+        trend: MemoryTrend.Verdict?,
+        values: RemoteConfigSnapshot,
+        rebootAvailable: Boolean
+    ): String {
         if (trend == null || !trend.growing || !nightlyRestartAvailable) return ""
-        if (restartsCover(trend, values)) return ""
+        if (restartsCover(trend, values, rebootAvailable)) return ""
         return "<div class=\"banner warning\" role=\"status\"><span aria-hidden=\"true\">!</span>" +
             "<p>Glance's memory keeps growing: ${escapeHtml(describe(trend))}. Android will close " +
             "Glance once memory runs out. See <a href=\"#memory\">Memory</a> for what helps.</p></div>"
     }
 
     /**
-     * Shown above every section once the kernel holds [KernelMemoryTrend.WARNING_SHARE] of the RAM.
-     * Glance's own trend can be stable meanwhile; only a tablet reboot releases this memory.
+     * Shown above every section once the kernel holds [KernelMemoryTrend.WARNING_SHARE] of the RAM,
+     * unless a scheduled reboot comes within a day. Glance's own trend can be stable meanwhile;
+     * only a tablet reboot releases this memory.
      */
-    private fun kernelMemoryWarning(kernel: KernelMemoryTrend.Status?): String {
+    private fun kernelMemoryWarning(
+        kernel: KernelMemoryTrend.Status?,
+        values: RemoteConfigSnapshot,
+        rebootAvailable: Boolean
+    ): String {
         if (kernel == null || kernel.advice != KernelMemoryTrend.Advice.RebootNow) return ""
+        if (rebootsCover(kernel, values, rebootAvailable)) return ""
         return "<div class=\"banner warning\" role=\"status\"><span aria-hidden=\"true\">!</span>" +
             "<p>The system holds ${kernel.unreclaimableBytes / MIB} MB of memory that only a tablet " +
             "reboot releases, ${(kernel.share * 100).toInt()}% of the RAM. Android may start " +
@@ -924,7 +959,11 @@ internal class RemoteConfigHttpHandler(
             "<a href=\"#memory\">Memory</a>.</p></div>"
     }
 
-    private fun kernelMemoryRows(kernel: KernelMemoryTrend.Status?): String = buildString {
+    private fun kernelMemoryRows(
+        kernel: KernelMemoryTrend.Status?,
+        values: RemoteConfigSnapshot,
+        rebootAvailable: Boolean
+    ): String = buildString {
         if (!nightlyRestartAvailable) {
             append(statusRow("Kernel memory", "Not measured by this recovery build."))
         } else if (kernel == null) {
@@ -956,13 +995,30 @@ internal class RemoteConfigHttpHandler(
             )
         }
         append(statusRow("Device uptime", uptimeText(runCatching(uptimeMs).getOrDefault(0L))))
-        if (kernel != null) append(statusRow("Tablet reboot", rebootSuggestion(kernel)))
+        if (kernel != null) append(statusRow("Tablet reboot", rebootSuggestion(kernel, values, rebootAvailable)))
     }
 
     private fun kernelLevel(kernel: KernelMemoryTrend.Status): String =
         "${kernel.unreclaimableBytes / MIB} MB, ${(kernel.share * 100).toInt()}% of the RAM"
 
-    private fun rebootSuggestion(kernel: KernelMemoryTrend.Status): String =
+    private fun rebootSuggestion(
+        kernel: KernelMemoryTrend.Status,
+        values: RemoteConfigSnapshot,
+        rebootAvailable: Boolean
+    ): String {
+        val advice = rebootAdvice(kernel)
+        if (kernel.advice is KernelMemoryTrend.Advice.None) return advice
+        return if (rebootsCover(kernel, values, rebootAvailable)) "$advice The scheduled reboots already do." else advice
+    }
+
+    private fun rebootsCover(
+        kernel: KernelMemoryTrend.Status,
+        values: RemoteConfigSnapshot,
+        rebootAvailable: Boolean
+    ): Boolean = rebootAvailable && values.tabletRebootEnabled &&
+        KernelMemoryTrend.rebootsCover(kernel.advice, values.rebootIntervalDays, kernel.uptimeMs)
+
+    private fun rebootAdvice(kernel: KernelMemoryTrend.Status): String =
         when (val advice = kernel.advice) {
             KernelMemoryTrend.Advice.RebootNow ->
                 "Reboot the tablet. Restarting Glance does not release this memory."
@@ -982,9 +1038,15 @@ internal class RemoteConfigHttpHandler(
 
     private fun plural(n: Long, unit: String) = "$n $unit" + if (n == 1L) "" else "s"
 
-    private fun restartsCover(trend: MemoryTrend.Verdict, values: RemoteConfigSnapshot): Boolean {
+    /** A reboot restarts Glance too, so frequent enough reboots also cover the suggestion. */
+    private fun restartsCover(
+        trend: MemoryTrend.Verdict,
+        values: RemoteConfigSnapshot,
+        rebootAvailable: Boolean
+    ): Boolean {
         val suggested = MemoryTrend.suggestedRestartIntervalDays(trend) ?: return true
-        return values.nightlyRestartEnabled && values.restartIntervalDays <= suggested
+        return (values.nightlyRestartEnabled && values.restartIntervalDays <= suggested) ||
+            (rebootAvailable && values.tabletRebootEnabled && values.rebootIntervalDays <= suggested)
     }
 
     private fun memoryTrendStatus(trend: MemoryTrend.Verdict?): String = when {
@@ -997,14 +1059,24 @@ internal class RemoteConfigHttpHandler(
         else -> "Stable: ${describe(trend)}"
     }
 
-    private fun restartSuggestion(trend: MemoryTrend.Verdict?, values: RemoteConfigSnapshot): String {
+    private fun restartSuggestion(
+        trend: MemoryTrend.Verdict?,
+        values: RemoteConfigSnapshot,
+        rebootAvailable: Boolean
+    ): String {
         if (!nightlyRestartAvailable) return "None in a recovery build."
         if (trend == null) return "None yet; it needs the first memory check."
         val days = MemoryTrend.suggestedRestartIntervalDays(trend)
             ?: return "No restarts needed while the memory stays stable."
         val advice = "Restart ${intervalLabel(days).lowercase(java.util.Locale.US)}. At the current " +
             "pace that keeps the growth under ${MemoryTrend.RESTART_BUDGET_BYTES / (1024 * 1024)} MB."
-        return if (restartsCover(trend, values)) "$advice The scheduled restarts already do." else advice
+        return if (restartsCover(trend, values, rebootAvailable)) "$advice The scheduled restarts already do." else advice
+    }
+
+    private fun rebootIntervalLabel(days: Int): String = when (days) {
+        7 -> "Once a week"
+        14 -> "Every 2 weeks"
+        else -> "Every $days days"
     }
 
     private fun intervalLabel(days: Int): String = when (days) {
