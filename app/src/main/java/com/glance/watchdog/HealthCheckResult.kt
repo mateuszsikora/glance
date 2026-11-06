@@ -20,10 +20,11 @@ enum class HealthCheckResult {
  * What matters is where the ticks after a reload land. A failed check reloads the page within
  * its tick, so later ticks come k·interval after the reload; a JavaScript timeout reloads it
  * 5 s into the tick, so they come k·interval − 5 s after it. A tick on the boundary leaves a
- * few milliseconds of handler jitter to decide between a skip and a failure. 35 s avoids both
- * series for the default 30 s interval (ticks at 30 and 60 s, or 25 and 55 s) and for 15 and
- * 60 s: the tick after a reload is always skipped and the one after that always judges the
- * page. At 10 and 20 s a timeout's series still hits 35 s, which can cost one extra tick.
+ * few milliseconds of handler jitter to decide between a skip and a failure. 35 s keeps both
+ * series off the boundary for 15, 30 and 60 s intervals, so whether a tick is skipped never
+ * depends on jitter. With the default 30 s interval (ticks at 30 and 60 s, or 25 and 55 s)
+ * exactly one tick is skipped; at 15 s two are, at 60 s none. At 10 and 20 s a timeout's
+ * series still hits 35 s, which can cost one extra tick.
  *
  * Timestamps are elapsed-realtime milliseconds.
  */
