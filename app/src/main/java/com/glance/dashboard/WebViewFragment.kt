@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.graphics.Bitmap
 import android.net.http.SslError
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
@@ -13,6 +14,8 @@ import androidx.fragment.app.Fragment
 import com.glance.databinding.FragmentWebviewBinding
 import com.glance.diagnostics.Diagnostics
 import com.glance.watchdog.CrashLogger
+import com.glance.watchdog.HealthCheckResult
+import com.glance.watchdog.PageLoadGrace
 
 /**
  * Fragment wrapping a WebView that loads a single dashboard URL.
@@ -29,6 +32,8 @@ class WebViewFragment : Fragment() {
         private set
     private var allowedNavigationOrigins: List<String> = emptyList()
     private var isLoaded = false
+    /** Elapsed realtime at which the current content generation started loading. */
+    private var loadStartedAtMs = 0L
     private var mainFrameError = false
     private var rendererGone = false
 
@@ -39,7 +44,7 @@ class WebViewFragment : Fragment() {
         loadUrl(url)
     }
 
-    var onHealthCheckCallback: ((Boolean) -> Unit)? = null
+    var onHealthCheckCallback: ((HealthCheckResult) -> Unit)? = null
 
     /**
      * A `View.LAYER_TYPE_*` constant; a hardware layer unless the caller chose otherwise. Not
@@ -226,6 +231,7 @@ class WebViewFragment : Fragment() {
         }
         url = newUrl
         contentGeneration++
+        loadStartedAtMs = SystemClock.elapsedRealtime()
         isLoaded = false
         _binding?.webview?.loadUrl(url)
     }
@@ -237,6 +243,7 @@ class WebViewFragment : Fragment() {
         }
         val currentBinding = _binding ?: return
         contentGeneration++
+        loadStartedAtMs = SystemClock.elapsedRealtime()
         isLoaded = false
         currentBinding.webview.reload()
     }
@@ -248,8 +255,20 @@ class WebViewFragment : Fragment() {
     }
 
     fun performHealthCheck() {
-        if (rendererGone || !isLoaded || _binding == null) {
-            onHealthCheckCallback?.invoke(false)
+        if (rendererGone || _binding == null) {
+            onHealthCheckCallback?.invoke(HealthCheckResult.UNHEALTHY)
+            return
+        }
+        if (!isLoaded) {
+            val now = SystemClock.elapsedRealtime()
+            val result = PageLoadGrace.resultWhileLoading(mainFrameError, loadStartedAtMs, now)
+            if (result == HealthCheckResult.STILL_LOADING) {
+                val seconds = (now - loadStartedAtMs) / 1000L
+                Diagnostics.record(
+                    "Health check skipped; page $diagnosticLabel still loading after $seconds s"
+                )
+            }
+            onHealthCheckCallback?.invoke(result)
             return
         }
 
@@ -265,7 +284,9 @@ class WebViewFragment : Fragment() {
                     configuredUrl = url,
                     additionalOriginUrls = allowedNavigationOrigins
                 )
-            onHealthCheckCallback?.invoke(healthy)
+            onHealthCheckCallback?.invoke(
+                if (healthy) HealthCheckResult.HEALTHY else HealthCheckResult.UNHEALTHY
+            )
         }
     }
 

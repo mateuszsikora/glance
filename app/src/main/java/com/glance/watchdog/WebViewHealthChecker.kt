@@ -30,18 +30,13 @@ class WebViewHealthChecker(
         pendingFragment = fragment
         val completion = CompletionGate()
 
-        fragment.onHealthCheckCallback = { healthy ->
+        fragment.onHealthCheckCallback = { result ->
             if (generation == checkGeneration && completion.tryComplete()) {
                 pendingTimeout?.let(handler::removeCallbacks)
                 pendingTimeout = null
                 fragment.onHealthCheckCallback = null
                 pendingFragment = null
-                if (healthy) {
-                    consecutiveFailures = 0
-                    Log.d(TAG, "Health check passed")
-                } else {
-                    handleFailure()
-                }
+                onResult(result)
             }
         }
 
@@ -58,6 +53,18 @@ class WebViewHealthChecker(
         // Register the timeout before invoking the fragment: unavailable or not-yet-loaded
         // WebViews can report a result synchronously.
         fragment.performHealthCheck()
+    }
+
+    internal fun onResult(result: HealthCheckResult) {
+        when (result) {
+            HealthCheckResult.HEALTHY -> {
+                consecutiveFailures = 0
+                Log.d(TAG, "Health check passed")
+            }
+            HealthCheckResult.UNHEALTHY -> handleFailure()
+            // Neither pass nor failure: earlier failures still count towards a restart.
+            HealthCheckResult.STILL_LOADING -> Log.d(TAG, "Page still loading, check skipped")
+        }
     }
 
     private fun handleFailure() {
