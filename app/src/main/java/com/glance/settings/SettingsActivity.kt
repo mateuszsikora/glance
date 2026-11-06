@@ -236,7 +236,9 @@ class SettingsActivity : AppCompatActivity() {
         textMemoryTrend = findViewById(R.id.textMemoryTrend)
         textKernelMemory = findViewById(R.id.textKernelMemory)
         findViewById<TextView>(R.id.textKernelMemoryHelp).text = getString(
-            R.string.kernel_memory_help,
+            // Without Device Owner the reboot below cannot be scheduled.
+            if (LockTaskHelper.isDeviceOwner(this)) R.string.kernel_memory_help
+            else R.string.kernel_memory_help_manual,
             (KernelMemoryTrend.WARNING_SHARE * 100).toInt()
         )
         switchMqttEnabled = findViewById(R.id.switchMqttEnabled)
@@ -294,7 +296,7 @@ class SettingsActivity : AppCompatActivity() {
             findViewById<TextView>(R.id.textTabletRebootHelp).setText(R.string.tablet_reboot_unavailable)
         }
         textMemoryTrend.text = memoryTrendText(GlanceApp.instance.memoryTrend.latest())
-        textKernelMemory.text = kernelMemoryText(GlanceApp.instance.kernelMemory.status())
+        textKernelMemory.text = kernelMemoryText(GlanceApp.instance.kernelMemory.status(), maintenance)
         switchMqttEnabled.isChecked = config.mqttEnabled
         editMqttBrokerHost.setText(
             config.mqttBrokerHost.ifBlank {
@@ -858,10 +860,20 @@ class SettingsActivity : AppCompatActivity() {
         return getString(R.string.memory_trend_growing, megabytes, hours, label)
     }
 
-    /** The kernel's unreclaimable memory, its daily trend, the uptime, and whether to reboot. */
-    private fun kernelMemoryText(kernel: KernelMemoryTrend.Status?): String {
+    /**
+     * The kernel's unreclaimable memory, its daily trend, the uptime, and whether to reboot; like
+     * the remote panel, it says so when the scheduled reboots come in time.
+     */
+    private fun kernelMemoryText(
+        kernel: KernelMemoryTrend.Status?,
+        maintenance: MaintenanceSettings
+    ): String {
         if (kernel == null) return getString(R.string.kernel_memory_unavailable)
         val growth = kernel.growth
+        val covered = kernel.advice !is KernelMemoryTrend.Advice.None &&
+            maintenance.tabletRebootEnabled &&
+            LockTaskHelper.isDeviceOwner(this) &&
+            KernelMemoryTrend.rebootsCover(kernel.advice, maintenance.rebootIntervalDays, kernel.uptimeMs)
         val advice = when (val advice = kernel.advice) {
             KernelMemoryTrend.Advice.RebootNow -> getString(R.string.kernel_memory_reboot_now)
             is KernelMemoryTrend.Advice.RebootSoon -> getString(
@@ -871,7 +883,7 @@ class SettingsActivity : AppCompatActivity() {
             is KernelMemoryTrend.Advice.None -> advice.daysToWarning
                 ?.let { getString(R.string.kernel_memory_reboot_later, it) }
                 ?: getString(R.string.kernel_memory_reboot_none)
-        }
+        }.let { if (covered) it + " " + getString(R.string.kernel_memory_reboots_cover) else it }
         return listOf(
             getString(
                 R.string.kernel_memory_level,

@@ -1,12 +1,16 @@
 package com.glance.kiosk
 
 import android.app.admin.DevicePolicyManager
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
+import androidx.core.content.ContextCompat
 import com.glance.AdminReceiver
 import com.glance.diagnostics.Diagnostics
 
@@ -16,8 +20,10 @@ import com.glance.diagnostics.Diagnostics
  * process, as [AppRestarter] does, leaves it in place.
  *
  * Requires Device Owner ([DevicePolicyManager.reboot]). Android refuses the reboot during a phone
- * call; then, and when the tablet is somehow still running a minute later, Glance restarts its
- * process instead, which releases at least its own memory.
+ * call; then, and when the tablet has not begun to shut down three minutes later, Glance restarts
+ * its process instead, which releases at least its own memory. Once Android announces the
+ * shutdown, it is left to finish however long it takes: a restart in the middle would drop the
+ * marker the next boot needs.
  *
  * After the boot [BootReceiver] opens the dashboard, which enters lock task mode and starts the
  * services, as after any boot. A marker tells [KioskService] that this boot was the scheduled
@@ -33,8 +39,11 @@ object TabletRebooter {
     private const val KEY_BOOT_COUNT = "boot_count"
     /** Lets the journal thread and pending preference writes reach storage first. */
     internal const val REBOOT_DELAY_MS = 1_000L
-    /** A reboot ends the process within seconds; still running after this, it did not happen. */
-    internal const val REBOOT_TIMEOUT_MS = 60_000L
+    /**
+     * Without a shutdown broadcast for this long, the reboot did not happen. Shutting down usually
+     * takes 20-40 seconds, but the broadcast itself can come late on a tablet that swaps hard.
+     */
+    internal const val REBOOT_TIMEOUT_MS = 3 * 60_000L
     /**
      * EMUI can deliver BOOT_COMPLETED minutes after the boot. A marker older than this was left by
      * a reboot that never came back to Glance, and the boot that finds it is not the scheduled one.
@@ -45,6 +54,10 @@ object TabletRebooter {
     @Volatile
     var rebootInProgress = false
         internal set
+
+    private val handler = Handler(Looper.getMainLooper())
+    private var fallback: Runnable? = null
+    private var shutdownReceiver: BroadcastReceiver? = null
 
     /**
      * @param displayOn whether the display is on now; used only when Glance restarts instead.
@@ -63,7 +76,11 @@ object TabletRebooter {
         // The tablet starts without today's samples; judge them now.
         (app as? com.glance.GlanceApp)?.memoryTrend?.evaluateNow(SystemClock.elapsedRealtime())
         markReboot(app)
-        val handler = Handler(Looper.getMainLooper())
+        val didNotReboot = Runnable {
+            restartInstead(app, reason, displayOn, "the tablet did not reboot", restartApp)
+        }
+        fallback = didNotReboot
+        watchForShutdown(app)
         handler.postDelayed(
             {
                 try {
@@ -74,13 +91,31 @@ object TabletRebooter {
                     restartInstead(app, reason, displayOn, "the tablet refused to reboot", restartApp)
                     return@postDelayed
                 }
-                handler.postDelayed(
-                    { restartInstead(app, reason, displayOn, "the tablet did not reboot", restartApp) },
-                    REBOOT_TIMEOUT_MS
-                )
+                // Unless the shutdown has already been announced.
+                if (fallback === didNotReboot) handler.postDelayed(didNotReboot, REBOOT_TIMEOUT_MS)
             },
             REBOOT_DELAY_MS
         )
+    }
+
+    /** Registered before the reboot is requested: the call can return after the broadcast. */
+    private fun watchForShutdown(context: Context) {
+        stopWatchingForShutdown(context)
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                if (intent?.action != Intent.ACTION_SHUTDOWN) return
+                Log.i(TAG, "Shutdown under way")
+                fallback?.let(handler::removeCallbacks)
+                fallback = null
+            }
+        }
+        ContextCompat.registerReceiver(
+            context,
+            receiver,
+            IntentFilter(Intent.ACTION_SHUTDOWN),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        shutdownReceiver = receiver
     }
 
     /**
@@ -136,10 +171,18 @@ object TabletRebooter {
         failure: String,
         restartApp: (Context, String, Boolean) -> Unit
     ) {
+        fallback?.let(handler::removeCallbacks)
+        fallback = null
+        stopWatchingForShutdown(context)
         clearMarker(context)
         rebootInProgress = false
         Diagnostics.record("Tablet reboot failed: $failure; restarting Glance instead")
         restartApp(context, "$reason, $failure", displayOn)
+    }
+
+    private fun stopWatchingForShutdown(context: Context) {
+        shutdownReceiver?.let { runCatching { context.applicationContext.unregisterReceiver(it) } }
+        shutdownReceiver = null
     }
 
     private fun clearMarker(context: Context) {

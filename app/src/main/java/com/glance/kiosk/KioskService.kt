@@ -466,17 +466,19 @@ class KioskService : Service() {
             deviceOwner = deviceOwner
         )
         if (action == null) {
-            Diagnostics.record(
+            val reasons = listOfNotNull(
                 when {
-                    settings.nightlyRestartEnabled && intervalDays <= 1 ->
-                        "Nightly maintenance skipped; the app started less than an hour ago"
-                    settings.nightlyRestartEnabled ->
-                        "Nightly maintenance skipped; not due yet in its $intervalDays-day interval"
-                    !deviceOwner -> "Nightly maintenance skipped; a tablet reboot needs Device Owner"
-                    else -> "Nightly maintenance skipped; the tablet reboot is not due yet in its " +
-                        "${settings.rebootIntervalDays}-day interval"
+                    !settings.nightlyRestartEnabled -> null
+                    intervalDays <= 1 -> "the app started less than an hour ago"
+                    else -> "the restart is not due yet in its $intervalDays-day interval"
+                },
+                when {
+                    !settings.tabletRebootEnabled -> null
+                    !deviceOwner -> "a tablet reboot needs Device Owner"
+                    else -> "the tablet reboot is not due yet in its ${settings.rebootIntervalDays}-day interval"
                 }
             )
+            Diagnostics.record("Nightly maintenance skipped; " + reasons.joinToString("; "))
             return
         }
         Diagnostics.record(

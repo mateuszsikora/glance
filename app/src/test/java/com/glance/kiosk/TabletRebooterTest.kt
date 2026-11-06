@@ -1,10 +1,13 @@
 package com.glance.kiosk
 
+import android.app.Application
 import android.content.Context
+import android.content.Intent
 import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
 import java.time.Duration
 import org.junit.After
+import org.junit.Before
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -20,6 +23,13 @@ class TabletRebooterTest {
 
     private val context = ApplicationProvider.getApplicationContext<Context>()
     private val restarts = mutableListOf<Pair<String, Boolean>>()
+
+    @Before
+    fun grantReceiverPermission() {
+        // ContextCompat's API 26 stand-in for RECEIVER_NOT_EXPORTED; merged into the real manifest.
+        shadowOf(context as Application)
+            .grantPermissions("${context.packageName}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION")
+    }
 
     @After
     fun tearDown() {
@@ -70,7 +80,25 @@ class TabletRebooterTest {
     }
 
     @Test
-    fun aRebootThatDoesNotHappenWithinAMinuteRestartsGlanceInstead() {
+    fun aSlowShutdownIsLeftToFinish() {
+        TabletRebooter.reboot(
+            context,
+            "nightly maintenance",
+            displayOn = false,
+            rebootDevice = {},
+            restartApp = { _, reason, displayOn -> restarts += reason to displayOn }
+        )
+        advance(TabletRebooter.REBOOT_DELAY_MS)
+
+        context.sendBroadcast(Intent(Intent.ACTION_SHUTDOWN))
+        advance(2 * TabletRebooter.REBOOT_TIMEOUT_MS)
+
+        assertTrue(restarts.isEmpty())
+        assertFalse(markerState().all.isEmpty())
+    }
+
+    @Test
+    fun aRebootThatDoesNotBeginInTimeRestartsGlanceInstead() {
         var reboots = 0
         TabletRebooter.reboot(
             context,
