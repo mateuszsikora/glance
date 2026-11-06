@@ -41,13 +41,41 @@ class MaintenanceSettingsTest {
     }
 
     @Test
+    fun scheduledRebootsDefaultToOffWeeklyAndPersist() {
+        val defaults = MaintenanceSettings(context)
+        assertFalse(defaults.tabletRebootEnabled)
+        assertEquals(7, defaults.rebootIntervalDays)
+        assertFalse(defaults.anyScheduled)
+
+        defaults.tabletRebootEnabled = true
+        defaults.rebootIntervalDays = 30
+
+        val reloaded = MaintenanceSettings(context)
+        assertTrue(reloaded.tabletRebootEnabled)
+        assertEquals(30, reloaded.rebootIntervalDays)
+        assertTrue(reloaded.anyScheduled)
+    }
+
+    @Test
+    fun aRebootIntervalThatIsNotOfferedFallsBackToWeekly() {
+        MaintenanceSettings(context).rebootIntervalDays = 1
+
+        assertEquals(7, MaintenanceSettings(context).rebootIntervalDays)
+    }
+
+    @Test
     fun settingsAreNotStoredInTheMainConfiguration() {
         MaintenanceSettings(context).apply {
             nightlyRestartEnabled = false
+            tabletRebootEnabled = true
             quietTime = "04:45"
         }
 
         val configuration = context.getSharedPreferences("glance_config", Context.MODE_PRIVATE)
-        assertTrue(configuration.all.keys.none { it.contains("restart") || it.contains("quiet") })
+        assertTrue(
+            configuration.all.keys.none {
+                it.contains("restart") || it.contains("reboot") || it.contains("quiet")
+            }
+        )
     }
 }

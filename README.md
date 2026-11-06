@@ -51,7 +51,7 @@ Open that address from a computer or phone, sign in with the tablet's settings P
 - dashboard URLs, allowed login origins, rotation and scheduled content profiles;
 - the idle-screen URL and inactivity timeout;
 - automatic and minimum/maximum brightness;
-- screen wake and turn-off schedules, the memory trend and scheduled restarts;
+- screen wake and turn-off schedules, the memory trend, and scheduled restarts and tablet reboots;
 - Home Assistant MQTT connection and discovery;
 - remote access and the settings PIN itself.
 
@@ -283,7 +283,26 @@ The Memory section therefore also shows:
   and the remote panel shows a warning above every section. Before that it suggests a reboot once
   the measured pace reaches the 40% level within 30 days, and otherwise says how far away it is.
   On the test tablet the 40% level comes about two months before the level at which Android began
-  closing Glance. Glance does not reboot the tablet itself.
+  closing Glance. Glance does not reboot the tablet on its own judgement; once reboots are scheduled
+  in time for the advice, the panel says so and drops the warning.
+- **Scheduled tablet reboot**, off by default: once a week, every 2 weeks, or every 30 days. The
+  interval counts from the tablet's last start, whoever rebooted it.
+
+The scheduled reboot runs on the same nightly alarm as the restart, at the same time and under the
+same conditions: 15 minutes after the scheduled screen-off or at the quiet time, postponed while the
+tablet is in use, and skipped for the night after three hours. On a night both are due, the reboot
+replaces the restart, since it restarts Glance too. Only a Device Owner can reboot the tablet
+(`DevicePolicyManager.reboot`); without it the option is shown as unavailable. Weekly reboots also
+count as weekly restarts for the memory trend's suggestion.
+
+After the reboot the tablet comes back to the dashboard in lock task mode on its own, usually within
+a minute or two. It keeps the screen state it was asked for before the reboot instead of applying the
+schedule again: inside the OFF window the display turns off again once the tablet is up, and a
+screen turned on manually during the OFF window stays on. The `Screen` light reports that state, and
+Home Assistant sees the tablet unavailable while it boots. If Android refuses the reboot, for example
+during a phone call, or the tablet is still running a minute later, Glance restarts its process
+instead and records why in the diagnostic log. A screen lock that asks for a PIN or pattern after a
+reboot keeps the tablet from coming back, so a kiosk that reboots on a schedule must not have one.
 
 The idle screen's WebView is drawn straight onto the window, without an offscreen layer, which would
 add a full-screen texture and a compositing pass to every frame of a slideshow that plays all day.

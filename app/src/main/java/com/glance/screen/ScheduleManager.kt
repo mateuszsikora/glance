@@ -17,7 +17,7 @@ import java.time.ZoneId
 import java.util.Calendar
 
 /**
- * Persistent daily screen schedule and the nightly maintenance restart placed inside it.
+ * Persistent daily screen schedule and the nightly maintenance restart or reboot placed inside it.
  *
  * Alarms target the manifest-declared [ScheduleReceiver], so they remain actionable even when
  * MainActivity has been destroyed. The receiver delegates hardware work to [KioskService].
@@ -72,7 +72,7 @@ class ScheduleManager(
         if (action == ACTION_NIGHTLY_MAINTENANCE) {
             Log.i(TAG, "Nightly maintenance alarm fired")
             scheduleNightlyMaintenance()
-            if (maintenance.nightlyRestartEnabled) {
+            if (maintenance.anyScheduled) {
                 dispatchKioskCommand(
                     Intent(context, KioskService::class.java)
                         .setAction(KioskService.ACTION_NIGHTLY_MAINTENANCE)
@@ -116,7 +116,7 @@ class ScheduleManager(
      * too, at their quiet time instead.
      */
     private fun scheduleNightlyMaintenance() {
-        if (!maintenance.nightlyRestartEnabled) {
+        if (!maintenance.anyScheduled) {
             cancelAlarm(ACTION_NIGHTLY_MAINTENANCE)
             return
         }

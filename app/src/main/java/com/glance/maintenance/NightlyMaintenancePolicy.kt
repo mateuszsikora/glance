@@ -15,6 +15,11 @@ import java.time.LocalTime
  * [com.glance.dashboard.IdleMaintenanceReload] can keep deferring the reload of an idle page that
  * stays on screen.
  *
+ * A tablet reboot, which the owner can schedule as well, runs on the same alarm and under the same
+ * conditions. It also ends the process, and in addition releases the kernel's unreclaimable memory
+ * (see [com.glance.diagnostics.KernelMemoryTrend]), so on a night both are due it replaces the
+ * restart.
+ *
  * The restart is placed where nobody is watching: shortly after the scheduled screen-off, or at a
  * configured quiet time on installations without a screen OFF window. If the screen is on at that
  * moment it still waits for the tablet to be left alone.
@@ -43,6 +48,9 @@ object NightlyMaintenancePolicy {
     private const val INTERVAL_SLACK_MS = 6 * 60 * 60_000L
 
     enum class Decision { RUN, POSTPONE, GIVE_UP }
+
+    /** What a night's maintenance does once it may run. */
+    enum class Action { RESTART, REBOOT }
 
     /** The daily screen schedule; the display is off from [off] until [on]. */
     data class ScreenOffWindow(val on: LocalTime, val off: LocalTime)
@@ -97,5 +105,33 @@ object NightlyMaintenancePolicy {
         val due = if (intervalDays <= 1) MIN_PROCESS_UPTIME_MS
         else intervalDays * 24 * 60 * 60_000L - INTERVAL_SLACK_MS
         return processUptimeMs >= due
+    }
+
+    /**
+     * The kernel memory a reboot releases has built up since the tablet started, whoever rebooted
+     * it; so the interval counts from boot.
+     *
+     * @param deviceUptimeMs [android.os.SystemClock.elapsedRealtime].
+     */
+    fun rebootDue(deviceUptimeMs: Long, intervalDays: Int): Boolean =
+        deviceUptimeMs >= intervalDays * 24 * 60 * 60_000L - INTERVAL_SLACK_MS
+
+    /**
+     * @param deviceOwner a reboot needs it; without it only a restart, which then reloads every
+     * page instead, is possible.
+     * @return what tonight's maintenance does, or null when nothing is due.
+     */
+    fun action(
+        restartEnabled: Boolean,
+        restartIntervalDays: Int,
+        processUptimeMs: Long,
+        rebootEnabled: Boolean,
+        rebootIntervalDays: Int,
+        deviceUptimeMs: Long,
+        deviceOwner: Boolean
+    ): Action? = when {
+        rebootEnabled && deviceOwner && rebootDue(deviceUptimeMs, rebootIntervalDays) -> Action.REBOOT
+        restartEnabled && worthwhile(processUptimeMs, restartIntervalDays) -> Action.RESTART
+        else -> null
     }
 }

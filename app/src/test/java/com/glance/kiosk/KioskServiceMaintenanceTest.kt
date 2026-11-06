@@ -2,19 +2,23 @@ package com.glance.kiosk
 
 import android.app.AlarmManager
 import android.app.Application
+import android.app.KeyguardManager
 import android.app.admin.DevicePolicyManager
 import android.content.Context
 import android.content.Intent
 import android.os.Looper
 import android.os.PowerManager
+import android.provider.Settings
 import androidx.test.core.app.ApplicationProvider
 import com.glance.AdminReceiver
 import com.glance.MainActivity
 import com.glance.config.AppConfig
+import com.glance.maintenance.MaintenanceSettings
 import com.glance.maintenance.NightlyMaintenancePolicy
 import java.time.Duration
 import java.time.LocalTime
 import org.junit.After
+import org.junit.Before
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -37,11 +41,18 @@ class KioskServiceMaintenanceTest {
     private val config = AppConfig(app)
     private var controller: ServiceController<KioskService>? = null
 
+    @Before
+    fun scheduleRestarts() {
+        // Off by default; most of these tests are about the restart.
+        MaintenanceSettings(app).nightlyRestartEnabled = true
+    }
+
     @After
     fun tearDown() {
         controller?.destroy()
-        // AppRestarter is process-wide; Robolectric keeps it across tests.
+        // AppRestarter and TabletRebooter are process-wide; Robolectric keeps them across tests.
         AppRestarter.restartInProgress = false
+        TabletRebooter.rebootInProgress = false
     }
 
     @Test
@@ -237,6 +248,109 @@ class KioskServiceMaintenanceTest {
         assertNull(AppRestarter.consumePendingRelaunch(app))
     }
 
+    @Test
+    fun withTheDisplayOffADeviceOwnerRebootsOnceTheRebootIsDue() {
+        becomeDeviceOwner()
+        MaintenanceSettings(app).tabletRebootEnabled = true
+        start()
+        advance(7 * DAY)
+        shadowOf(app.getSystemService(PowerManager::class.java)).setIsInteractive(false)
+        clearBroadcasts()
+
+        // The reboot is posted a second later; the looper is never advanced that far here.
+        requestMaintenance()
+
+        assertTrue(maintenanceBroadcasts().isEmpty())
+        assertTrue(TabletRebooter.rebootInProgress)
+        assertFalse(AppRestarter.restartInProgress)
+    }
+
+    @Test
+    fun withTheDisplayOnTheActivityIsAskedToRebootRatherThanRestart() {
+        becomeDeviceOwner()
+        MaintenanceSettings(app).tabletRebootEnabled = true
+        start()
+        advance(7 * DAY)
+        clearBroadcasts()
+
+        requestMaintenance()
+
+        assertTrue(maintenanceBroadcasts().single().getBooleanExtra(KioskService.EXTRA_MAINTENANCE_REBOOT, false))
+        assertFalse(TabletRebooter.rebootInProgress)
+    }
+
+    @Test
+    fun aRebootThatIsNotDueYetLeavesTheRestartToItsOwnInterval() {
+        becomeDeviceOwner()
+        MaintenanceSettings(app).tabletRebootEnabled = true
+        start()
+        ageProcess()
+        clearBroadcasts()
+
+        requestMaintenance()
+
+        assertFalse(maintenanceBroadcasts().single().getBooleanExtra(KioskService.EXTRA_MAINTENANCE_REBOOT, true))
+    }
+
+    @Test
+    fun theBootAfterAScheduledRebootKeepsAManualScreenOverride() {
+        // Inside the OFF window, after an MQTT ON command.
+        insideTheOffWindow()
+        config.requestedScreenOn = true
+        becomeDeviceOwner()
+        rebootedSinceMarking()
+
+        start(Intent(app, KioskService::class.java).putExtra(KioskService.EXTRA_DASHBOARD_LAUNCHED, true))
+
+        assertFalse(startedServiceActions().contains(KioskService.ACTION_COMMAND_SCREEN))
+        assertTrue(config.requestedScreenOn)
+        assertFalse(app.getSystemService(KeyguardManager::class.java).isKeyguardLocked)
+        assertFalse(TabletRebooter.consumePendingReboot(app))
+    }
+
+    @Test
+    fun theBootAfterAScheduledRebootInsideTheOffWindowTurnsTheDisplayOffAgain() {
+        insideTheOffWindow()
+        config.requestedScreenOn = false
+        becomeDeviceOwner()
+        rebootedSinceMarking()
+
+        start(Intent(app, KioskService::class.java).putExtra(KioskService.EXTRA_DASHBOARD_LAUNCHED, true))
+
+        assertFalse(config.requestedScreenOn)
+        assertTrue(app.getSystemService(KeyguardManager::class.java).isKeyguardLocked)
+    }
+
+    @Test
+    fun anUnplannedBootStillAppliesTheSchedule() {
+        insideTheOffWindow()
+        config.requestedScreenOn = true
+        // A marker from this boot: the reboot it announced never happened.
+        TabletRebooter.markReboot(app, bootCount = 5)
+        Settings.Global.putInt(app.contentResolver, Settings.Global.BOOT_COUNT, 5)
+
+        start(Intent(app, KioskService::class.java).putExtra(KioskService.EXTRA_DASHBOARD_LAUNCHED, true))
+
+        assertTrue(startedServiceActions().contains(KioskService.ACTION_COMMAND_SCREEN))
+    }
+
+    private fun becomeDeviceOwner() {
+        shadowOf(app.getSystemService(DevicePolicyManager::class.java))
+            .setDeviceOwner(AdminReceiver.getComponentName(app))
+    }
+
+    private fun rebootedSinceMarking() {
+        TabletRebooter.markReboot(app, bootCount = 5)
+        Settings.Global.putInt(app.contentResolver, Settings.Global.BOOT_COUNT, 6)
+    }
+
+    private fun insideTheOffWindow() {
+        val now = LocalTime.now()
+        config.scheduleEnabled = true
+        config.screenOffTime = now.minusHours(1).withSecond(0).withNano(0).toString().take(5)
+        config.screenOnTime = now.plusHours(1).withSecond(0).withNano(0).toString().take(5)
+    }
+
     private fun start(intent: Intent = Intent(app, KioskService::class.java)) {
         // ContextCompat's API 26 stand-in for RECEIVER_NOT_EXPORTED; merged into the real manifest.
         shadowOf(app).grantPermissions("${app.packageName}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION")
@@ -286,4 +400,8 @@ class KioskServiceMaintenanceTest {
 
     private fun maintenanceBroadcasts(): List<Intent> = shadowOf(app).broadcastIntents
         .filter { it.action == KioskService.ACTION_CONTROL_NIGHTLY_MAINTENANCE }
+
+    private companion object {
+        const val DAY = 24 * 60 * 60_000L
+    }
 }

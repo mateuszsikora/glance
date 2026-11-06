@@ -68,6 +68,8 @@ class KioskService : Service() {
     private var displayRestorePending = false
     /** Elapsed-realtime start of tonight's maintenance while it still waits; null otherwise. */
     private var maintenanceRequestedAtMs: Long? = null
+    /** What tonight's maintenance does once the tablet is left alone. */
+    private var maintenanceAction = NightlyMaintenancePolicy.Action.RESTART
 
     private val screenStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -232,6 +234,8 @@ class KioskService : Service() {
         )
 
         val relaunch = AppRestarter.consumePendingRelaunch(this)
+        // Consumed on every first start, so a marker never outlives the boot after it.
+        val rebooted = TabletRebooter.consumePendingReboot(this) && relaunch == null
         val restoreDisplay = relaunch?.wakeDisplay == true && config.requestedScreenOn
         if (restoreDisplay) {
             // The display is only dark for the restart; Home Assistant should not see it go off.
@@ -240,12 +244,20 @@ class KioskService : Service() {
         }
         startMqtt()
         startBatteryMonitor()
-        // After a maintenance restart the persisted requested state stands. Recomputing it from
-        // the schedule would cancel a manual MQTT override until the next scheduled transition.
+        // After a maintenance restart or reboot the persisted requested state stands. Recomputing
+        // it from the schedule would cancel a manual MQTT override until the next scheduled
+        // transition.
         scheduleManager = ScheduleManager(this, config).also {
-            it.start(applyCurrentState = relaunch == null)
+            it.start(applyCurrentState = relaunch == null && !rebooted)
         }
         reconcileRemoteConfigServer()
+        if (rebooted) {
+            Log.i(TAG, "First start after a scheduled reboot, restoring the requested screen state")
+            Diagnostics.record("First start after a scheduled tablet reboot")
+            // The boot lit the display; inside the OFF window it goes dark again, and Home
+            // Assistant hears the state either way.
+            handleLightCommand(MqttLightCommand(screenOn = config.requestedScreenOn, brightness = null))
+        }
         if (relaunch == null && !dashboardLaunchedBySender && MainActivity.liveInstances.get() == 0) {
             // Android restarts this sticky service after the process died, but not the Activity
             // it lost; Glance is usually not the home app, so the launcher would stay in front.
@@ -441,19 +453,37 @@ class KioskService : Service() {
 
     private fun startNightlyMaintenance() {
         val now = SystemClock.elapsedRealtime()
-        val intervalDays = MaintenanceSettings(this).restartIntervalDays
-        if (!NightlyMaintenancePolicy.worthwhile(
-                now - GlanceApp.instance.processStartElapsedMs,
-                intervalDays
-            )
-        ) {
+        val settings = MaintenanceSettings(this)
+        val intervalDays = settings.restartIntervalDays
+        val deviceOwner = devicePolicyManager.isDeviceOwnerApp(packageName)
+        val action = NightlyMaintenancePolicy.action(
+            restartEnabled = settings.nightlyRestartEnabled,
+            restartIntervalDays = intervalDays,
+            processUptimeMs = now - GlanceApp.instance.processStartElapsedMs,
+            rebootEnabled = settings.tabletRebootEnabled,
+            rebootIntervalDays = settings.rebootIntervalDays,
+            deviceUptimeMs = now,
+            deviceOwner = deviceOwner
+        )
+        if (action == null) {
             Diagnostics.record(
-                if (intervalDays <= 1) "Nightly maintenance skipped; the app started less than an hour ago"
-                else "Nightly maintenance skipped; not due yet in its $intervalDays-day interval"
+                when {
+                    settings.nightlyRestartEnabled && intervalDays <= 1 ->
+                        "Nightly maintenance skipped; the app started less than an hour ago"
+                    settings.nightlyRestartEnabled ->
+                        "Nightly maintenance skipped; not due yet in its $intervalDays-day interval"
+                    !deviceOwner -> "Nightly maintenance skipped; a tablet reboot needs Device Owner"
+                    else -> "Nightly maintenance skipped; the tablet reboot is not due yet in its " +
+                        "${settings.rebootIntervalDays}-day interval"
+                }
             )
             return
         }
-        Diagnostics.record("Nightly maintenance requested")
+        Diagnostics.record(
+            if (action == NightlyMaintenancePolicy.Action.REBOOT) "Nightly maintenance requested: tablet reboot"
+            else "Nightly maintenance requested"
+        )
+        maintenanceAction = action
         maintenanceRequestedAtMs = now
         mainHandler.removeCallbacks(nightlyMaintenanceRunnable)
         attemptNightlyMaintenance()
@@ -471,14 +501,20 @@ class KioskService : Service() {
      */
     private fun attemptNightlyMaintenance() {
         val requestedAt = maintenanceRequestedAtMs ?: return
+        val reboot = maintenanceAction == NightlyMaintenancePolicy.Action.REBOOT
         if (devicePolicyManager.isDeviceOwnerApp(packageName) && !powerManager.isInteractive) {
             finishNightlyMaintenance()
-            AppRestarter.restart(this, "nightly maintenance, display off", displayOn = false)
+            if (reboot) {
+                TabletRebooter.reboot(this, "nightly maintenance, display off", displayOn = false)
+            } else {
+                AppRestarter.restart(this, "nightly maintenance, display off", displayOn = false)
+            }
             return
         }
         sendActivityControl(
             Intent(ACTION_CONTROL_NIGHTLY_MAINTENANCE)
                 .putExtra(EXTRA_MAINTENANCE_REQUESTED_AT, requestedAt)
+                .putExtra(EXTRA_MAINTENANCE_REBOOT, reboot)
         )
         val postponedForMs = SystemClock.elapsedRealtime() - requestedAt
         if (postponedForMs < NightlyMaintenancePolicy.MAX_POSTPONE_MS) {
@@ -509,8 +545,9 @@ class KioskService : Service() {
      * and such a wake must not be mistaken for a request to abandon the screen schedule.
      */
     private fun reportScreenState(isOn: Boolean) {
-        // A restart darkens the display only until the next process turns it back on.
-        if (AppRestarter.restartInProgress || displayRestorePending) return
+        // A restart darkens the display only until the next process turns it back on, a reboot
+        // until the tablet is back up.
+        if (AppRestarter.restartInProgress || TabletRebooter.rebootInProgress || displayRestorePending) return
         if (reportedScreenOn == isOn) return
         reportedScreenOn = isOn
         mqttStateManager?.publishCurrentState()
@@ -666,6 +703,8 @@ class KioskService : Service() {
         const val ACTION_REPORT_NIGHTLY_MAINTENANCE_DONE =
             "com.glance.action.REPORT_NIGHTLY_MAINTENANCE_DONE"
         const val EXTRA_MAINTENANCE_REQUESTED_AT = "maintenance_requested_at"
+        /** Whether tonight's maintenance reboots the tablet rather than restarting Glance. */
+        const val EXTRA_MAINTENANCE_REBOOT = "maintenance_reboot"
         const val EXTRA_SCREEN_ON = "screen_on"
         /** False when the Activity merely observed the screen state rather than changing it. */
         const val EXTRA_DELIBERATE = "deliberate"

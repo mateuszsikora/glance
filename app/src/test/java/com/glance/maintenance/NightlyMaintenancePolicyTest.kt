@@ -1,5 +1,6 @@
 package com.glance.maintenance
 
+import com.glance.maintenance.NightlyMaintenancePolicy.Action
 import com.glance.maintenance.NightlyMaintenancePolicy.Decision
 import com.glance.maintenance.NightlyMaintenancePolicy.ScreenOffWindow
 import java.time.LocalDateTime
@@ -120,6 +121,58 @@ class NightlyMaintenancePolicyTest {
         assertFalse(NightlyMaintenancePolicy.worthwhile(6 * 24 * hour, intervalDays = 7))
         assertTrue(NightlyMaintenancePolicy.worthwhile(7 * 24 * hour, intervalDays = 7))
     }
+
+    @Test
+    fun rebootIntervalsCountFromBootWithTheSameSlack() {
+        val hour = 60 * 60_000L
+        assertFalse(NightlyMaintenancePolicy.rebootDue(6 * 24 * hour, intervalDays = 7))
+        // Rebooted by the schedule a week ago, a few minutes later in the evening.
+        assertTrue(NightlyMaintenancePolicy.rebootDue(7 * 24 * hour - 5 * 60_000L, intervalDays = 7))
+        assertFalse(NightlyMaintenancePolicy.rebootDue(13 * 24 * hour, intervalDays = 14))
+        assertTrue(NightlyMaintenancePolicy.rebootDue(236 * 24 * hour, intervalDays = 30))
+    }
+
+    @Test
+    fun aDueRebootReplacesTheRestart() {
+        val day = 24 * 60 * 60_000L
+        assertEquals(Action.REBOOT, action(rebootEnabled = true, deviceUptimeMs = 8 * day))
+        assertEquals(
+            Action.REBOOT,
+            action(restartEnabled = true, rebootEnabled = true, deviceUptimeMs = 8 * day)
+        )
+        // Not due yet: the restart still runs on its own interval.
+        assertEquals(
+            Action.RESTART,
+            action(restartEnabled = true, rebootEnabled = true, deviceUptimeMs = 3 * day)
+        )
+        assertEquals(null, action(rebootEnabled = true, deviceUptimeMs = 3 * day))
+        assertEquals(null, action(deviceUptimeMs = 8 * day))
+    }
+
+    @Test
+    fun withoutDeviceOwnerOnlyTheRestartRemains() {
+        val day = 24 * 60 * 60_000L
+        assertEquals(null, action(rebootEnabled = true, deviceUptimeMs = 30 * day, deviceOwner = false))
+        assertEquals(
+            Action.RESTART,
+            action(restartEnabled = true, rebootEnabled = true, deviceUptimeMs = 30 * day, deviceOwner = false)
+        )
+    }
+
+    private fun action(
+        restartEnabled: Boolean = false,
+        rebootEnabled: Boolean = false,
+        deviceUptimeMs: Long,
+        deviceOwner: Boolean = true
+    ) = NightlyMaintenancePolicy.action(
+        restartEnabled = restartEnabled,
+        restartIntervalDays = 1,
+        processUptimeMs = 2 * 60 * 60_000L,
+        rebootEnabled = rebootEnabled,
+        rebootIntervalDays = 7,
+        deviceUptimeMs = deviceUptimeMs,
+        deviceOwner = deviceOwner
+    )
 
     private fun decide(
         screenVisible: Boolean = true,

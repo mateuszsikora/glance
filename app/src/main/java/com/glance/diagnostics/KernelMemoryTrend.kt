@@ -107,5 +107,22 @@ object KernelMemoryTrend {
         return if (days <= SOON_DAYS) Advice.RebootSoon(days.coerceAtLeast(1)) else Advice.None(days)
     }
 
+    /**
+     * Whether reboots scheduled every [intervalDays] days come before [advice] is due: the next one
+     * runs once the uptime reaches the interval, so it must fall within the advised days, or within
+     * a day for [Advice.RebootNow]. An uptime a day past the interval means the scheduled reboots
+     * are not happening, for example because the tablet stays in use, and covers nothing.
+     */
+    fun rebootsCover(advice: Advice, intervalDays: Int, uptimeMs: Long): Boolean {
+        val untilNextMs = intervalDays * DAY_MS - uptimeMs
+        if (untilNextMs < -DAY_MS) return false
+        val days = when (advice) {
+            Advice.RebootNow -> 1
+            is Advice.RebootSoon -> advice.days
+            is Advice.None -> return true
+        }
+        return untilNextMs <= days * DAY_MS
+    }
+
     private const val KIB = 1024L
 }

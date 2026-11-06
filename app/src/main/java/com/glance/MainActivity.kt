@@ -37,6 +37,7 @@ import com.glance.kiosk.AppRestarter
 import com.glance.kiosk.KioskService
 import com.glance.kiosk.LockTaskHelper
 import com.glance.kiosk.ServiceStarter
+import com.glance.kiosk.TabletRebooter
 import com.glance.maintenance.NightlyMaintenanceAttempt
 import com.glance.maintenance.NightlyMaintenancePolicy
 import com.glance.screen.ScreenController
@@ -172,7 +173,8 @@ class MainActivity : AppCompatActivity() {
                     intent.getLongExtra(
                         KioskService.EXTRA_MAINTENANCE_REQUESTED_AT,
                         SystemClock.elapsedRealtime()
-                    )
+                    ),
+                    reboot = intent.getBooleanExtra(KioskService.EXTRA_MAINTENANCE_REBOOT, false)
                 )
             }
         }
@@ -675,13 +677,22 @@ class MainActivity : AppCompatActivity() {
 
     // --- Nightly maintenance ---
 
-    /** One attempt; [KioskService] repeats it while the tablet stays in use. */
-    private fun runNightlyMaintenance(requestedAtMs: Long) {
+    /**
+     * One attempt; [KioskService] repeats it while the tablet stays in use.
+     *
+     * @param reboot reboot the tablet rather than restart Glance; the service asks for it only as
+     * Device Owner.
+     */
+    private fun runNightlyMaintenance(requestedAtMs: Long, reboot: Boolean) {
         val now = SystemClock.elapsedRealtime()
         val attempt = NightlyMaintenanceAttempt(
             deviceOwner = LockTaskHelper.isDeviceOwner(this),
             restart = { displayOn ->
-                AppRestarter.restart(this, "nightly maintenance", displayOn = displayOn)
+                if (reboot) {
+                    TabletRebooter.reboot(this, "nightly maintenance", displayOn = displayOn)
+                } else {
+                    AppRestarter.restart(this, "nightly maintenance", displayOn = displayOn)
+                }
             },
             reloadEveryPage = {
                 Diagnostics.record("Nightly maintenance: reloading every page without Device Owner")
