@@ -43,6 +43,16 @@
     <string name="memory_trend_unknown">Memory trend: not checked yet. Glance checks once it has run for about 13 hours, at least 9 of them with the screen on, then daily.</string>
     <string name="memory_trend_stable">Memory trend: stable, %1$+d MB in %2$d hours. No restarts needed.</string>
     <string name="memory_trend_step">Memory trend: stable after a one-time step of %1$+d MB in %2$d hours, for example a heavier page after a settings change. No restarts needed.</string>
+    <string name="kernel_memory_help" formatted="false">The system itself can also keep memory that no app gets back. On a 3 GB test tablet the kernel\'s unreclaimable memory grew by a few megabytes a day; after 236 days without a reboot it held over half of the RAM, and Android began closing Glance even while it was on screen. Restarting Glance does not release it; only rebooting the tablet does. Glance warns once it reaches 40% of the RAM.</string>
+    <string name="kernel_memory_unavailable">Kernel memory: unavailable on this tablet.</string>
+    <string name="kernel_memory_level">Kernel memory: %1$d MB, %2$d%% of the RAM, unreclaimable. Warning at %3$d MB.</string>
+    <string name="kernel_memory_trend">Trend: %1$+.1f MB a day over the last %2$d days.</string>
+    <string name="kernel_memory_trend_unknown">Trend: not measured yet. It needs %1$d days since the tablet started, each with at least %2$d hours of samples.</string>
+    <string name="kernel_memory_uptime">Device uptime: %1$d d %2$d h.</string>
+    <string name="kernel_memory_reboot_now">Reboot the tablet. Android may start closing Glance even while it is on screen, and restarting Glance does not release this memory.</string>
+    <string name="kernel_memory_reboot_soon">Reboot the tablet within about %1$d days, before the warning level. Restarting Glance does not release this memory.</string>
+    <string name="kernel_memory_reboot_later">No tablet reboot needed yet. At this pace the warning level is about %1$d days away.</string>
+    <string name="kernel_memory_reboot_none">No tablet reboot needed.</string>
     <string name="memory_trend_growing">Memory trend: growing, %1$+d MB in %2$d hours. Suggested: restart %3$s.</string>
     <string name="nightly_restart_label">Restart Glance on a schedule</string>
     <string name="restart_every_day">Every day</string>

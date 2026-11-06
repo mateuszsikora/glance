@@ -5,6 +5,7 @@ import com.glance.GlanceApp
 import com.glance.config.AppConfig
 import com.glance.content.WeekDays
 import com.glance.diagnostics.Diagnostics
+import com.glance.diagnostics.KernelMemoryTrend
 import com.glance.diagnostics.MemoryTrend
 import com.glance.maintenance.MaintenanceSettings
 import com.glance.settings.ContentProfileDraft
@@ -210,6 +211,8 @@ internal class RemoteConfigHttpHandler(
     private val diagnosticLogTail: () -> String = { Diagnostics.readTail(DIAGNOSTIC_PREVIEW_BYTES) },
     private val clearDiagnosticLog: () -> Unit = Diagnostics::clear,
     private val memoryTrend: () -> MemoryTrend.Verdict? = { GlanceApp.instance.memoryTrend.latest() },
+    private val kernelMemory: () -> KernelMemoryTrend.Status? = { GlanceApp.instance.kernelMemory.status() },
+    private val uptimeMs: () -> Long = android.os.SystemClock::elapsedRealtime,
     /** False in recovery builds, whose older app code has no nightly restart to configure. */
     private val nightlyRestartAvailable: Boolean = !com.glance.BuildConfig.RESTORE_BUILD,
     private val recoveryState: com.glance.update.RestoreState = com.glance.update.RestoreState(com.glance.GlanceApp.instance),
@@ -603,6 +606,7 @@ internal class RemoteConfigHttpHandler(
         }
         // Like the journal preview, a broken verdict must not take down the settings page.
         val trend = runCatching(memoryTrend).getOrNull()
+        val kernel = if (nightlyRestartAvailable) runCatching(kernelMemory).getOrNull() else null
         val selectedInterval = submittedValues?.get("restartIntervalDays") ?: values.restartIntervalDays.toString()
         val intervalOptions = MaintenanceSettings.INTERVAL_DAYS.joinToString("") { days ->
             "<option value=\"$days\"" + (if (days.toString() == selectedInterval) " selected" else "") +
@@ -651,6 +655,7 @@ internal class RemoteConfigHttpHandler(
                   <p>Changes are validated on the tablet and applied as soon as you save.</p>
                 </div>
                 ${memoryTrendWarning(trend, values)}
+                ${kernelMemoryWarning(kernel)}
                 <form id="remote-settings-form" method="post" action="/save" accept-charset="UTF-8">
                   <input type="hidden" name="csrf" value="${escapeHtml(session.csrfToken)}">
                   <!-- Pressing Enter in a field submits the form's first submit button. Without
@@ -748,6 +753,8 @@ internal class RemoteConfigHttpHandler(
                         <div class="section-body">
                           <p class="hint">On some older tablets the graphics driver keeps a little memory every time a page redraws, for example each photo of an idle-screen slideshow, and only a restart of Glance gives it back. When memory runs out, Android closes Glance, which then starts again. If you notice Glance restarting unexpectedly, or the trend below keeps growing, schedule restarts here.</p>
                           <dl class="status-list">${statusRow("Memory trend", memoryTrendStatus(trend))}${statusRow("Suggestion", restartSuggestion(trend, values))}</dl>
+                          <p class="hint">The system itself can also keep memory that no app gets back. On a 3 GB test tablet the kernel's unreclaimable memory grew by a few megabytes a day; after 236 days without a reboot it held over half of the RAM, and Android began closing Glance even while it was on screen. Restarting Glance does not release it; only rebooting the tablet does. Glance warns once it reaches ${(KernelMemoryTrend.WARNING_SHARE * 100).toInt()}% of the RAM.</p>
+                          <dl class="status-list">${kernelMemoryRows(kernel)}</dl>
                           $restartSettings
                         </div>
                       </section>
@@ -900,6 +907,76 @@ internal class RemoteConfigHttpHandler(
         return "<div class=\"banner warning\" role=\"status\"><span aria-hidden=\"true\">!</span>" +
             "<p>Glance's memory keeps growing: ${escapeHtml(describe(trend))}. Android will close " +
             "Glance once memory runs out. See <a href=\"#memory\">Memory</a> for what helps.</p></div>"
+    }
+
+    /**
+     * Shown above every section once the kernel holds [KernelMemoryTrend.WARNING_SHARE] of the RAM.
+     * Glance's own trend can be stable meanwhile; only a tablet reboot releases this memory.
+     */
+    private fun kernelMemoryWarning(kernel: KernelMemoryTrend.Status?): String {
+        if (kernel == null || kernel.advice != KernelMemoryTrend.Advice.RebootNow) return ""
+        return "<div class=\"banner warning\" role=\"status\"><span aria-hidden=\"true\">!</span>" +
+            "<p>The system holds ${kernel.unreclaimableBytes / MIB} MB of memory that only a tablet " +
+            "reboot releases, ${(kernel.share * 100).toInt()}% of the RAM. Android may start " +
+            "closing Glance even while it is on screen. See " +
+            "<a href=\"#memory\">Memory</a>.</p></div>"
+    }
+
+    private fun kernelMemoryRows(kernel: KernelMemoryTrend.Status?): String = buildString {
+        if (!nightlyRestartAvailable) {
+            append(statusRow("Kernel memory", "Not measured by this recovery build."))
+        } else if (kernel == null) {
+            append(statusRow("Kernel memory", "Unavailable on this tablet."))
+        } else {
+            append(
+                statusRow(
+                    "Kernel memory",
+                    "${kernelLevel(kernel)}, unreclaimable. Warning at ${kernel.warningBytes / MIB} MB."
+                )
+            )
+            val growth = kernel.growth
+            append(
+                statusRow(
+                    "Kernel trend",
+                    if (growth == null) {
+                        "Not measured yet. It needs ${KernelMemoryTrend.MIN_DAYS} days since the " +
+                            "tablet started, each with at least ${KernelMemoryTrend.MIN_HOURS_PER_DAY} " +
+                            "hours of samples."
+                    } else {
+                        String.format(
+                            java.util.Locale.US,
+                            "%+.1f MB a day over the last %d days",
+                            growth.bytesPerDay / MIB.toDouble(),
+                            growth.days
+                        )
+                    }
+                )
+            )
+        }
+        append(statusRow("Device uptime", uptimeText(runCatching(uptimeMs).getOrDefault(0L))))
+        if (kernel != null) append(statusRow("Tablet reboot", rebootSuggestion(kernel)))
+    }
+
+    private fun kernelLevel(kernel: KernelMemoryTrend.Status): String =
+        "${kernel.unreclaimableBytes / MIB} MB, ${(kernel.share * 100).toInt()}% of the RAM"
+
+    private fun rebootSuggestion(kernel: KernelMemoryTrend.Status): String =
+        when (val advice = kernel.advice) {
+            KernelMemoryTrend.Advice.RebootNow ->
+                "Reboot the tablet. Restarting Glance does not release this memory."
+            is KernelMemoryTrend.Advice.RebootSoon ->
+                "Reboot the tablet within about ${advice.days} days, before the warning level. " +
+                    "Restarting Glance does not release this memory."
+            is KernelMemoryTrend.Advice.None -> advice.daysToWarning
+                ?.let { "Not needed yet. At this pace the warning level is about $it days away." }
+                ?: "Not needed."
+        }
+
+    private fun uptimeText(ms: Long): String {
+        val hours = ms / 3_600_000L
+        val days = hours / 24
+        fun plural(n: Long, unit: String) = "$n $unit" + if (n == 1L) "" else "s"
+        return if (days == 0L) plural(hours, "hour") else "${plural(days, "day")}, ${plural(hours % 24, "hour")}"
     }
 
     private fun restartsCover(trend: MemoryTrend.Verdict, values: RemoteConfigSnapshot): Boolean {
@@ -1190,6 +1267,7 @@ internal class RemoteConfigHttpHandler(
         private const val DIAGNOSTIC_PREVIEW_LINES = 200
         /** Enough for [DIAGNOSTIC_PREVIEW_LINES] memory samples, the longest entries. */
         private const val DIAGNOSTIC_PREVIEW_BYTES = 128 * 1024
+        private const val MIB = 1024L * 1024L
     }
 }
 

@@ -65,8 +65,8 @@ copied into an issue and omits private addresses and credentials.
 The **Diagnostic log** section controls an opt-in journal kept on the tablet. It is off by default
 and also has a switch under Debug Info in on-device settings. While on, it records every reload with
 its cause, idle-screen changes, page load failures, renderer crashes, charger and display events,
-memory trim signals, and a memory sample every 5 minutes: available memory, swap use, and the
-app's footprint. Every entry also carries the app's allocated native heap, so the cost of each event
+memory trim signals, and a memory sample every 5 minutes: available memory, swap use, the kernel's
+unreclaimable memory (`slabUnreclaim`), and the app's footprint. Every entry also carries the app's allocated native heap, so the cost of each event
 shows as the step between entries. It works without adb, including on vendor builds that hide application logcat
 output. The panel shows the latest entries and can download or clear the full log. Entries contain
 no addresses or credentials. Turn it off once the problem is understood, so the tablet does not
@@ -260,6 +260,29 @@ MQTT reconnects. The restart needs Device Owner, because only then may Glance br
 back from the background. Without Device Owner, Glance reloads every page at that time instead, the
 idle screen included even while it is on screen; that refreshes the pages but does not release the
 memory.
+
+#### Kernel memory and tablet reboots
+
+The system itself can also keep memory that no app gets back. On the same tablet the kernel's
+unreclaimable slab memory (`SUnreclaim` in `/proc/meminfo`) grew by a few megabytes a day. After 236
+days without a reboot it held 1.47 GB, over half of the RAM, and any ordinary burst, such as a charger
+connection, made Android close Glance while it was on screen, although Glance's own memory was
+stable. Restarting Glance does not release this memory; only rebooting the tablet does.
+
+The Memory section therefore also shows:
+
+- **Kernel memory**, read when the page opens, as megabytes and as a share of the RAM.
+- **Kernel trend**, the daily pace over up to the last 7 days. Each day since boot counts with the
+  lowest of its hourly minimums, leaving out the first hour after boot, the day still running, and
+  days with fewer than 6 hours of samples. The pace is the median change between every pair of
+  those days, so it needs 3 of them first. The hourly minimums are stored, at most one write an
+  hour, so a restart of Glance keeps them; a reboot starts them over.
+- **Device uptime.**
+- **Tablet reboot.** Once the kernel holds 40% of the RAM, Glance suggests rebooting the tablet,
+  and the remote panel shows a warning above every section. Before that it suggests a reboot once
+  the measured pace reaches the 40% level within 30 days, and otherwise says how far away it is.
+  On the test tablet the 40% level comes about two months before the level at which Android began
+  closing Glance. Glance does not reboot the tablet itself.
 
 The idle screen's WebView is drawn straight onto the window, without an offscreen layer, which would
 add a full-screen texture and a compositing pass to every frame of a slideshow that plays all day.
