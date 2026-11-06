@@ -170,6 +170,21 @@ class MaintenanceReloaderTest {
     }
 
     @Test
+    fun idleScreenReturningDuringTheDelayDropsItsCallback() {
+        reloadDeferredDuringPlayback()
+        hideIdle(byTouch = true)
+        advanceBy(10_000)
+        showIdle()
+        advanceBy(10_000)
+        // The first dismissal's callback would come due 10 s into this delay.
+        hideIdle(byTouch = true)
+        advanceBy(IdleMaintenanceReload.TOUCH_DISMISS_DELAY_MS - 1)
+        assertEquals(0, reloadsOf(idle))
+        advanceBy(1)
+        assertEquals(1, reloadsOf(idle))
+    }
+
+    @Test
     fun repeatedRequestsDuringPlaybackRunOneDeferredReload() {
         reloadDeferredDuringPlayback()
         reloader.reloadAll()
