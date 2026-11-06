@@ -135,6 +135,11 @@ class WebViewFragment : Fragment() {
                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                     super.onPageStarted(view, url, favicon)
                     view?.removeCallbacks(retryRunnable)
+                    // A navigation started by the page itself, such as `location.reload()` or
+                    // a redirect to a login page, gets its own grace period. Only one that
+                    // follows a finished load does: restarting the clock on every redirect
+                    // would let a redirect loop stay in the grace period for good.
+                    if (isLoaded) loadStartedAtMs = SystemClock.elapsedRealtime()
                     isLoaded = false
                     mainFrameError = false
                     binding.errorContainer.visibility = View.GONE

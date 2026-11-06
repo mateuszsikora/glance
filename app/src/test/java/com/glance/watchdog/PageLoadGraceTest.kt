@@ -17,6 +17,18 @@ class PageLoadGraceTest {
     }
 
     @Test
+    fun lastMillisecondOfTheGracePeriodIsStillLoading() {
+        assertEquals(
+            HealthCheckResult.STILL_LOADING,
+            PageLoadGrace.resultWhileLoading(
+                mainFrameError = false,
+                loadStartedAtMs = 100_000L,
+                nowMs = 100_000L + PageLoadGrace.DEFAULT_GRACE_MS - 1
+            )
+        )
+    }
+
+    @Test
     fun loadThatOutlivesTheGracePeriodFails() {
         assertEquals(
             HealthCheckResult.UNHEALTHY,
