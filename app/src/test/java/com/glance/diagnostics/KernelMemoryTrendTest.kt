@@ -14,7 +14,8 @@ class KernelMemoryTrendTest {
         val growth = KernelMemoryTrend.dailyGrowth(screenOnHours(days = 7) { day -> BASE + day * 6 * MIB_KB }, now(day = 7))!!
 
         assertEquals(6.0, growth.bytesPerDay / MIB.toDouble(), 0.01)
-        assertEquals(7, growth.days)
+        // Seven days, six days apart.
+        assertEquals(6, growth.spanDays)
     }
 
     @Test
@@ -53,7 +54,7 @@ class KernelMemoryTrendTest {
 
         // The third day is still running, so its minimum is not final.
         assertNull(KernelMemoryTrend.dailyGrowth(floors, now(day = 2)))
-        assertEquals(3, KernelMemoryTrend.dailyGrowth(floors, now(day = 3))!!.days)
+        assertEquals(2, KernelMemoryTrend.dailyGrowth(floors, now(day = 3))!!.spanDays)
         assertNull(KernelMemoryTrend.dailyGrowth(emptyList(), now(day = 3)))
     }
 
@@ -63,7 +64,8 @@ class KernelMemoryTrendTest {
         val floors = screenOnHours(days = 4) { day -> BASE + day * 6 * MIB_KB }
             .filter { it.hour / 24 != 1L || it.hour % 24 in 8L..11L }
 
-        assertEquals(3, KernelMemoryTrend.dailyGrowth(floors, now(day = 4))!!.days)
+        // Days 0, 2 and 3: the skipped day still lies inside the span.
+        assertEquals(3, KernelMemoryTrend.dailyGrowth(floors, now(day = 4))!!.spanDays)
         assertNull(KernelMemoryTrend.dailyGrowth(floors.filter { it.hour / 24 != 3L }, now(day = 4)))
     }
 
@@ -87,7 +89,7 @@ class KernelMemoryTrendTest {
 
         val growth = KernelMemoryTrend.dailyGrowth(floors, now(day = 12))!!
 
-        assertEquals(KernelMemoryTrend.MAX_DAYS, growth.days)
+        assertEquals(KernelMemoryTrend.MAX_DAYS - 1, growth.spanDays)
         assertEquals(1.0, growth.bytesPerDay / MIB.toDouble(), 0.01)
     }
 
@@ -103,15 +105,16 @@ class KernelMemoryTrendTest {
     @Test
     fun aRebootIsSuggestedOnceTheWarningLevelIsAMonthAway() {
         val warning = (TOTAL * KernelMemoryTrend.WARNING_SHARE).toLong()
-        val sixPerDay = KernelMemoryTrend.Growth(6 * MIB, days = 7)
+        val sixPerDay = KernelMemoryTrend.Growth(6 * MIB, spanDays = 6)
 
         assertEquals(Advice.RebootSoon(30), status(warning - 180 * MIB, sixPerDay).advice)
-        assertEquals(Advice.RebootSoon(0), status(warning - MIB, sixPerDay).advice)
+        // Less than a day's growth away reads as about a day, not 0 days.
+        assertEquals(Advice.RebootSoon(1), status(warning - MIB, sixPerDay).advice)
         assertEquals(Advice.None(100), status(warning - 600 * MIB, sixPerDay).advice)
         // Shrinking: nothing to project.
         assertEquals(
             Advice.None(null),
-            status(warning - 600 * MIB, KernelMemoryTrend.Growth(-2 * MIB, days = 7)).advice
+            status(warning - 600 * MIB, KernelMemoryTrend.Growth(-2 * MIB, spanDays = 6)).advice
         )
     }
 

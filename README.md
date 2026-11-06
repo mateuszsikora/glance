@@ -66,11 +66,12 @@ The **Diagnostic log** section controls an opt-in journal kept on the tablet. It
 and also has a switch under Debug Info in on-device settings. While on, it records every reload with
 its cause, idle-screen changes, page load failures, renderer crashes, charger and display events,
 memory trim signals, and a memory sample every 5 minutes: available memory, swap use, the kernel's
-unreclaimable memory (`slabUnreclaim`), and the app's footprint. Every entry also carries the app's allocated native heap, so the cost of each event
-shows as the step between entries. It works without adb, including on vendor builds that hide application logcat
-output. The panel shows the latest entries and can download or clear the full log. Entries contain
-no addresses or credentials. Turn it off once the problem is understood, so the tablet does not
-keep writing to storage. Turning it off keeps the recorded entries readable until **Clear log**.
+unreclaimable memory (`slabUnreclaim`), and the app's footprint. Every entry also carries the app's
+allocated native heap, so the cost of each event shows as the step between entries. It works without
+adb, including on vendor builds that hide application logcat output. The panel shows the latest
+entries and can download or clear the full log. Entries contain no addresses or credentials. Turn it
+off once the problem is understood, so the tablet does not keep writing to storage. Turning it off
+keeps the recorded entries readable until **Clear log**.
 Whether the app's memory keeps growing is shown in the **Memory** section; see
 [Memory and scheduled restarts](#memory-and-scheduled-restarts).
 

@@ -231,6 +231,10 @@ class SettingsActivity : AppCompatActivity() {
         groupRestartInterval = findViewById(R.id.groupRestartInterval)
         textMemoryTrend = findViewById(R.id.textMemoryTrend)
         textKernelMemory = findViewById(R.id.textKernelMemory)
+        findViewById<TextView>(R.id.textKernelMemoryHelp).text = getString(
+            R.string.kernel_memory_help,
+            (KernelMemoryTrend.WARNING_SHARE * 100).toInt()
+        )
         switchMqttEnabled = findViewById(R.id.switchMqttEnabled)
         editMqttBrokerHost = findViewById(R.id.editMqttBrokerHost)
         editMqttBrokerPort = findViewById(R.id.editMqttBrokerPort)
@@ -838,12 +842,13 @@ class SettingsActivity : AppCompatActivity() {
     /** The kernel's unreclaimable memory, its daily trend, the uptime, and whether to reboot. */
     private fun kernelMemoryText(kernel: KernelMemoryTrend.Status?): String {
         if (kernel == null) return getString(R.string.kernel_memory_unavailable)
-        val uptimeHours = kernel.uptimeMs / 3_600_000L
         val growth = kernel.growth
         val advice = when (val advice = kernel.advice) {
             KernelMemoryTrend.Advice.RebootNow -> getString(R.string.kernel_memory_reboot_now)
-            is KernelMemoryTrend.Advice.RebootSoon ->
-                getString(R.string.kernel_memory_reboot_soon, advice.days)
+            is KernelMemoryTrend.Advice.RebootSoon -> getString(
+                R.string.kernel_memory_reboot_soon,
+                resources.getQuantityString(R.plurals.duration_days, advice.days, advice.days)
+            )
             is KernelMemoryTrend.Advice.None -> advice.daysToWarning
                 ?.let { getString(R.string.kernel_memory_reboot_later, it) }
                 ?: getString(R.string.kernel_memory_reboot_none)
@@ -862,11 +867,20 @@ class SettingsActivity : AppCompatActivity() {
                     KernelMemoryTrend.MIN_HOURS_PER_DAY
                 )
             } else {
-                getString(R.string.kernel_memory_trend, growth.bytesPerDay / MIB.toDouble(), growth.days)
+                getString(R.string.kernel_memory_trend, growth.bytesPerDay / MIB.toDouble(), growth.spanDays)
             },
-            getString(R.string.kernel_memory_uptime, (uptimeHours / 24).toInt(), (uptimeHours % 24).toInt()),
+            getString(R.string.kernel_memory_uptime, uptimeText(kernel.uptimeMs)),
             advice
         ).joinToString("\n")
+    }
+
+    /** Like the remote panel: "41 days, 5 hours", or only the hours on the first day. */
+    private fun uptimeText(uptimeMs: Long): String {
+        val totalHours = (uptimeMs / 3_600_000L).toInt()
+        val days = totalHours / 24
+        val hours = resources.getQuantityString(R.plurals.duration_hours, totalHours % 24, totalHours % 24)
+        if (days == 0) return hours
+        return resources.getQuantityString(R.plurals.duration_days, days, days) + ", " + hours
     }
 
     companion object {

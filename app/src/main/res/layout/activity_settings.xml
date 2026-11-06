@@ -362,9 +362,9 @@
             android:layout_marginBottom="16dp" />
 
         <TextView
+            android:id="@+id/textKernelMemoryHelp"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/kernel_memory_help"
             android:textColor="#FFB0B0B0"
             android:textSize="12sp"
             android:layout_marginBottom="8dp" />

@@ -836,7 +836,7 @@ class RemoteConfigHttpHandlerTest {
             unreclaimableBytes = 420L * MIB,
             totalBytes = 2748L * MIB,
             uptimeMs = 41 * DAY + 5 * HOUR,
-            growth = KernelMemoryTrend.Growth(6 * MIB, days = 7)
+            growth = KernelMemoryTrend.Growth(6 * MIB, spanDays = 7)
         )
         val handler = RemoteConfigHttpHandler(
             config,
@@ -868,6 +868,9 @@ class RemoteConfigHttpHandlerTest {
         assertTrue(due.contains("<dt>Kernel trend</dt><dd>Not measured yet. It needs 3 days"))
         assertTrue(due.contains("<dt>Tablet reboot</dt><dd>Reboot the tablet. Restarting Glance does not release this memory.</dd>"))
 
+        kernel = KernelMemoryTrend.Status(1098L * MIB, 2748L * MIB, 41 * DAY, KernelMemoryTrend.Growth(6 * MIB, 7))
+        assertTrue(handler.handle(get("/", cookie)).text().contains("<dd>Reboot the tablet within about 1 day, before"))
+
         kernel = null
         val unavailable = handler.handle(get("/", cookie)).text()
         assertTrue(unavailable.contains("<dt>Kernel memory</dt><dd>Unavailable on this tablet.</dd>"))
@@ -894,6 +897,8 @@ class RemoteConfigHttpHandlerTest {
         assertFalse(page.contains("banner warning"))
         assertTrue(page.contains("<dt>Kernel memory</dt><dd>Not measured by this recovery build.</dd>"))
         assertFalse(page.contains("<dt>Tablet reboot</dt>"))
+        assertTrue(page.contains("only rebooting the tablet does.</p>"))
+        assertFalse(page.contains("Glance warns once it reaches"))
     }
 
     @Test

@@ -606,6 +606,8 @@ internal class RemoteConfigHttpHandler(
         }
         // Like the journal preview, a broken verdict must not take down the settings page.
         val trend = runCatching(memoryTrend).getOrNull()
+        // A recovery build's older watchdog does not feed the monitor; its stored minimums would be
+        // stale, so the panel does not judge them.
         val kernel = if (nightlyRestartAvailable) runCatching(kernelMemory).getOrNull() else null
         val selectedInterval = submittedValues?.get("restartIntervalDays") ?: values.restartIntervalDays.toString()
         val intervalOptions = MaintenanceSettings.INTERVAL_DAYS.joinToString("") { days ->
@@ -753,7 +755,7 @@ internal class RemoteConfigHttpHandler(
                         <div class="section-body">
                           <p class="hint">On some older tablets the graphics driver keeps a little memory every time a page redraws, for example each photo of an idle-screen slideshow, and only a restart of Glance gives it back. When memory runs out, Android closes Glance, which then starts again. If you notice Glance restarting unexpectedly, or the trend below keeps growing, schedule restarts here.</p>
                           <dl class="status-list">${statusRow("Memory trend", memoryTrendStatus(trend))}${statusRow("Suggestion", restartSuggestion(trend, values))}</dl>
-                          <p class="hint">The system itself can also keep memory that no app gets back. On a 3 GB test tablet the kernel's unreclaimable memory grew by a few megabytes a day; after 236 days without a reboot it held over half of the RAM, and Android began closing Glance even while it was on screen. Restarting Glance does not release it; only rebooting the tablet does. Glance warns once it reaches ${(KernelMemoryTrend.WARNING_SHARE * 100).toInt()}% of the RAM.</p>
+                          <p class="hint">The system itself can also keep memory that no app gets back. On a 3 GB test tablet the kernel's unreclaimable memory grew by a few megabytes a day; after 236 days without a reboot it held over half of the RAM, and Android began closing Glance even while it was on screen. Restarting Glance does not release it; only rebooting the tablet does.${if (nightlyRestartAvailable) " Glance warns once it reaches ${(KernelMemoryTrend.WARNING_SHARE * 100).toInt()}% of the RAM." else ""}</p>
                           <dl class="status-list">${kernelMemoryRows(kernel)}</dl>
                           $restartSettings
                         </div>
@@ -947,7 +949,7 @@ internal class RemoteConfigHttpHandler(
                             java.util.Locale.US,
                             "%+.1f MB a day over the last %d days",
                             growth.bytesPerDay / MIB.toDouble(),
-                            growth.days
+                            growth.spanDays
                         )
                     }
                 )
@@ -965,7 +967,7 @@ internal class RemoteConfigHttpHandler(
             KernelMemoryTrend.Advice.RebootNow ->
                 "Reboot the tablet. Restarting Glance does not release this memory."
             is KernelMemoryTrend.Advice.RebootSoon ->
-                "Reboot the tablet within about ${advice.days} days, before the warning level. " +
+                "Reboot the tablet within about ${plural(advice.days.toLong(), "day")}, before the warning level. " +
                     "Restarting Glance does not release this memory."
             is KernelMemoryTrend.Advice.None -> advice.daysToWarning
                 ?.let { "Not needed yet. At this pace the warning level is about $it days away." }
@@ -975,9 +977,10 @@ internal class RemoteConfigHttpHandler(
     private fun uptimeText(ms: Long): String {
         val hours = ms / 3_600_000L
         val days = hours / 24
-        fun plural(n: Long, unit: String) = "$n $unit" + if (n == 1L) "" else "s"
         return if (days == 0L) plural(hours, "hour") else "${plural(days, "day")}, ${plural(hours % 24, "hour")}"
     }
+
+    private fun plural(n: Long, unit: String) = "$n $unit" + if (n == 1L) "" else "s"
 
     private fun restartsCover(trend: MemoryTrend.Verdict, values: RemoteConfigSnapshot): Boolean {
         val suggested = MemoryTrend.suggestedRestartIntervalDays(trend) ?: return true

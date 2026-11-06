@@ -20,8 +20,8 @@ object KernelMemoryTrend {
     /** The lowest reading during one hour since boot. */
     data class Floor(val hour: Long, val kb: Long)
 
-    /** @param days days whose minimums the pace was measured on. */
-    data class Growth(val bytesPerDay: Long, val days: Int)
+    /** @param spanDays days from the first to the last day the pace was measured on. */
+    data class Growth(val bytesPerDay: Long, val spanDays: Int)
 
     data class Status(
         val unreclaimableBytes: Long,
@@ -39,7 +39,7 @@ object KernelMemoryTrend {
         /** The kernel holds [WARNING_SHARE] of RAM or more. */
         object RebootNow : Advice()
 
-        /** At the measured pace the warning level is [days] or fewer away. */
+        /** At the measured pace the warning level is [days] or fewer away; at least 1. */
         data class RebootSoon(val days: Int) : Advice()
 
         /** @param daysToWarning at the measured pace; null when it is not growing or unmeasured. */
@@ -91,7 +91,10 @@ object KernelMemoryTrend {
                 add((days[j].second - days[i].second).toDouble() / (days[j].first - days[i].first))
             }
         }.sorted()
-        return Growth((slopes[slopes.size / 2] * KIB).toLong(), days.size)
+        return Growth(
+            bytesPerDay = (slopes[slopes.size / 2] * KIB).toLong(),
+            spanDays = (days.last().first - days.first().first).toInt()
+        )
     }
 
     fun advise(status: Status): Advice {
@@ -100,7 +103,8 @@ object KernelMemoryTrend {
         val perDay = status.growth?.bytesPerDay?.takeIf { it > 0 } ?: return Advice.None(null)
         val days = ((status.warningBytes - status.unreclaimableBytes) / perDay)
             .coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-        return if (days <= SOON_DAYS) Advice.RebootSoon(days) else Advice.None(days)
+        // Less than a day's growth away still reads as about a day.
+        return if (days <= SOON_DAYS) Advice.RebootSoon(days.coerceAtLeast(1)) else Advice.None(days)
     }
 
     private const val KIB = 1024L

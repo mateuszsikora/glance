@@ -48,7 +48,7 @@ class KernelMemoryMonitorTest {
 
         feed(monitor, fromHour = 3 * 24, toHour = 3 * 24 + 2) { hour -> leaking(hour) }
         val growth = monitor.status()!!.growth!!
-        assertEquals(3, growth.days)
+        assertEquals(2, growth.spanDays)
         assertEquals(6.0, growth.bytesPerDay / MIB, 0.01)
     }
 
@@ -59,9 +59,9 @@ class KernelMemoryMonitorTest {
         val restarted = monitor()
 
         // Before its first sample too; only the old process's running hour is lost.
-        assertEquals(3, restarted.status()!!.growth!!.days)
+        assertEquals(2, restarted.status()!!.growth!!.spanDays)
         feed(restarted, fromHour = 3 * 24 + 1, toHour = 4 * 24 + 1) { hour -> leaking(hour) }
-        assertEquals(4, restarted.status()!!.growth!!.days)
+        assertEquals(3, restarted.status()!!.growth!!.spanDays)
     }
 
     @Test
