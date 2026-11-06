@@ -799,10 +799,10 @@ class MainActivity : AppCompatActivity() {
             lockTaskEntries = AdminReceiver.lockTaskEntriesHandled::get
         )
         val pressure = MemoryPressure(
-            lowMemory = {
+            systemMemory = {
                 ActivityManager.MemoryInfo()
                     .also { getSystemService(ActivityManager::class.java).getMemoryInfo(it) }
-                    .lowMemory
+                    .let { MemoryPressure.SystemMemory(it.lowMemory, it.availMem) }
             },
             swapIns = ::readSwapIns,
             nowMs = nowMs
