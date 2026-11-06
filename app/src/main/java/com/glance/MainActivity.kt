@@ -26,8 +26,8 @@ import com.glance.content.ContentSchedulePolicy
 import com.glance.content.IdleTimeoutTracker
 import com.glance.dashboard.ColdStartGate
 import com.glance.dashboard.DashboardPagerAdapter
-import com.glance.dashboard.IdleMaintenanceReload
 import com.glance.dashboard.LaunchWork
+import com.glance.dashboard.MaintenanceReloader
 import com.glance.dashboard.MemoryPressure
 import com.glance.dashboard.WebViewFragment
 import com.glance.databinding.ActivityMainBinding
@@ -59,12 +59,20 @@ class MainActivity : AppCompatActivity() {
     private lateinit var screenController: ScreenController
     private var controlReceiverRegistered = false
     private val webViewHealthChecker = WebViewHealthChecker()
-    private val idleMaintenanceReload = IdleMaintenanceReload()
+    private val maintenanceReloader: MaintenanceReloader<WebViewFragment> = MaintenanceReloader(
+        pages = { supportFragmentManager.fragments.filterIsInstance<WebViewFragment>() },
+        idlePage = { idleScreenFragment() },
+        idleScreenActive = { idleScreenActive },
+        reload = WebViewFragment::reload,
+        postDelayed = { handler.postDelayed(delayedIdleReloadRunnable, it) },
+        cancelDelayed = { handler.removeCallbacks(delayedIdleReloadRunnable) },
+        log = { Log.i(TAG, it) }
+    )
     private val webViewReachabilityChecker = WebViewReachabilityChecker(
         fragments = { supportFragmentManager.fragments.filterIsInstance<WebViewFragment>() },
         // Settings can cover a still-loaded dashboard; keep observing its host until destroyed.
         canCheck = { powerManager.isInteractive },
-        shouldCheck = { isReloadableWebView(it) },
+        shouldCheck = { maintenanceReloader.isReloadable(it) },
         canReload = { dashboardResumed && screenController.isScreenOn }
     )
 
@@ -127,15 +135,13 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private val delayedIdleReloadRunnable = Runnable {
-        if (idleMaintenanceReload.onDelayElapsed()) reloadDeferredIdlePage()
-    }
+    private val delayedIdleReloadRunnable = Runnable { maintenanceReloader.onDelayElapsed() }
 
     private val reloadReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == WatchdogService.ACTION_RELOAD_WEBVIEW) {
                 Log.i(TAG, "Maintenance reload broadcast received")
-                reloadAllWebViews()
+                maintenanceReloader.reloadAll()
             } else if (intent?.action == WatchdogService.ACTION_HEALTH_CHECK) {
                 webViewReachabilityChecker.check()
                 webViewHealthChecker.check(currentWebViewFragment())
@@ -585,8 +591,7 @@ class MainActivity : AppCompatActivity() {
             Diagnostics.record("Idle page created")
         }
         idleScreenActive = true
-        handler.removeCallbacks(delayedIdleReloadRunnable)
-        idleMaintenanceReload.onIdleShown()
+        maintenanceReloader.onIdleShown()
         binding.idleScreenLayer.visibility = View.VISIBLE
         idleScreenFragment()?.setWebContentPaused(false)
         Log.i(TAG, "Idle screen shown")
@@ -604,30 +609,8 @@ class MainActivity : AppCompatActivity() {
             Diagnostics.record("Idle screen hidden")
         }
         // Also when already hidden: screen-off or pause runs a touch dismissal's delayed reload.
-        when (idleMaintenanceReload.onIdleHidden(byTouch)) {
-            IdleMaintenanceReload.Action.NONE -> Unit
-            IdleMaintenanceReload.Action.RELOAD_NOW -> {
-                handler.removeCallbacks(delayedIdleReloadRunnable)
-                reloadDeferredIdlePage()
-            }
-            IdleMaintenanceReload.Action.RELOAD_AFTER_DELAY -> {
-                // A stale runnable left by a settled request must not cut this delay short.
-                handler.removeCallbacks(delayedIdleReloadRunnable)
-                val delayMs = IdleMaintenanceReload.TOUCH_DISMISS_DELAY_MS
-                handler.postDelayed(delayedIdleReloadRunnable, delayMs)
-                val message =
-                    "Idle page reload deferred during playback runs in ${delayMs / 1000} s"
-                Log.i(TAG, message)
-                Diagnostics.record(message)
-            }
-        }
+        maintenanceReloader.onIdleHidden(byTouch)
         if (byTouch) recordUserActivity()
-    }
-
-    private fun reloadDeferredIdlePage() {
-        Log.i(TAG, "Running the idle page reload deferred during playback")
-        Diagnostics.record("Running the idle page reload deferred during playback")
-        idleScreenFragment()?.reload()
     }
 
     // --- Reload WebViews ---
@@ -690,30 +673,6 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    /** @param includeIdleOnScreen also restarts idle playback; only for nightly maintenance. */
-    private fun reloadAllWebViews(includeIdleOnScreen: Boolean = false) {
-        val idleFragment = idleScreenFragment()
-        val dashboards = supportFragmentManager.fragments.filterIsInstance<WebViewFragment>()
-            .filter { it !== idleFragment }
-        Diagnostics.record("Reload broadcast: reloading ${dashboards.size} dashboard page(s)")
-        dashboards.forEach { it.reload() }
-        if (idleFragment == null) return
-        val idleOnScreen = idleScreenActive && !includeIdleOnScreen
-        if (idleMaintenanceReload.onMaintenanceReload(idleOnScreen = idleOnScreen)) {
-            Diagnostics.record(
-                if (idleScreenActive) {
-                    "Reloading the idle page on screen"
-                } else {
-                    "Reloading the hidden idle page"
-                }
-            )
-            idleFragment.reload()
-        } else {
-            Log.i(TAG, "Idle page reload deferred until the idle screen is dismissed")
-            Diagnostics.record("Idle page reload deferred until the idle screen is dismissed")
-        }
-    }
-
     // --- Nightly maintenance ---
 
     /** One attempt; [KioskService] repeats it while the tablet stays in use. */
@@ -726,7 +685,7 @@ class MainActivity : AppCompatActivity() {
             },
             reloadEveryPage = {
                 Diagnostics.record("Nightly maintenance: reloading every page without Device Owner")
-                reloadAllWebViews(includeIdleOnScreen = true)
+                maintenanceReloader.reloadAll(includeIdleOnScreen = true)
             },
             reportDone = {
                 sendBroadcast(
@@ -753,9 +712,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
-
-    private fun isReloadableWebView(fragment: WebViewFragment): Boolean =
-        fragment !== idleScreenFragment() || idleScreenActive
 
     private fun setupWebViewHealthChecker() {
         webViewHealthChecker.onReloadNeeded = {
