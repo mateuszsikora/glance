@@ -66,7 +66,7 @@ class WebViewFragmentHealthCheckTest {
     fun loadThatOutlivesTheGracePeriodIsUnhealthy() {
         val fragment = shownFragment()
 
-        advancePastGrace()
+        advanceToEndOfGrace()
 
         assertEquals(HealthCheckResult.UNHEALTHY, healthOf(fragment))
     }
@@ -74,7 +74,7 @@ class WebViewFragmentHealthCheckTest {
     @Test
     fun reloadStartsANewGracePeriod() {
         val fragment = shownFragment()
-        advancePastGrace()
+        advanceToEndOfGrace()
 
         fragment.reload()
 
@@ -86,7 +86,7 @@ class WebViewFragmentHealthCheckTest {
         val fragment = shownFragment()
         val webView = webViewOf(fragment)
         webView.webViewClient.onPageFinished(webView, URL)
-        advancePastGrace()
+        advanceToEndOfGrace()
 
         webView.webViewClient.onPageStarted(webView, URL, null)
 
@@ -98,7 +98,7 @@ class WebViewFragmentHealthCheckTest {
         val fragment = shownFragment()
         val webView = webViewOf(fragment)
         webView.webViewClient.onPageStarted(webView, URL, null)
-        advancePastGrace()
+        advanceToEndOfGrace()
 
         webView.webViewClient.onPageStarted(webView, "$URL/redirected", null)
 
@@ -154,7 +154,7 @@ class WebViewFragmentHealthCheckTest {
         return result
     }
 
-    private fun advancePastGrace() {
+    private fun advanceToEndOfGrace() {
         ShadowSystemClock.advanceBy(Duration.ofMillis(PageLoadGrace.DEFAULT_GRACE_MS))
     }
 

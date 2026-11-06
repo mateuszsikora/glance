@@ -138,7 +138,9 @@ class WebViewFragment : Fragment() {
                     // A navigation started by the page itself, such as `location.reload()` or
                     // a redirect to a login page, gets its own grace period. Only one that
                     // follows a finished load does: restarting the clock on every redirect
-                    // would let a redirect loop stay in the grace period for good.
+                    // would let a redirect loop stay in the grace period for good. A page that
+                    // navigates again after every finished load still renews it each time;
+                    // reloading would not fix such a loop anyway.
                     if (isLoaded) loadStartedAtMs = SystemClock.elapsedRealtime()
                     isLoaded = false
                     mainFrameError = false

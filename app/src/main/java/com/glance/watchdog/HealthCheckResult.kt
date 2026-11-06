@@ -17,11 +17,13 @@ enum class HealthCheckResult {
  * reloads it, which restarts the load already in progress. A load gets [graceMs] before an
  * unfinished page counts as failed; a main-frame error fails it at once.
  *
- * The default deliberately is not a multiple of the usual check intervals (10, 15, 20, 30 and
- * 60 s). A failed check reloads the page within the same tick, so with a grace equal to the
- * interval the next tick would land on the boundary and a few milliseconds of handler jitter
- * would decide between a skip and a second failure. With 35 s and the default 30 s interval
- * the tick after a reload is always skipped and the one after that always judges the page.
+ * What matters is where the ticks after a reload land. A failed check reloads the page within
+ * its tick, so later ticks come k·interval after the reload; a JavaScript timeout reloads it
+ * 5 s into the tick, so they come k·interval − 5 s after it. A tick on the boundary leaves a
+ * few milliseconds of handler jitter to decide between a skip and a failure. 35 s avoids both
+ * series for the default 30 s interval (ticks at 30 and 60 s, or 25 and 55 s) and for 15 and
+ * 60 s: the tick after a reload is always skipped and the one after that always judges the
+ * page. At 10 and 20 s a timeout's series still hits 35 s, which can cost one extra tick.
  *
  * Timestamps are elapsed-realtime milliseconds.
  */
