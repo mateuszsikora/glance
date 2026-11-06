@@ -32,6 +32,31 @@ class MemorySampleTest {
     }
 
     @Test
+    fun readsTheSwapInCounterFromProcVmstat() {
+        val vmstat = "nr_free_pages 12345\npswpout 777\npswpin 4321\npgmajfault 99\n"
+
+        assertEquals(4321L, MemorySample.swapIns(vmstat))
+        assertNull(MemorySample.swapIns("nr_free_pages 12345\npswpout 777\n"))
+    }
+
+    @Test
+    fun readsSwapInsFromZramStatistics() {
+        val stat = "     123        0 23566192     4004  3779348        0 30234784    51200" +
+            "        0    20500    55204\n"
+
+        assertEquals(2945774L, MemorySample.zramSwapIns(stat))
+        assertNull(MemorySample.zramSwapIns(""))
+    }
+
+    @Test
+    fun swapInRateIsPagesPerSecondBetweenTwoReadings() {
+        assertEquals(1_500L, MemorySample.swapInRate(10_000L, 13_000L, elapsedMs = 2_000L))
+        assertNull(MemorySample.swapInRate(null, 13_000L, elapsedMs = 2_000L))
+        assertNull(MemorySample.swapInRate(13_000L, 100L, elapsedMs = 2_000L))
+        assertNull(MemorySample.swapInRate(100L, 200L, elapsedMs = 0L))
+    }
+
+    @Test
     fun formatsOneAddressFreeLine() {
         val line = MemorySample.format(
             availableBytes = 383L * MIB,
@@ -40,6 +65,7 @@ class MemorySampleTest {
             lowMemory = false,
             swapTotalKb = 512L * 1024L,
             swapFreeKb = 440L * 1024L,
+            swapInPagesPerSecond = 37L,
             appPssKb = 125L * 1024L,
             javaHeapKb = 8L * 1024L,
             nativeHeapKb = 30L * 1024L,
@@ -48,7 +74,7 @@ class MemorySampleTest {
         )
 
         assertEquals(
-            "system available=383/2748MB threshold=216MB low=no swapUsed=72/512MB; " +
+            "system available=383/2748MB threshold=216MB low=no swapUsed=72/512MB swapIn=37/s; " +
                 "app pss=125MB java=8MB native=30MB graphics=88MB nativeAlloc=160MB",
             line
         )

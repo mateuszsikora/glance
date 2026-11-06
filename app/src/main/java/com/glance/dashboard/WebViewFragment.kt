@@ -69,6 +69,7 @@ class WebViewFragment : Fragment() {
         // Fragment instances can survive an Activity recreation. A new WebView has a fresh
         // renderer and must not inherit the terminal state of the destroyed one.
         rendererGone = false
+        ColdStartGate.webViewStarted = true
         _binding = FragmentWebviewBinding.inflate(inflater, container, false)
         return binding.root
     }

@@ -15,9 +15,12 @@ import androidx.core.app.NotificationCompat
 import com.glance.GlanceApp
 import com.glance.MainActivity
 import com.glance.R
+import com.glance.dashboard.ColdStartGate
+import com.glance.dashboard.LaunchWork
 import com.glance.diagnostics.Diagnostics
 import com.glance.update.UpdateChecker
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Foreground service monitoring WebView health and app stability.
@@ -42,6 +45,10 @@ class WatchdogService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        LaunchWork.recordHandled(
+            launchTokenHandled,
+            intent?.getLongExtra(LaunchWork.EXTRA_LAUNCH_TOKEN, 0L) ?: 0L
+        )
         startForeground(NOTIFICATION_ID, buildNotification())
         if (GlanceApp.instance.appConfig.isKioskSuspended) {
             Log.i(TAG, "Kiosk is suspended; stopping watchdog")
@@ -84,7 +91,7 @@ class WatchdogService : Service() {
                     Log.i(TAG, "Periodic WebView reload triggered")
                     Diagnostics.record("Periodic reload requested")
                     triggerWebViewReload()
-                } else {
+                } else if (ColdStartGate.webViewStarted) {
                     reloadPendingUntilScreenOn = true
                     Log.i(TAG, "Periodic reload deferred until the screen wakes")
                     Diagnostics.record("Periodic reload deferred until the screen wakes")
@@ -139,7 +146,10 @@ class WatchdogService : Service() {
 
     private fun performHealthCheck() {
         if (!powerManager.isInteractive) {
-            stalePolicy.onScreenOff(SystemClock.elapsedRealtime())
+            stalePolicy.onScreenOff(
+                SystemClock.elapsedRealtime(),
+                pageExists = ColdStartGate.webViewStarted
+            )
             Log.d(TAG, "Screen is off; skipping WebView health check")
             return
         }
@@ -215,9 +225,12 @@ class WatchdogService : Service() {
 
     private fun requestMemoryRecovery(reason: String) {
         if (!powerManager.isInteractive) {
-            reloadPendingUntilScreenOn = true
-            Log.w(TAG, "Memory recovery deferred while screen is off ($reason)")
-            Diagnostics.record("Memory reload deferred until the screen wakes ($reason)")
+            // Before the first WebView there is nothing to reload, now or after the wake.
+            if (ColdStartGate.webViewStarted) {
+                reloadPendingUntilScreenOn = true
+                Log.w(TAG, "Memory recovery deferred while screen is off ($reason)")
+                Diagnostics.record("Memory reload deferred until the screen wakes ($reason)")
+            }
             return
         }
         val now = SystemClock.elapsedRealtime()
@@ -279,6 +292,9 @@ class WatchdogService : Service() {
         private const val UPDATE_CHECK_INITIAL_DELAY_MS = 16 * 60 * 1000L
         private const val UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000L
         private const val MEMORY_SAMPLE_INTERVAL_MS = 5 * 60 * 1000L
+
+        /** The newest [LaunchWork] token this service has run in this process. */
+        internal val launchTokenHandled = AtomicLong()
 
         const val ACTION_RELOAD_WEBVIEW = "com.glance.ACTION_RELOAD_WEBVIEW"
         const val ACTION_HEALTH_CHECK = "com.glance.ACTION_HEALTH_CHECK"

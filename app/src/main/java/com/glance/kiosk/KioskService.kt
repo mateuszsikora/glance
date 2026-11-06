@@ -22,6 +22,7 @@ import com.glance.R
 import com.glance.battery.BatteryMonitor
 import com.glance.battery.BatteryStatus
 import com.glance.config.AppConfig
+import com.glance.dashboard.LaunchWork
 import com.glance.diagnostics.Diagnostics
 import com.glance.maintenance.MaintenanceSettings
 import com.glance.maintenance.NightlyMaintenancePolicy
@@ -33,6 +34,7 @@ import com.glance.screen.PowerWakePolicy
 import com.glance.screen.ScheduleManager
 import com.glance.update.UpdateChecker
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Foreground owner of all control-plane work: MQTT, screen commands and scheduling.
@@ -129,6 +131,10 @@ class KioskService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        LaunchWork.recordHandled(
+            launchTokenHandled,
+            intent?.getLongExtra(LaunchWork.EXTRA_LAUNCH_TOKEN, 0L) ?: 0L
+        )
         startForeground(NOTIFICATION_ID, buildNotification())
         if (config.isKioskSuspended) {
             Log.i(TAG, "Kiosk is suspended; ignoring service start")
@@ -663,6 +669,9 @@ class KioskService : Service() {
         const val EXTRA_SCREEN_ON = "screen_on"
         /** False when the Activity merely observed the screen state rather than changing it. */
         const val EXTRA_DELIBERATE = "deliberate"
+
+        /** The newest [LaunchWork] token this service has run in this process. */
+        internal val launchTokenHandled = AtomicLong()
 
         /** Set by a starter that opens the dashboard itself, so the service does not open it too. */
         const val EXTRA_DASHBOARD_LAUNCHED = "dashboard_launched"

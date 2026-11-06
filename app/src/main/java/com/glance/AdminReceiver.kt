@@ -5,6 +5,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Device Owner receiver.
@@ -24,8 +25,17 @@ class AdminReceiver : DeviceAdminReceiver() {
         Log.i(TAG, "Device admin disabled")
     }
 
+    override fun onLockTaskModeEntering(context: Context, intent: Intent, pkg: String) {
+        super.onLockTaskModeEntering(context, intent, pkg)
+        lockTaskEntriesHandled.incrementAndGet()
+        Log.i(TAG, "Lock task mode entering")
+    }
+
     companion object {
         private const val TAG = "AdminReceiver"
+
+        /** Lock task entries handled in this process; see [com.glance.dashboard.LaunchWork]. */
+        internal val lockTaskEntriesHandled = AtomicInteger()
 
         fun getComponentName(context: Context): ComponentName {
             return ComponentName(context, AdminReceiver::class.java)

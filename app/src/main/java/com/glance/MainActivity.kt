@@ -1,5 +1,6 @@
 package com.glance
 
+import android.app.ActivityManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -19,14 +20,19 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
 import com.glance.brightness.BrightnessController
 import com.glance.content.ContentSchedulePolicy
 import com.glance.content.IdleTimeoutTracker
+import com.glance.dashboard.ColdStartGate
 import com.glance.dashboard.DashboardPagerAdapter
 import com.glance.dashboard.IdleMaintenanceReload
+import com.glance.dashboard.LaunchWork
+import com.glance.dashboard.MemoryPressure
 import com.glance.dashboard.WebViewFragment
 import com.glance.databinding.ActivityMainBinding
 import com.glance.diagnostics.Diagnostics
+import com.glance.diagnostics.MemorySample
 import com.glance.kiosk.AppRestarter
 import com.glance.kiosk.KioskService
 import com.glance.kiosk.LockTaskHelper
@@ -70,6 +76,18 @@ class MainActivity : AppCompatActivity() {
     private var consumeIdleDismissGesture = false
     private var idleTimeoutTracker: IdleTimeoutTracker? = null
     private var lastUserActivityElapsedMs: Long? = null
+
+    /** Set until the first dashboard WebView of this process may be created. */
+    private var coldStart: ColdStart? = null
+    private var savedStateDiscarded = false
+
+    private val coldStartRunnable = Runnable { checkColdStart() }
+    private val coldStartNoteRunnable = Runnable {
+        binding.coldStartStatus.visibility = View.VISIBLE
+    }
+    private val coldStartWindowRunnable = Runnable {
+        coldStart?.pressure?.startWindow(SystemClock.elapsedRealtime())
+    }
 
     private val contentScheduleRunnable = object : Runnable {
         override fun run() {
@@ -155,7 +173,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
+        val coldWebView = !ColdStartGate.webViewStarted
+        // Fragments restored from the previous process would create their WebViews in onStart,
+        // before the cold start gate could hold them back. A kiosk dashboard restores nothing.
+        savedStateDiscarded = coldWebView && savedInstanceState != null
+        super.onCreate(if (coldWebView) null else savedInstanceState)
+        // Before the lock task request and the service starts, whose handling it waits for.
+        if (coldWebView) coldStart = ColdStart(SystemClock.elapsedRealtime())
 
         // An explicit launch is the opt-in path back into kiosk mode after "Exit Kiosk Mode".
         GlanceApp.instance.appConfig.isKioskSuspended = false
@@ -190,6 +214,11 @@ class MainActivity : AppCompatActivity() {
         recordUserActivity()
     }
 
+    override fun onRestoreInstanceState(savedInstanceState: Bundle) {
+        // Would hand the pager the state of fragments that onCreate did not restore.
+        if (!savedStateDiscarded) super.onRestoreInstanceState(savedInstanceState)
+    }
+
     override fun onPause() {
         dashboardResumed = false
         handler.removeCallbacks(contentScheduleRunnable)
@@ -201,12 +230,21 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        // A stopped Activity lays nothing out, so the gate waits for this.
+        if (coldStart != null) scheduleColdStartCheck(0L, measureMemory = true)
         if (::brightnessController.isInitialized) {
             brightnessController.start(window)
         }
     }
 
     override fun onStop() {
+        // onStart replaces any pending check, which would then never see the stop. A recreation
+        // is not a stop: the new Activity inherits the gate and its time limit.
+        if (!isChangingConfigurations) coldStart?.gate?.onStopped()
+        // The note describes the wait in progress, not one from before the display went off.
+        coldStart?.noteScheduled = false
+        handler.removeCallbacks(coldStartNoteRunnable)
+        if (::binding.isInitialized) binding.coldStartStatus.visibility = View.GONE
         if (::brightnessController.isInitialized) {
             brightnessController.stop()
         }
@@ -242,8 +280,12 @@ class MainActivity : AppCompatActivity() {
                 stayAwakeWhilePlugged = GlanceApp.instance.appConfig.requestedScreenOn
             )
 
+            val enteringLockTask = getSystemService(ActivityManager::class.java)
+                .lockTaskModeState == ActivityManager.LOCK_TASK_MODE_NONE
             try {
                 startLockTask()
+                // A task still locked from the previous process gets no broadcast.
+                coldStart?.work?.lockTaskBroadcastExpected = enteringLockTask
                 Log.i(TAG, "LockTask mode started")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start LockTask", e)
@@ -257,6 +299,8 @@ class MainActivity : AppCompatActivity() {
     // --- Dashboard setup ---
 
     private fun setupDashboard() {
+        // onStart begins the checks.
+        if (coldStart != null) return
         val config = GlanceApp.instance.appConfig
         val urls = ContentSchedulePolicy.activeUrls(
             now = LocalDateTime.now(),
@@ -265,6 +309,70 @@ class MainActivity : AppCompatActivity() {
             profiles = config.contentProfiles
         )
         installDashboardUrls(urls)
+    }
+
+    /** Holds back the first WebView of this process; see [ColdStartGate]. */
+    private fun checkColdStart() {
+        val pending = coldStart ?: return
+        val now = SystemClock.elapsedRealtime()
+        var reading: MemoryPressure.Reading? = null
+        val decision = pending.gate.check(
+            nowMs = now,
+            started = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED),
+            startWorkSettled = pending.work.settled
+        ) {
+            pending.pressure.read(now).also { reading = it }.high
+        }
+        when (decision) {
+            ColdStartGate.Decision.WaitForStart -> Unit
+            is ColdStartGate.Decision.WaitForStartWork -> {
+                // The check that finds the work settled measures swap-in over the last second.
+                pending.pressure.mark(now)
+                scheduleColdStartCheck(decision.delayMs, measureMemory = false)
+            }
+            is ColdStartGate.Decision.WaitForMemory -> {
+                val message = "First dashboard page held back while memory is short " +
+                    "($reading); next check in ${decision.delayMs / 1000} s"
+                Log.w(TAG, message)
+                Diagnostics.record(message, includeMemory = !pending.heldForMemory)
+                pending.heldForMemory = true
+                if (!pending.noteScheduled) {
+                    pending.noteScheduled = true
+                    handler.postDelayed(coldStartNoteRunnable, ColdStartGate.MEMORY_NOTE_DELAY_MS)
+                }
+                scheduleColdStartCheck(decision.delayMs, measureMemory = true)
+            }
+            is ColdStartGate.Decision.Open -> {
+                coldStart = null
+                pendingColdStartGate = null
+                handler.removeCallbacks(coldStartNoteRunnable)
+                binding.coldStartStatus.visibility = View.GONE
+                val message = "Creating the first dashboard page after " +
+                    "${pending.gate.visibleWaitMs(now) / 1000} s" +
+                    (if (decision.gaveUp) ", no longer waiting" else "") + " ($reading)"
+                Log.i(TAG, message)
+                Diagnostics.record(message, includeMemory = pending.heldForMemory)
+                setupDashboard()
+                // The idle timeout counts from the dashboard appearing, not from the black screen.
+                recordUserActivity()
+            }
+        }
+    }
+
+    /**
+     * @param measureMemory the check may read memory pressure, so the swap-in window starts
+     * [MemoryPressure.WINDOW_MS] before it, which also delays it by at least that much.
+     */
+    private fun scheduleColdStartCheck(delayMs: Long, measureMemory: Boolean) {
+        handler.removeCallbacks(coldStartWindowRunnable)
+        handler.removeCallbacks(coldStartRunnable)
+        if (!measureMemory) {
+            handler.postDelayed(coldStartRunnable, delayMs)
+            return
+        }
+        val checkDelayMs = maxOf(delayMs, MemoryPressure.WINDOW_MS)
+        handler.postDelayed(coldStartWindowRunnable, checkDelayMs - MemoryPressure.WINDOW_MS)
+        handler.postDelayed(coldStartRunnable, checkDelayMs)
     }
 
     private fun installDashboardUrls(urls: List<String>) {
@@ -290,7 +398,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun applyActiveContentProfile() {
-        if (!::binding.isInitialized) return
+        if (!::binding.isInitialized || coldStart != null) return
         val config = GlanceApp.instance.appConfig
         installDashboardUrls(
             ContentSchedulePolicy.activeUrls(
@@ -447,6 +555,7 @@ class MainActivity : AppCompatActivity() {
     private fun showIdleScreen() {
         val config = GlanceApp.instance.appConfig
         if (idleScreenActive ||
+            coldStart != null ||
             !dashboardResumed ||
             !config.idleScreenEnabled ||
             config.idleScreenUrl.isBlank() ||
@@ -685,8 +794,13 @@ class MainActivity : AppCompatActivity() {
     // --- Services ---
 
     private fun startServices() {
-        ServiceStarter.startFromForeground(this, Intent(this, KioskService::class.java))
-        ServiceStarter.startFromForeground(this, Intent(this, WatchdogService::class.java))
+        val token = coldStart?.work?.token ?: 0L
+        listOf(KioskService::class.java, WatchdogService::class.java).forEach { service ->
+            ServiceStarter.startFromForeground(
+                this,
+                Intent(this, service).putExtra(LaunchWork.EXTRA_LAUNCH_TOKEN, token)
+            )
+        }
     }
 
     // --- Block back button ---
@@ -701,6 +815,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         liveInstances.decrementAndGet()
+        // Only a recreation takes over the wait; a later launch starts its own time limit.
+        if (!isChangingConfigurations) pendingColdStartGate = null
         handler.removeCallbacksAndMessages(null)
         webViewHealthChecker.reset()
         webViewReachabilityChecker.destroy()
@@ -716,9 +832,49 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
+    private inner class ColdStart(nowMs: Long) {
+        // A recreation during the wait keeps the process's gate and its time limit.
+        val gate = pendingColdStartGate?.also { it.onLaunch(nowMs) }
+            ?: ColdStartGate(nowMs).also { pendingColdStartGate = it }
+        val work = LaunchWork(
+            token = LaunchWork.nextToken(),
+            kioskTokenHandled = KioskService.launchTokenHandled::get,
+            watchdogTokenHandled = WatchdogService.launchTokenHandled::get,
+            lockTaskEntries = AdminReceiver.lockTaskEntriesHandled::get
+        )
+        val pressure = MemoryPressure(
+            lowMemory = {
+                ActivityManager.MemoryInfo()
+                    .also { getSystemService(ActivityManager::class.java).getMemoryInfo(it) }
+                    .lowMemory
+            },
+            swapIns = ::readSwapIns,
+            nowMs = nowMs
+        )
+        var heldForMemory = false
+        var noteScheduled = false
+    }
+
+    private fun readSwapIns(): Long? = try {
+        MemorySample.readSwapIns()
+    } catch (e: Exception) {
+        if (!swapInsUnreadableRecorded) {
+            swapInsUnreadableRecorded = true
+            // Without it the gate relies on the low-memory flag alone.
+            val message = "Swap-in rate unavailable (${e.javaClass.simpleName})"
+            Log.w(TAG, message, e)
+            Diagnostics.record(message)
+        }
+        null
+    }
+
     companion object {
         /** Dashboards alive in this process; a service restarted in a new process sees none. */
         internal val liveInstances = java.util.concurrent.atomic.AtomicInteger()
+
+        /** Outlives a recreation during the wait; see [ColdStartGate]. */
+        private var pendingColdStartGate: ColdStartGate? = null
+        private var swapInsUnreadableRecorded = false
         private const val TAG = "MainActivity"
         private const val TAPS_TO_SETTINGS = 5
         private const val TAP_TIMEOUT_MS = 2000L
