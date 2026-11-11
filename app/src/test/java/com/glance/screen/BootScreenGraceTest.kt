@@ -1,6 +1,8 @@
 package com.glance.screen
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BootScreenGraceTest {
@@ -18,6 +20,20 @@ class BootScreenGraceTest {
 
         now += BootScreenGrace.VISIBLE_MS
         assertEquals(0L, grace.remainingMs())
+    }
+
+    @Test
+    fun aDisplayLitOnlyForTheGraceIsNotReportedAsOn() {
+        now = 70_000L
+        assertFalse(grace.hidesOnReport(isOn = true, requestedScreenOn = false))
+
+        grace.remainingMs()
+        assertTrue(grace.hidesOnReport(isOn = true, requestedScreenOn = false))
+        assertFalse(grace.hidesOnReport(isOn = false, requestedScreenOn = false))
+        assertFalse(grace.hidesOnReport(isOn = true, requestedScreenOn = true))
+
+        now += BootScreenGrace.VISIBLE_MS
+        assertFalse(grace.hidesOnReport(isOn = true, requestedScreenOn = false))
     }
 
     @Test

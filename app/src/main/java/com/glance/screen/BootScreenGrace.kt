@@ -30,6 +30,18 @@ class BootScreenGrace(private val nowElapsedMs: () -> Long) {
         return (endsAt - now).coerceAtLeast(0L)
     }
 
+    /**
+     * Whichever of the dashboard and KioskService holds its OFF back, Home Assistant has heard
+     * OFF and keeps hearing it: a display lit only for the grace is not reported as ON.
+     *
+     * @return true to drop a report that the display is on; never starts a grace.
+     */
+    @Synchronized
+    fun hidesOnReport(isOn: Boolean, requestedScreenOn: Boolean): Boolean {
+        val endsAt = endsAtElapsedMs ?: return false
+        return isOn && !requestedScreenOn && nowElapsedMs() < endsAt
+    }
+
     companion object {
         /** A display-off request this soon after the boot is the one that follows it. */
         const val BOOT_WINDOW_MS = 5 * 60_000L
