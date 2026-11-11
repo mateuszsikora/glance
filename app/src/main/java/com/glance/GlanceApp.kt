@@ -11,6 +11,7 @@ import com.glance.diagnostics.Diagnostics
 import com.glance.diagnostics.KernelMemoryMonitor
 import com.glance.diagnostics.MemorySample
 import com.glance.diagnostics.MemoryTrendMonitor
+import com.glance.screen.BootScreenGrace
 import com.glance.watchdog.CrashLogger
 import kotlin.system.exitProcess
 
@@ -30,6 +31,9 @@ class GlanceApp : Application() {
     /** Warns in the remote panel when the native heap keeps growing over a day. */
     lateinit var memoryTrend: MemoryTrendMonitor
         private set
+
+    /** Shared by the dashboard and the service, either of which may darken the display first. */
+    val bootScreenGrace = BootScreenGrace(SystemClock::elapsedRealtime)
 
     /** Tells when the kernel holds so much memory that only a tablet reboot helps. */
     lateinit var kernelMemory: KernelMemoryMonitor

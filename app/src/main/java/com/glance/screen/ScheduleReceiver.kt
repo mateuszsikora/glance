@@ -9,6 +9,9 @@ class ScheduleReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val action = intent.action ?: return
         ScheduleManager(context.applicationContext, AppConfig(context.applicationContext))
-            .handleAlarm(action)
+            .handleAlarm(
+                action,
+                intent.getLongExtra(ScheduleManager.EXTRA_SCHEDULED_AT, -1L).takeIf { it > 0L }
+            )
     }
 }

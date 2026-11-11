@@ -15,6 +15,7 @@ import com.glance.MainActivity
 import com.glance.config.AppConfig
 import com.glance.maintenance.MaintenanceSettings
 import com.glance.maintenance.NightlyMaintenancePolicy
+import com.glance.screen.BootScreenGrace
 import java.time.Duration
 import java.time.LocalTime
 import org.junit.After
@@ -318,7 +319,45 @@ class KioskServiceMaintenanceTest {
         start(Intent(app, KioskService::class.java).putExtra(KioskService.EXTRA_DASHBOARD_LAUNCHED, true))
 
         assertFalse(config.requestedScreenOn)
-        assertTrue(app.getSystemService(KeyguardManager::class.java).isKeyguardLocked)
+        // The dashboard stays in front for a moment first; see BootScreenGrace.
+        val keyguard = app.getSystemService(KeyguardManager::class.java)
+        assertFalse(keyguard.isKeyguardLocked)
+        advance(BootScreenGrace.VISIBLE_MS)
+        assertTrue(keyguard.isKeyguardLocked)
+    }
+
+    @Test
+    fun anOnDuringTheBootGraceCancelsTheHeldBackOff() {
+        insideTheOffWindow()
+        config.requestedScreenOn = false
+        becomeDeviceOwner()
+        rebootedSinceMarking()
+        start(Intent(app, KioskService::class.java).putExtra(KioskService.EXTRA_DASHBOARD_LAUNCHED, true))
+
+        startCommand(
+            Intent(app, KioskService::class.java)
+                .setAction(KioskService.ACTION_COMMAND_SCREEN)
+                .putExtra(KioskService.EXTRA_SCREEN_ON, true)
+        )
+        advance(BootScreenGrace.VISIBLE_MS)
+
+        assertTrue(config.requestedScreenOn)
+        assertFalse(app.getSystemService(KeyguardManager::class.java).isKeyguardLocked)
+    }
+
+    @Test
+    fun withoutAScheduleOrRebootTheServiceLeavesTheBootOffToTheDashboard() {
+        // MainActivity reapplies the OFF from Home Assistant once the grace is over; nothing here
+        // would.
+        config.scheduleEnabled = false
+        config.requestedScreenOn = false
+        becomeDeviceOwner()
+
+        start(Intent(app, KioskService::class.java).putExtra(KioskService.EXTRA_DASHBOARD_LAUNCHED, true))
+        advance(BootScreenGrace.VISIBLE_MS)
+
+        assertFalse(startedServiceActions().contains(KioskService.ACTION_COMMAND_SCREEN))
+        assertFalse(app.getSystemService(KeyguardManager::class.java).isKeyguardLocked)
     }
 
     @Test

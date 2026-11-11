@@ -66,6 +66,11 @@ class KioskService : Service() {
     private var remainingPowerWakeChecks = 0
     /** Between a maintenance restart and turning its darkened display back on. */
     private var displayRestorePending = false
+    /**
+     * While an OFF waits for [BootScreenGrace]. Home Assistant has already heard OFF; the display
+     * lit only for the grace is not reported as ON in between.
+     */
+    private var bootGraceOffPending = false
     /** Elapsed-realtime start of tonight's maintenance while it still waits; null otherwise. */
     private var maintenanceRequestedAtMs: Long? = null
     /** What tonight's maintenance does once the tablet is left alone. */
@@ -408,6 +413,8 @@ class KioskService : Service() {
         }
 
         mainHandler.removeCallbacks(restoreScreenOffRunnable)
+        mainHandler.removeCallbacks(bootGraceScreenOffRunnable)
+        bootGraceOffPending = false
         config.requestedScreenOn = targetScreenOn
         applyStayAwakePolicy(targetScreenOn)
         val wasScreenOn = reportedScreenOn
@@ -423,6 +430,18 @@ class KioskService : Service() {
                 Intent(ACTION_CONTROL_SCREEN).putExtra(EXTRA_SCREEN_ON, true)
             )
         } else {
+            val graceMs = GlanceApp.instance.bootScreenGrace.remainingMs()
+            if (graceMs > 0L) {
+                Diagnostics.record(
+                    "Keeping the dashboard on screen for ${graceMs / 1000} s after the boot " +
+                        "before turning the display off"
+                )
+                wakeDisplay()
+                launchDashboard()
+                bootGraceOffPending = true
+                mainHandler.postDelayed(bootGraceScreenOffRunnable, graceMs)
+                return
+            }
             if (devicePolicyManager.isDeviceOwnerApp(packageName)) {
                 try {
                     releaseWakeLock()
@@ -534,6 +553,10 @@ class KioskService : Service() {
 
     /** A deliberate state change inside Glance also redefines what the kiosk is asking for. */
     private fun updateScreenState(isOn: Boolean) {
+        if (isOn) {
+            mainHandler.removeCallbacks(bootGraceScreenOffRunnable)
+            bootGraceOffPending = false
+        }
         if (config.requestedScreenOn != isOn) {
             config.requestedScreenOn = isOn
             applyStayAwakePolicy(isOn)
@@ -549,7 +572,9 @@ class KioskService : Service() {
     private fun reportScreenState(isOn: Boolean) {
         // A restart darkens the display only until the next process turns it back on, a reboot
         // until the tablet is back up.
-        if (AppRestarter.restartInProgress || TabletRebooter.rebootInProgress || displayRestorePending) return
+        if (AppRestarter.restartInProgress || TabletRebooter.rebootInProgress || displayRestorePending ||
+            bootGraceOffPending
+        ) return
         if (reportedScreenOn == isOn) return
         reportedScreenOn = isOn
         mqttStateManager?.publishCurrentState()
@@ -567,6 +592,14 @@ class KioskService : Service() {
         mainHandler.removeCallbacks(restoreScreenOffRunnable)
         remainingPowerWakeChecks = POWER_EVENT_CHECKS
         mainHandler.postDelayed(restoreScreenOffRunnable, POWER_EVENT_SETTLE_MS)
+    }
+
+    private val bootGraceScreenOffRunnable = Runnable {
+        bootGraceOffPending = false
+        // An ON from MQTT or the schedule in the meantime cancels this runnable.
+        if (!destroyed && !config.requestedScreenOn) {
+            handleLightCommand(MqttLightCommand(screenOn = false, brightness = null))
+        }
     }
 
     private val restoreScreenOffRunnable = object : Runnable {

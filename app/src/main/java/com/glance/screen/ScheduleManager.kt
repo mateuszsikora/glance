@@ -7,7 +7,9 @@ import android.content.Intent
 import android.os.Build
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.glance.MainActivity
 import com.glance.config.AppConfig
+import com.glance.diagnostics.Diagnostics
 import com.glance.kiosk.KioskService
 import com.glance.maintenance.MaintenanceSettings
 import com.glance.maintenance.NightlyMaintenancePolicy
@@ -63,7 +65,9 @@ class ScheduleManager(
         Log.i(TAG, "Schedule stopped")
     }
 
-    fun handleAlarm(action: String) {
+    /** @param scheduledAtMs when the alarm was due, to journal one EMUI held back; null if unknown. */
+    fun handleAlarm(action: String, scheduledAtMs: Long? = null) {
+        recordIfLate(action, scheduledAtMs, System.currentTimeMillis())
         if (config.isKioskSuspended) {
             stop()
             Log.i(TAG, "Ignoring schedule alarm while kiosk is suspended")
@@ -104,6 +108,17 @@ class ScheduleManager(
                 scheduleNextAlarm(ACTION_SCREEN_OFF, offTime)
             }
         }
+    }
+
+    private fun recordIfLate(action: String, scheduledAtMs: Long?, nowMs: Long) {
+        val minutes = lateMinutes(scheduledAtMs ?: return, nowMs) ?: return
+        val name = when (action) {
+            ACTION_SCREEN_ON -> "Screen ON"
+            ACTION_SCREEN_OFF -> "Screen OFF"
+            ACTION_NIGHTLY_MAINTENANCE -> "Nightly maintenance"
+            else -> return
+        }
+        Diagnostics.record("$name alarm arrived $minutes min late")
     }
 
     private fun cancelScreenAlarms() {
@@ -163,19 +178,29 @@ class ScheduleManager(
     private fun setAlarm(action: String, triggerAtMillis: Long) {
         val canScheduleExact = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
             alarmManager.canScheduleExactAlarms()
+        // Only an exact alarm has a due time to be late against; Doze may defer the other kind.
+        val operation = getPendingIntent(action, triggerAtMillis.takeIf { canScheduleExact })
 
         try {
-            if (canScheduleExact) {
+            if (canScheduleExact && action == ACTION_SCREEN_ON) {
+                // After a reboot inside the OFF window EMUI held every ordinary alarm of Glance
+                // back until someone woke the tablet by hand, ON included, so the morning stayed
+                // dark. An alarm clock is what EMUI and Doze deliver on time.
+                alarmManager.setAlarmClock(
+                    AlarmManager.AlarmClockInfo(triggerAtMillis, dashboardIntent()),
+                    operation
+                )
+            } else if (canScheduleExact) {
                 alarmManager.setExactAndAllowWhileIdle(
                     AlarmManager.RTC_WAKEUP,
                     triggerAtMillis,
-                    getPendingIntent(action)
+                    operation
                 )
             } else {
                 alarmManager.setAndAllowWhileIdle(
                     AlarmManager.RTC_WAKEUP,
                     triggerAtMillis,
-                    getPendingIntent(action)
+                    operation
                 )
             }
         } catch (e: SecurityException) {
@@ -187,13 +212,15 @@ class ScheduleManager(
         alarmManager.cancel(getPendingIntent(action))
     }
 
-    private fun getPendingIntent(action: String): PendingIntent {
+    /** @param triggerAtMillis travels along to measure lateness; extras do not affect matching. */
+    private fun getPendingIntent(action: String, triggerAtMillis: Long? = null): PendingIntent {
         val requestCode = when (action) {
             ACTION_SCREEN_ON -> REQUEST_CODE_ON
             ACTION_SCREEN_OFF -> REQUEST_CODE_OFF
             else -> REQUEST_CODE_MAINTENANCE
         }
         val intent = Intent(action).setClass(context, ScheduleReceiver::class.java)
+        if (triggerAtMillis != null) intent.putExtra(EXTRA_SCHEDULED_AT, triggerAtMillis)
         return PendingIntent.getBroadcast(
             context,
             requestCode,
@@ -201,6 +228,14 @@ class ScheduleManager(
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
     }
+
+    /** What the system opens when someone taps the alarm clock it shows. */
+    private fun dashboardIntent(): PendingIntent = PendingIntent.getActivity(
+        context,
+        REQUEST_CODE_SHOW_DASHBOARD,
+        Intent(context, MainActivity::class.java),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
 
     private fun dispatchScreenCommand(screenOn: Boolean) {
         dispatchKioskCommand(
@@ -225,12 +260,22 @@ class ScheduleManager(
         const val ACTION_SCREEN_ON = "com.glance.action.SCHEDULE_SCREEN_ON"
         const val ACTION_SCREEN_OFF = "com.glance.action.SCHEDULE_SCREEN_OFF"
         const val ACTION_NIGHTLY_MAINTENANCE = "com.glance.action.NIGHTLY_MAINTENANCE"
+        const val EXTRA_SCHEDULED_AT = "com.glance.extra.SCHEDULED_AT"
         private const val REQUEST_CODE_ON = 2001
         private const val REQUEST_CODE_OFF = 2002
         private const val REQUEST_CODE_MAINTENANCE = 2003
+        private const val REQUEST_CODE_SHOW_DASHBOARD = 2004
+        /** Exact alarms land within seconds; EMUI's screen-off batching adds up to about 5 min. */
+        private const val LATE_THRESHOLD_MS = 10 * 60_000L
         private val DEFAULT_ON_TIME = LocalTime.of(6, 0)
         private val DEFAULT_OFF_TIME = LocalTime.of(23, 0)
         private val DEFAULT_QUIET_TIME = LocalTime.parse(MaintenanceSettings.DEFAULT_QUIET_TIME)
+
+        /** @return whole minutes late, or null while the delay is ordinary batching. */
+        fun lateMinutes(scheduledAtMs: Long, nowMs: Long): Long? {
+            val lateMs = nowMs - scheduledAtMs
+            return if (lateMs >= LATE_THRESHOLD_MS) lateMs / 60_000L else null
+        }
     }
 }
 
