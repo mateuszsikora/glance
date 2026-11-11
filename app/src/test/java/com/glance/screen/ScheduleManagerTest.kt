@@ -147,6 +147,37 @@ class ScheduleManagerTest {
         )
     }
 
+    @Test
+    fun theScreenTurnsOnByAnAlarmClock() {
+        config.scheduleEnabled = true
+        config.screenOnTime = "06:25"
+        config.screenOffTime = "23:20"
+
+        ScheduleManager(context, config, maintenance).start(applyCurrentState = false)
+
+        val alarmClock = context.getSystemService(AlarmManager::class.java).nextAlarmClock
+        assertEquals(
+            LocalTime.of(6, 25),
+            Instant.ofEpochMilli(alarmClock.triggerTime).atZone(ZoneId.systemDefault()).toLocalTime()
+        )
+        val on = alarms.scheduledAlarms.single { it.action() == ScheduleManager.ACTION_SCREEN_ON }
+        assertEquals(
+            on.triggerAtMs,
+            shadowOf(on.operation).savedIntent.getLongExtra(ScheduleManager.EXTRA_SCHEDULED_AT, 0L)
+        )
+        val off = alarms.scheduledAlarms.single { it.action() == ScheduleManager.ACTION_SCREEN_OFF }
+        assertNull(off.showIntent)
+    }
+
+    @Test
+    fun onlyAnAlarmHeldBackBeyondBatchingCountsAsLate() {
+        val due = 1_000_000_000L
+
+        assertNull(ScheduleManager.lateMinutes(due, due + 5 * 60_000L))
+        assertEquals(10L, ScheduleManager.lateMinutes(due, due + 10 * 60_000L))
+        assertEquals(79L, ScheduleManager.lateMinutes(due, due + 79 * 60_000L + 14_000L))
+    }
+
     private fun ShadowAlarmManager.ScheduledAlarm.action(): String? =
         shadowOf(operation).savedIntent.action
 

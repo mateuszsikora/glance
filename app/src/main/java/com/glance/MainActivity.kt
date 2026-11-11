@@ -488,7 +488,17 @@ class MainActivity : AppCompatActivity() {
         if (!config.requestedScreenOn) {
             // Reapply the logical OFF state after Activity/process recreation. This is essential
             // for the non-Device-Owner black-overlay fallback, whose View cannot be persisted.
-            screenController.screenOff()
+            // Right after a boot it waits for BootScreenGrace; not every boot path has
+            // KioskService send an OFF of its own.
+            val graceMs = GlanceApp.instance.bootScreenGrace.remainingMs()
+            if (graceMs == 0L) {
+                screenController.screenOff()
+            } else {
+                handler.postDelayed(
+                    { if (!config.requestedScreenOn) screenController.screenOff() },
+                    graceMs
+                )
+            }
         }
     }
 

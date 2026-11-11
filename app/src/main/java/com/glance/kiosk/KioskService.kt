@@ -408,6 +408,7 @@ class KioskService : Service() {
         }
 
         mainHandler.removeCallbacks(restoreScreenOffRunnable)
+        mainHandler.removeCallbacks(bootGraceScreenOffRunnable)
         config.requestedScreenOn = targetScreenOn
         applyStayAwakePolicy(targetScreenOn)
         val wasScreenOn = reportedScreenOn
@@ -423,6 +424,17 @@ class KioskService : Service() {
                 Intent(ACTION_CONTROL_SCREEN).putExtra(EXTRA_SCREEN_ON, true)
             )
         } else {
+            val graceMs = GlanceApp.instance.bootScreenGrace.remainingMs()
+            if (graceMs > 0L) {
+                Diagnostics.record(
+                    "Keeping the dashboard on screen for ${graceMs / 1000} s after the boot " +
+                        "before turning the display off"
+                )
+                wakeDisplay()
+                launchDashboard()
+                mainHandler.postDelayed(bootGraceScreenOffRunnable, graceMs)
+                return
+            }
             if (devicePolicyManager.isDeviceOwnerApp(packageName)) {
                 try {
                     releaseWakeLock()
@@ -534,6 +546,7 @@ class KioskService : Service() {
 
     /** A deliberate state change inside Glance also redefines what the kiosk is asking for. */
     private fun updateScreenState(isOn: Boolean) {
+        if (isOn) mainHandler.removeCallbacks(bootGraceScreenOffRunnable)
         if (config.requestedScreenOn != isOn) {
             config.requestedScreenOn = isOn
             applyStayAwakePolicy(isOn)
@@ -549,7 +562,9 @@ class KioskService : Service() {
     private fun reportScreenState(isOn: Boolean) {
         // A restart darkens the display only until the next process turns it back on, a reboot
         // until the tablet is back up.
-        if (AppRestarter.restartInProgress || TabletRebooter.rebootInProgress || displayRestorePending) return
+        if (AppRestarter.restartInProgress || TabletRebooter.rebootInProgress || displayRestorePending ||
+            GlanceApp.instance.bootScreenGrace.hidesOnReport(isOn, config.requestedScreenOn)
+        ) return
         if (reportedScreenOn == isOn) return
         reportedScreenOn = isOn
         mqttStateManager?.publishCurrentState()
@@ -567,6 +582,13 @@ class KioskService : Service() {
         mainHandler.removeCallbacks(restoreScreenOffRunnable)
         remainingPowerWakeChecks = POWER_EVENT_CHECKS
         mainHandler.postDelayed(restoreScreenOffRunnable, POWER_EVENT_SETTLE_MS)
+    }
+
+    private val bootGraceScreenOffRunnable = Runnable {
+        // An ON from MQTT or the schedule in the meantime cancels this runnable.
+        if (!destroyed && !config.requestedScreenOn) {
+            handleLightCommand(MqttLightCommand(screenOn = false, brightness = null))
+        }
     }
 
     private val restoreScreenOffRunnable = object : Runnable {
