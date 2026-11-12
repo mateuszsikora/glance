@@ -454,9 +454,8 @@ class KioskService : Service() {
         }
     }
 
-    /** @param lateMs how long after its time the alarm arrived; the postponement counts from then. */
     /**
-     * @param lateMs how long after its time the alarm arrived.
+     * @param lateMs how long after its time the alarm arrived; the postponement counts from then.
      * @param tooLate skip it for the night ([NightlyMaintenancePolicy.skipForTheNight]); journaled
      *   with what was due, so a night that lost a reboot reads differently from one with none due.
      */
@@ -492,9 +491,11 @@ class KioskService : Service() {
         }
         if (tooLate) {
             val due = if (action == NightlyMaintenancePolicy.Action.REBOOT) "tablet reboot" else "restart"
+            // Without an exact alarm its due time is unknown; only the OFF window told it was late.
+            val came = if (lateMs > 0L) "came ${lateMs / 60_000L} min late" else "came after the OFF window"
             Diagnostics.record(
-                "Nightly maintenance skipped for tonight; its alarm came ${lateMs / 60_000L} min " +
-                    "late, and the $due that was due waits for the next night"
+                "Nightly maintenance skipped for tonight; its alarm $came, " +
+                    "and the $due that was due waits for the next night"
             )
             return
         }
