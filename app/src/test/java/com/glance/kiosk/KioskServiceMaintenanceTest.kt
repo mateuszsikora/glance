@@ -243,6 +243,23 @@ class KioskServiceMaintenanceTest {
     }
 
     @Test
+    fun aMaintenanceAlarmTooLateForTonightRunsNothing() {
+        start()
+        ageProcess()
+        clearBroadcasts()
+
+        startCommand(
+            Intent(app, KioskService::class.java)
+                .setAction(KioskService.ACTION_NIGHTLY_MAINTENANCE)
+                .putExtra(KioskService.EXTRA_MAINTENANCE_LATE_MS, NightlyMaintenancePolicy.MAX_POSTPONE_MS)
+                .putExtra(KioskService.EXTRA_MAINTENANCE_TOO_LATE, true)
+        )
+        repeat(3) { advance(NightlyMaintenancePolicy.RETRY_MS) }
+
+        assertTrue(maintenanceBroadcasts().isEmpty())
+    }
+
+    @Test
     fun withTheDisplayOffADeviceOwnerRestartsWithoutAskingTheActivity() {
         shadowOf(app.getSystemService(DevicePolicyManager::class.java))
             .setDeviceOwner(AdminReceiver.getComponentName(app))

@@ -88,14 +88,15 @@ class ScheduleManager(
             if (!maintenance.anyScheduled) return
             val lateMs = scheduledAtMs?.let { (nowMs - it).coerceAtLeast(0L) } ?: 0L
             val arrivedAt = Instant.ofEpochMilli(nowMs).atZone(ZoneId.systemDefault()).toLocalTime()
-            if (NightlyMaintenancePolicy.skipForTheNight(lateMs, offWindow(), arrivedAt)) {
-                Diagnostics.record("Nightly maintenance skipped for tonight; its alarm came too late")
-                return
-            }
+            // KioskService skips it, once it knows what tonight's maintenance would have been.
             dispatchKioskCommand(
                 Intent(context, KioskService::class.java)
                     .setAction(KioskService.ACTION_NIGHTLY_MAINTENANCE)
                     .putExtra(KioskService.EXTRA_MAINTENANCE_LATE_MS, lateMs)
+                    .putExtra(
+                        KioskService.EXTRA_MAINTENANCE_TOO_LATE,
+                        NightlyMaintenancePolicy.skipForTheNight(lateMs, offWindow(), arrivedAt)
+                    )
             )
             return
         }

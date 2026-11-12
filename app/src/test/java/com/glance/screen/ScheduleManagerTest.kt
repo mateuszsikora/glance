@@ -13,6 +13,7 @@ import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -190,7 +191,7 @@ class ScheduleManagerTest {
             nowMs = due + NightlyMaintenancePolicy.MAX_POSTPONE_MS
         )
 
-        assertNull(shadowOf(context as Application).nextStartedService)
+        assertTooLate(true)
         // The next night's alarm is set all the same.
         assertTrue(alarms.scheduledAlarms.any { it.action() == ScheduleManager.ACTION_NIGHTLY_MAINTENANCE })
     }
@@ -210,6 +211,7 @@ class ScheduleManagerTest {
         val started = shadowOf(context as Application).nextStartedService
         assertEquals(KioskService.ACTION_NIGHTLY_MAINTENANCE, started.action)
         assertEquals(late, started.getLongExtra(KioskService.EXTRA_MAINTENANCE_LATE_MS, 0L))
+        assertFalse(started.getBooleanExtra(KioskService.EXTRA_MAINTENANCE_TOO_LATE, true))
     }
 
     @Test
@@ -226,7 +228,55 @@ class ScheduleManagerTest {
             nowMs = arrived.toInstant().toEpochMilli()
         )
 
-        assertNull(shadowOf(context as Application).nextStartedService)
+        assertTooLate(true)
+    }
+
+    @Test
+    fun aMaintenanceAlarmLessThanThreeHoursLateButAfterTheOffWindowIsSkipped() {
+        // Decided by the OFF window alone: 135 minutes stay under the three-hour limit.
+        config.scheduleEnabled = true
+        config.screenOnTime = "06:25"
+        config.screenOffTime = "04:00"
+        val due = LocalDate.of(2026, 11, 12).atTime(4, 15).atZone(ZoneId.systemDefault())
+
+        ScheduleManager(context, config, maintenance).handleAlarm(
+            ScheduleManager.ACTION_NIGHTLY_MAINTENANCE,
+            scheduledAtMs = due.toInstant().toEpochMilli(),
+            nowMs = due.plusMinutes(135).toInstant().toEpochMilli()
+        )
+
+        assertTooLate(true)
+    }
+
+    @Test
+    fun aMaintenanceAlarmLateInsideTheOffWindowStillRuns() {
+        config.scheduleEnabled = true
+        config.screenOnTime = "06:25"
+        config.screenOffTime = "04:00"
+        val due = LocalDate.of(2026, 11, 12).atTime(4, 15).atZone(ZoneId.systemDefault())
+
+        ScheduleManager(context, config, maintenance).handleAlarm(
+            ScheduleManager.ACTION_NIGHTLY_MAINTENANCE,
+            scheduledAtMs = due.toInstant().toEpochMilli(),
+            nowMs = due.plusMinutes(90).toInstant().toEpochMilli()
+        )
+
+        assertTooLate(false)
+    }
+
+    @Test
+    fun onlyAnAlarmHeldBackBeyondBatchingCountsAsLate() {
+        val due = 1_000_000_000L
+
+        assertNull(ScheduleManager.lateMinutes(due, due + 5 * 60_000L))
+        assertEquals(10L, ScheduleManager.lateMinutes(due, due + 10 * 60_000L))
+        assertEquals(79L, ScheduleManager.lateMinutes(due, due + 79 * 60_000L + 14_000L))
+    }
+
+    private fun assertTooLate(expected: Boolean) {
+        val started = shadowOf(context as Application).nextStartedService
+        assertEquals(KioskService.ACTION_NIGHTLY_MAINTENANCE, started.action)
+        assertEquals(expected, started.getBooleanExtra(KioskService.EXTRA_MAINTENANCE_TOO_LATE, !expected))
     }
 
     private fun ShadowAlarmManager.ScheduledAlarm.action(): String? =

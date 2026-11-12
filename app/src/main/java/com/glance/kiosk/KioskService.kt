@@ -160,7 +160,8 @@ class KioskService : Service() {
                 )
             }
             ACTION_NIGHTLY_MAINTENANCE -> startNightlyMaintenance(
-                lateMs = intent.getLongExtra(EXTRA_MAINTENANCE_LATE_MS, 0L).coerceAtLeast(0L)
+                lateMs = intent.getLongExtra(EXTRA_MAINTENANCE_LATE_MS, 0L).coerceAtLeast(0L),
+                tooLate = intent.getBooleanExtra(EXTRA_MAINTENANCE_TOO_LATE, false)
             )
         }
 
@@ -454,7 +455,12 @@ class KioskService : Service() {
     }
 
     /** @param lateMs how long after its time the alarm arrived; the postponement counts from then. */
-    private fun startNightlyMaintenance(lateMs: Long = 0L) {
+    /**
+     * @param lateMs how long after its time the alarm arrived.
+     * @param tooLate skip it for the night ([NightlyMaintenancePolicy.skipForTheNight]); journaled
+     *   with what was due, so a night that lost a reboot reads differently from one with none due.
+     */
+    private fun startNightlyMaintenance(lateMs: Long = 0L, tooLate: Boolean = false) {
         val now = SystemClock.elapsedRealtime()
         val settings = MaintenanceSettings(this)
         val intervalDays = settings.restartIntervalDays
@@ -482,6 +488,14 @@ class KioskService : Service() {
                 }
             )
             Diagnostics.record("Nightly maintenance skipped; " + reasons.joinToString("; "))
+            return
+        }
+        if (tooLate) {
+            val due = if (action == NightlyMaintenancePolicy.Action.REBOOT) "tablet reboot" else "restart"
+            Diagnostics.record(
+                "Nightly maintenance skipped for tonight; its alarm came ${lateMs / 60_000L} min " +
+                    "late, and the $due that was due waits for the next night"
+            )
             return
         }
         Diagnostics.record(
@@ -712,6 +726,8 @@ class KioskService : Service() {
         const val EXTRA_MAINTENANCE_REBOOT = "maintenance_reboot"
         /** How long after its time the nightly maintenance alarm arrived. */
         const val EXTRA_MAINTENANCE_LATE_MS = "maintenance_late_ms"
+        /** The alarm came too late to run tonight; see [NightlyMaintenancePolicy.skipForTheNight]. */
+        const val EXTRA_MAINTENANCE_TOO_LATE = "maintenance_too_late"
         const val EXTRA_SCREEN_ON = "screen_on"
         /** False when the Activity merely observed the screen state rather than changing it. */
         const val EXTRA_DELIBERATE = "deliberate"
