@@ -13,6 +13,7 @@ import com.glance.diagnostics.Diagnostics
 import com.glance.kiosk.KioskService
 import com.glance.maintenance.MaintenanceSettings
 import com.glance.maintenance.NightlyMaintenancePolicy
+import java.time.Instant
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
@@ -65,9 +66,17 @@ class ScheduleManager(
         Log.i(TAG, "Schedule stopped")
     }
 
-    /** @param scheduledAtMs when the alarm was due, to journal one EMUI held back; null if unknown. */
-    fun handleAlarm(action: String, scheduledAtMs: Long? = null) {
-        recordIfLate(action, scheduledAtMs, System.currentTimeMillis())
+    /**
+     * @param scheduledAtMs when the alarm was due, to journal one EMUI held back and to count a
+     *   late night's maintenance from its time; null if unknown.
+     * @param nowMs when it arrived.
+     */
+    fun handleAlarm(
+        action: String,
+        scheduledAtMs: Long? = null,
+        nowMs: Long = System.currentTimeMillis()
+    ) {
+        recordIfLate(action, scheduledAtMs, nowMs)
         if (config.isKioskSuspended) {
             stop()
             Log.i(TAG, "Ignoring schedule alarm while kiosk is suspended")
@@ -76,12 +85,18 @@ class ScheduleManager(
         if (action == ACTION_NIGHTLY_MAINTENANCE) {
             Log.i(TAG, "Nightly maintenance alarm fired")
             scheduleNightlyMaintenance()
-            if (maintenance.anyScheduled) {
-                dispatchKioskCommand(
-                    Intent(context, KioskService::class.java)
-                        .setAction(KioskService.ACTION_NIGHTLY_MAINTENANCE)
-                )
+            if (!maintenance.anyScheduled) return
+            val lateMs = scheduledAtMs?.let { (nowMs - it).coerceAtLeast(0L) } ?: 0L
+            val arrivedAt = Instant.ofEpochMilli(nowMs).atZone(ZoneId.systemDefault()).toLocalTime()
+            if (NightlyMaintenancePolicy.skipForTheNight(lateMs, offWindow(), arrivedAt)) {
+                Diagnostics.record("Nightly maintenance skipped for tonight; its alarm came too late")
+                return
             }
+            dispatchKioskCommand(
+                Intent(context, KioskService::class.java)
+                    .setAction(KioskService.ACTION_NIGHTLY_MAINTENANCE)
+                    .putExtra(KioskService.EXTRA_MAINTENANCE_LATE_MS, lateMs)
+            )
             return
         }
         if (!config.scheduleEnabled) {
@@ -135,16 +150,8 @@ class ScheduleManager(
             cancelAlarm(ACTION_NIGHTLY_MAINTENANCE)
             return
         }
-        val offWindow = if (config.scheduleEnabled) {
-            NightlyMaintenancePolicy.ScreenOffWindow(
-                on = parseTime(config.screenOnTime, DEFAULT_ON_TIME),
-                off = parseTime(config.screenOffTime, DEFAULT_OFF_TIME)
-            )
-        } else {
-            null
-        }
         val runTime = NightlyMaintenancePolicy.runTime(
-            offWindow,
+            offWindow(),
             parseTime(maintenance.quietTime, DEFAULT_QUIET_TIME)
         )
         val nextRun = NightlyMaintenancePolicy.nextRun(LocalDateTime.now(), runTime)
@@ -154,6 +161,16 @@ class ScheduleManager(
         )
         Log.i(TAG, "Nightly maintenance scheduled for $nextRun")
     }
+
+    private fun offWindow(): NightlyMaintenancePolicy.ScreenOffWindow? =
+        if (config.scheduleEnabled) {
+            NightlyMaintenancePolicy.ScreenOffWindow(
+                on = parseTime(config.screenOnTime, DEFAULT_ON_TIME),
+                off = parseTime(config.screenOffTime, DEFAULT_OFF_TIME)
+            )
+        } else {
+            null
+        }
 
     private fun shouldScreenBeOnNow(): Boolean {
         val now = LocalTime.now()
@@ -182,10 +199,12 @@ class ScheduleManager(
         val operation = getPendingIntent(action, triggerAtMillis.takeIf { canScheduleExact })
 
         try {
-            if (canScheduleExact && action == ACTION_SCREEN_ON) {
-                // After a reboot inside the OFF window EMUI held every ordinary alarm of Glance
-                // back until someone woke the tablet by hand, ON included, so the morning stayed
-                // dark. An alarm clock is what EMUI and Doze deliver on time.
+            if (canScheduleExact && action != ACTION_SCREEN_OFF) {
+                // With the display off EMUI may hold every ordinary alarm of Glance back until
+                // morning: after a reboot inside the OFF window the screen-on came only when
+                // someone woke the tablet by hand, and on another night the maintenance alarm,
+                // due 15 minutes after the OFF, came at the 06:25 screen-on. An alarm clock is what
+                // EMUI and Doze deliver on time. The OFF is due while the display is still on.
                 alarmManager.setAlarmClock(
                     AlarmManager.AlarmClockInfo(triggerAtMillis, dashboardIntent()),
                     operation

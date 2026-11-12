@@ -95,6 +95,31 @@ class NightlyMaintenancePolicyTest {
     }
 
     @Test
+    fun anAlarmHeldBackUntilTheScreenOnIsSkippedForTheNight() {
+        val window = ScreenOffWindow(on = LocalTime.of(6, 25), off = LocalTime.of(23, 20))
+
+        // The 23:35 alarm EMUI held back until the 06:25 screen-on.
+        assertTrue(NightlyMaintenancePolicy.skipForTheNight(410 * 60_000L, window, LocalTime.of(6, 25)))
+        // Late, but the room is still dark.
+        assertFalse(NightlyMaintenancePolicy.skipForTheNight(60 * 60_000L, window, LocalTime.of(0, 35)))
+        // Whatever made an alarm of unknown lateness come after the window, the tablet is in use.
+        assertTrue(NightlyMaintenancePolicy.skipForTheNight(0L, window, LocalTime.of(7, 0)))
+        assertFalse(NightlyMaintenancePolicy.skipForTheNight(0L, window, LocalTime.of(23, 35)))
+    }
+
+    @Test
+    fun withoutAnOffWindowOnlyHoursOfDelaySkipTheNight() {
+        val max = NightlyMaintenancePolicy.MAX_POSTPONE_MS
+        val noon = LocalTime.NOON
+
+        assertTrue(NightlyMaintenancePolicy.skipForTheNight(max, null, noon))
+        assertFalse(NightlyMaintenancePolicy.skipForTheNight(max - 1, null, noon))
+        // Identical ON and OFF times mean always on, which has no OFF window either.
+        val alwaysOn = ScreenOffWindow(on = LocalTime.of(6, 0), off = LocalTime.of(6, 0))
+        assertFalse(NightlyMaintenancePolicy.skipForTheNight(0L, alwaysOn, noon))
+    }
+
+    @Test
     fun givesUpForTheNightAfterBeingPostponedForHours() {
         assertEquals(
             Decision.GIVE_UP,
