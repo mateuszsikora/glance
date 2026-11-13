@@ -75,6 +75,10 @@ class KioskService : Service() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
                 Intent.ACTION_SCREEN_ON -> {
+                    // Until the first sleep after a boot Android has announced no screen state,
+                    // so it sends SCREEN_ON before that sleep's SCREEN_OFF; the display is
+                    // already dark by then. Home Assistant should not see it light up at 23:20.
+                    if (!powerManager.isInteractive) return
                     Diagnostics.record("Display turned on")
                     reportScreenState(true)
                 }
