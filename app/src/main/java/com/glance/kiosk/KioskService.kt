@@ -76,9 +76,15 @@ class KioskService : Service() {
             when (intent?.action) {
                 Intent.ACTION_SCREEN_ON -> {
                     // Until the first sleep after a boot Android has announced no screen state,
-                    // so it sends SCREEN_ON before that sleep's SCREEN_OFF; the display is
-                    // already dark by then. Home Assistant should not see it light up at 23:20.
-                    if (!powerManager.isInteractive) return
+                    // so it sends SCREEN_ON before that sleep's SCREEN_OFF, with the display
+                    // already dark. A real wake is already interactive by the time its broadcast
+                    // is handled, so only this one is dropped, and Home Assistant does not see the
+                    // screen light up at the scheduled screen-off.
+                    if (!powerManager.isInteractive) {
+                        Log.i(TAG, "Ignoring SCREEN_ON while the display is not interactive")
+                        Diagnostics.record("Screen-on broadcast ignored; the display is off")
+                        return
+                    }
                     Diagnostics.record("Display turned on")
                     reportScreenState(true)
                 }

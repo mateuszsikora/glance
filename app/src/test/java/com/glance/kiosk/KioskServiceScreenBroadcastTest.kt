@@ -35,14 +35,11 @@ class KioskServiceScreenBroadcastTest {
     private var controller: ServiceController<KioskService>? = null
 
     @Before
-    fun startService() {
+    fun installJournal() {
         journal = DiagnosticLog(directory = folder.root, enabled = { journalEnabled }, sampleMemory = { "" })
         Diagnostics.install(journal)
         // ContextCompat's API 26 stand-in for RECEIVER_NOT_EXPORTED; merged into the real manifest.
         shadowOf(app).grantPermissions("${app.packageName}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION")
-        controller = Robolectric.buildService(KioskService::class.java).create()
-        controller!!.withIntent(Intent(app, KioskService::class.java)).startCommand(0, 1)
-        shadowOf(Looper.getMainLooper()).idle()
     }
 
     @After
@@ -54,24 +51,47 @@ class KioskServiceScreenBroadcastTest {
 
     @Test
     fun theScreenOnAndroidSendsBeforeTheFirstSleepAfterABootIsIgnored() {
-        power.setIsInteractive(false)
+        startServiceWithTheDisplayDark()
 
         broadcast(Intent.ACTION_SCREEN_ON)
+        // Home Assistant would have heard ON here.
+        assertFalse(reportedScreenOn())
         broadcast(Intent.ACTION_SCREEN_OFF)
 
         val entries = journal.read()
         assertFalse(entries.contains("Display turned on"))
+        assertTrue(entries.contains("Screen-on broadcast ignored; the display is off"))
         assertTrue(entries.contains("Display turned off"))
+        assertFalse(reportedScreenOn())
     }
 
     @Test
-    fun aRealWakeIsRecorded() {
+    fun aRealWakeIsRecordedAndReported() {
+        startServiceWithTheDisplayDark()
         power.setIsInteractive(true)
 
         broadcast(Intent.ACTION_SCREEN_ON)
 
-        assertTrue(journal.read().contains("Display turned on"))
+        val entries = journal.read()
+        assertTrue(entries.contains("Display turned on"))
+        assertFalse(entries.contains("Screen-on broadcast ignored"))
+        assertTrue(reportedScreenOn())
     }
+
+    /** As at the scheduled screen-off: the display is dark and Home Assistant was told so. */
+    private fun startServiceWithTheDisplayDark() {
+        power.setIsInteractive(false)
+        controller = Robolectric.buildService(KioskService::class.java).create()
+        controller!!.withIntent(Intent(app, KioskService::class.java)).startCommand(0, 1)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertFalse(reportedScreenOn())
+    }
+
+    /** The screen state the service publishes to Home Assistant. */
+    private fun reportedScreenOn(): Boolean =
+        KioskService::class.java.getDeclaredField("reportedScreenOn")
+            .apply { isAccessible = true }
+            .getBoolean(controller!!.get())
 
     private fun broadcast(action: String) {
         app.sendBroadcast(Intent(action))
