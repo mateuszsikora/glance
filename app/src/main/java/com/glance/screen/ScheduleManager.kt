@@ -69,14 +69,16 @@ class ScheduleManager(
     /**
      * @param scheduledAtMs when the alarm was due, to journal one EMUI held back and to count a
      *   late night's maintenance from its time; null if unknown.
+     * @param inexact the alarm was set without exact-alarm access, so Android may defer it.
      * @param nowMs when it arrived.
      */
     fun handleAlarm(
         action: String,
         scheduledAtMs: Long? = null,
+        inexact: Boolean = false,
         nowMs: Long = System.currentTimeMillis()
     ) {
-        recordIfLate(action, scheduledAtMs, nowMs)
+        recordIfLate(action, scheduledAtMs, inexact, nowMs)
         if (config.isKioskSuspended) {
             stop()
             Log.i(TAG, "Ignoring schedule alarm while kiosk is suspended")
@@ -126,7 +128,7 @@ class ScheduleManager(
         }
     }
 
-    private fun recordIfLate(action: String, scheduledAtMs: Long?, nowMs: Long) {
+    private fun recordIfLate(action: String, scheduledAtMs: Long?, inexact: Boolean, nowMs: Long) {
         val minutes = lateMinutes(scheduledAtMs ?: return, nowMs) ?: return
         val name = when (action) {
             ACTION_SCREEN_ON -> "Screen ON"
@@ -134,7 +136,10 @@ class ScheduleManager(
             ACTION_NIGHTLY_MAINTENANCE -> "Nightly maintenance"
             else -> return
         }
-        Diagnostics.record("$name alarm arrived $minutes min late")
+        Diagnostics.record(
+            "$name alarm arrived $minutes min late" +
+                if (inexact) " (an inexact alarm, which Android may defer)" else ""
+        )
     }
 
     private fun cancelScreenAlarms() {
@@ -196,8 +201,14 @@ class ScheduleManager(
     private fun setAlarm(action: String, triggerAtMillis: Long) {
         val canScheduleExact = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
             alarmManager.canScheduleExactAlarms()
-        // Only an exact alarm has a due time to be late against; Doze may defer the other kind.
-        val operation = getPendingIntent(action, triggerAtMillis.takeIf { canScheduleExact })
+        // A screen alarm has a due time to be late against only when exact; Doze may defer the
+        // other kind. The maintenance keeps it either way: the skip for the night and its
+        // postponement count from the due time, and an inexact one is journaled as such.
+        val operation = getPendingIntent(
+            action,
+            triggerAtMillis.takeIf { canScheduleExact || action == ACTION_NIGHTLY_MAINTENANCE },
+            exact = canScheduleExact
+        )
 
         try {
             if (canScheduleExact && action != ACTION_SCREEN_OFF) {
@@ -232,8 +243,15 @@ class ScheduleManager(
         alarmManager.cancel(getPendingIntent(action))
     }
 
-    /** @param triggerAtMillis travels along to measure lateness; extras do not affect matching. */
-    private fun getPendingIntent(action: String, triggerAtMillis: Long? = null): PendingIntent {
+    /**
+     * @param triggerAtMillis travels along to measure lateness; extras do not affect matching.
+     * @param exact false for an alarm Android may defer, which [EXTRA_INEXACT] tells the receiver.
+     */
+    private fun getPendingIntent(
+        action: String,
+        triggerAtMillis: Long? = null,
+        exact: Boolean = true
+    ): PendingIntent {
         val requestCode = when (action) {
             ACTION_SCREEN_ON -> REQUEST_CODE_ON
             ACTION_SCREEN_OFF -> REQUEST_CODE_OFF
@@ -241,6 +259,7 @@ class ScheduleManager(
         }
         val intent = Intent(action).setClass(context, ScheduleReceiver::class.java)
         if (triggerAtMillis != null) intent.putExtra(EXTRA_SCHEDULED_AT, triggerAtMillis)
+        if (!exact) intent.putExtra(EXTRA_INEXACT, true)
         return PendingIntent.getBroadcast(
             context,
             requestCode,
@@ -281,6 +300,7 @@ class ScheduleManager(
         const val ACTION_SCREEN_OFF = "com.glance.action.SCHEDULE_SCREEN_OFF"
         const val ACTION_NIGHTLY_MAINTENANCE = "com.glance.action.NIGHTLY_MAINTENANCE"
         const val EXTRA_SCHEDULED_AT = "com.glance.extra.SCHEDULED_AT"
+        const val EXTRA_INEXACT = "com.glance.extra.INEXACT"
         private const val REQUEST_CODE_ON = 2001
         private const val REQUEST_CODE_OFF = 2002
         private const val REQUEST_CODE_MAINTENANCE = 2003

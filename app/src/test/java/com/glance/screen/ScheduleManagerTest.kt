@@ -265,6 +265,26 @@ class ScheduleManagerTest {
     }
 
     @Test
+    @Config(sdk = [31])
+    fun withoutExactAlarmsTheMaintenanceStillKnowsItsDueTime() {
+        ShadowAlarmManager.setCanScheduleExactAlarms(false)
+        config.scheduleEnabled = true
+        config.screenOnTime = "06:25"
+        config.screenOffTime = "23:20"
+
+        ScheduleManager(context, config, maintenance).start(applyCurrentState = false)
+
+        val restart = alarms.scheduledAlarms
+            .single { it.action() == ScheduleManager.ACTION_NIGHTLY_MAINTENANCE }
+        val restartIntent = shadowOf(restart.operation).savedIntent
+        assertEquals(restart.triggerAtMs, restartIntent.getLongExtra(ScheduleManager.EXTRA_SCHEDULED_AT, 0L))
+        assertTrue(restartIntent.getBooleanExtra(ScheduleManager.EXTRA_INEXACT, false))
+        // A screen alarm Doze may defer has no due time to be late against.
+        val on = alarms.scheduledAlarms.single { it.action() == ScheduleManager.ACTION_SCREEN_ON }
+        assertFalse(shadowOf(on.operation).savedIntent.hasExtra(ScheduleManager.EXTRA_SCHEDULED_AT))
+    }
+
+    @Test
     fun onlyAnAlarmHeldBackBeyondBatchingCountsAsLate() {
         val due = 1_000_000_000L
 
