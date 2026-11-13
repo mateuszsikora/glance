@@ -11,7 +11,8 @@ class ScheduleReceiver : BroadcastReceiver() {
         ScheduleManager(context.applicationContext, AppConfig(context.applicationContext))
             .handleAlarm(
                 action,
-                intent.getLongExtra(ScheduleManager.EXTRA_SCHEDULED_AT, -1L).takeIf { it > 0L }
+                intent.getLongExtra(ScheduleManager.EXTRA_SCHEDULED_AT, -1L).takeIf { it > 0L },
+                inexact = intent.getBooleanExtra(ScheduleManager.EXTRA_INEXACT, false)
             )
     }
 }

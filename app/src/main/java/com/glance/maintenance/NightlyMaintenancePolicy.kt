@@ -1,5 +1,6 @@
 package com.glance.maintenance
 
+import com.glance.screen.SchedulePolicy
 import java.time.Duration
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -35,7 +36,10 @@ object NightlyMaintenancePolicy {
     /** How often a postponed restart looks again whether the tablet has been left alone. */
     const val RETRY_MS = 10 * 60_000L
 
-    /** After this long in use the restart is skipped until the next night. */
+    /**
+     * This long after its time the restart is skipped until the next night, whether the tablet was
+     * in use meanwhile or its alarm was held back.
+     */
     const val MAX_POSTPONE_MS = 3 * 60 * 60_000L
 
     /** A younger app has too little accumulated, and its pages are fresh. */
@@ -78,7 +82,7 @@ object NightlyMaintenancePolicy {
      * @param screenVisible false when the display is off or covered by the soft-off overlay.
      * @param dashboardResumed false while settings or another Activity covers the dashboard.
      * @param sinceLastActivityMs time since the last touch on, or return to, the dashboard.
-     * @param postponedForMs time since the restart first asked to run tonight.
+     * @param postponedForMs time since tonight's restart was due.
      */
     fun decide(
         screenVisible: Boolean,
@@ -92,6 +96,22 @@ object NightlyMaintenancePolicy {
             return Decision.RUN
         }
         return if (postponedForMs >= MAX_POSTPONE_MS) Decision.GIVE_UP else Decision.POSTPONE
+    }
+
+    /**
+     * Whether a nightly alarm arriving only now is skipped until the next night. With the display
+     * off EMUI may hold it back until the screen-on in the morning, when it would restart or reboot
+     * a tablet that is in use again.
+     *
+     * @param lateMs how long after its time the alarm arrived; 0 if unknown.
+     * @param offWindow the screen schedule, or null when the screen has no OFF window.
+     * @param now the local time of day it arrived at.
+     */
+    fun skipForTheNight(lateMs: Long, offWindow: ScreenOffWindow?, now: LocalTime): Boolean {
+        if (lateMs >= MAX_POSTPONE_MS) return true
+        // runTime places the maintenance inside the OFF window, so after it the alarm is late.
+        if (offWindow == null || offWindow.on == offWindow.off) return false
+        return SchedulePolicy.shouldBeOn(now, offWindow.on, offWindow.off)
     }
 
     /**

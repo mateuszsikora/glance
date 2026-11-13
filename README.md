@@ -290,19 +290,21 @@ The Memory section therefore also shows:
 
 The scheduled reboot runs on the same nightly alarm as the restart, at the same time and under the
 same conditions: 15 minutes after the scheduled screen-off or at the quiet time, postponed while the
-tablet is in use, and skipped for the night after three hours. On a night both are due, the reboot
-replaces the restart, since it restarts Glance too. Only a Device Owner can reboot the tablet
+tablet is in use, and skipped for the night three hours after its time. On a night both are due, the
+reboot replaces the restart, since it restarts Glance too. Only a Device Owner can reboot the tablet
 (`DevicePolicyManager.reboot`); without it the option is shown as unavailable. Weekly reboots also
 count as weekly restarts for the memory trend's suggestion.
 
+This nightly alarm and the scheduled screen-on are set as alarm clocks, which Android shows as the
+next alarm. With the display off EMUI 8 can hold back ordinary alarms of Glance until morning; an
+alarm clock is still delivered on time. A nightly alarm that arrives after the OFF window has ended,
+or three hours or more after its time, is skipped for the night and recorded in the diagnostic log,
+rather than restarting or rebooting a tablet that is back in use in the morning.
+
 After the reboot the tablet comes back to the dashboard in lock task mode on its own, usually within
 a minute or two. It keeps the screen state it was asked for before the reboot instead of applying
-the schedule again: inside the OFF window the display turns off again once the tablet is up, after
-showing the dashboard for about 15 seconds, and a screen turned on manually during the OFF window
-stays on. The short look at the dashboard is there because on EMUI 8 a Glance that went dark without
-ever being in front since the boot had its alarms and timers held back until morning; that it
-prevents this is still being confirmed. The scheduled screen-on is set as an alarm clock, which
-Android shows as the next alarm. The `Screen` light reports that state, and
+the schedule again: inside the OFF window the display turns off again once the tablet is up, and a
+screen turned on manually during the OFF window stays on. The `Screen` light reports that state, and
 Home Assistant sees the tablet unavailable while it boots. If Android refuses the reboot, for
 example during a phone call, or the tablet has not begun to shut down three minutes later, Glance
 restarts its process instead and records why in the diagnostic log. A screen lock that asks for a

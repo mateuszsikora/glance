@@ -13,6 +13,7 @@ import com.glance.diagnostics.Diagnostics
 import com.glance.kiosk.KioskService
 import com.glance.maintenance.MaintenanceSettings
 import com.glance.maintenance.NightlyMaintenancePolicy
+import java.time.Instant
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
@@ -65,9 +66,19 @@ class ScheduleManager(
         Log.i(TAG, "Schedule stopped")
     }
 
-    /** @param scheduledAtMs when the alarm was due, to journal one EMUI held back; null if unknown. */
-    fun handleAlarm(action: String, scheduledAtMs: Long? = null) {
-        recordIfLate(action, scheduledAtMs, System.currentTimeMillis())
+    /**
+     * @param scheduledAtMs when the alarm was due, to journal one EMUI held back and to count a
+     *   late night's maintenance from its time; null if unknown.
+     * @param inexact the alarm was set without exact-alarm access, so Android may defer it.
+     * @param nowMs when it arrived.
+     */
+    fun handleAlarm(
+        action: String,
+        scheduledAtMs: Long? = null,
+        inexact: Boolean = false,
+        nowMs: Long = System.currentTimeMillis()
+    ) {
+        recordIfLate(action, scheduledAtMs, inexact, nowMs)
         if (config.isKioskSuspended) {
             stop()
             Log.i(TAG, "Ignoring schedule alarm while kiosk is suspended")
@@ -76,12 +87,19 @@ class ScheduleManager(
         if (action == ACTION_NIGHTLY_MAINTENANCE) {
             Log.i(TAG, "Nightly maintenance alarm fired")
             scheduleNightlyMaintenance()
-            if (maintenance.anyScheduled) {
-                dispatchKioskCommand(
-                    Intent(context, KioskService::class.java)
-                        .setAction(KioskService.ACTION_NIGHTLY_MAINTENANCE)
-                )
-            }
+            if (!maintenance.anyScheduled) return
+            val lateMs = scheduledAtMs?.let { (nowMs - it).coerceAtLeast(0L) } ?: 0L
+            val arrivedAt = Instant.ofEpochMilli(nowMs).atZone(ZoneId.systemDefault()).toLocalTime()
+            // KioskService skips it, once it knows what tonight's maintenance would have been.
+            dispatchKioskCommand(
+                Intent(context, KioskService::class.java)
+                    .setAction(KioskService.ACTION_NIGHTLY_MAINTENANCE)
+                    .putExtra(KioskService.EXTRA_MAINTENANCE_LATE_MS, lateMs)
+                    .putExtra(
+                        KioskService.EXTRA_MAINTENANCE_TOO_LATE,
+                        NightlyMaintenancePolicy.skipForTheNight(lateMs, offWindow(), arrivedAt)
+                    )
+            )
             return
         }
         if (!config.scheduleEnabled) {
@@ -110,7 +128,7 @@ class ScheduleManager(
         }
     }
 
-    private fun recordIfLate(action: String, scheduledAtMs: Long?, nowMs: Long) {
+    private fun recordIfLate(action: String, scheduledAtMs: Long?, inexact: Boolean, nowMs: Long) {
         val minutes = lateMinutes(scheduledAtMs ?: return, nowMs) ?: return
         val name = when (action) {
             ACTION_SCREEN_ON -> "Screen ON"
@@ -118,7 +136,10 @@ class ScheduleManager(
             ACTION_NIGHTLY_MAINTENANCE -> "Nightly maintenance"
             else -> return
         }
-        Diagnostics.record("$name alarm arrived $minutes min late")
+        Diagnostics.record(
+            "$name alarm arrived $minutes min late" +
+                if (inexact) " (an inexact alarm, which Android may defer)" else ""
+        )
     }
 
     private fun cancelScreenAlarms() {
@@ -135,16 +156,8 @@ class ScheduleManager(
             cancelAlarm(ACTION_NIGHTLY_MAINTENANCE)
             return
         }
-        val offWindow = if (config.scheduleEnabled) {
-            NightlyMaintenancePolicy.ScreenOffWindow(
-                on = parseTime(config.screenOnTime, DEFAULT_ON_TIME),
-                off = parseTime(config.screenOffTime, DEFAULT_OFF_TIME)
-            )
-        } else {
-            null
-        }
         val runTime = NightlyMaintenancePolicy.runTime(
-            offWindow,
+            offWindow(),
             parseTime(maintenance.quietTime, DEFAULT_QUIET_TIME)
         )
         val nextRun = NightlyMaintenancePolicy.nextRun(LocalDateTime.now(), runTime)
@@ -154,6 +167,16 @@ class ScheduleManager(
         )
         Log.i(TAG, "Nightly maintenance scheduled for $nextRun")
     }
+
+    private fun offWindow(): NightlyMaintenancePolicy.ScreenOffWindow? =
+        if (config.scheduleEnabled) {
+            NightlyMaintenancePolicy.ScreenOffWindow(
+                on = parseTime(config.screenOnTime, DEFAULT_ON_TIME),
+                off = parseTime(config.screenOffTime, DEFAULT_OFF_TIME)
+            )
+        } else {
+            null
+        }
 
     private fun shouldScreenBeOnNow(): Boolean {
         val now = LocalTime.now()
@@ -178,14 +201,22 @@ class ScheduleManager(
     private fun setAlarm(action: String, triggerAtMillis: Long) {
         val canScheduleExact = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
             alarmManager.canScheduleExactAlarms()
-        // Only an exact alarm has a due time to be late against; Doze may defer the other kind.
-        val operation = getPendingIntent(action, triggerAtMillis.takeIf { canScheduleExact })
+        // A screen alarm has a due time to be late against only when exact; Doze may defer the
+        // other kind. The maintenance keeps it either way: the skip for the night and its
+        // postponement count from the due time, and an inexact one is journaled as such.
+        val operation = getPendingIntent(
+            action,
+            triggerAtMillis.takeIf { canScheduleExact || action == ACTION_NIGHTLY_MAINTENANCE },
+            exact = canScheduleExact
+        )
 
         try {
-            if (canScheduleExact && action == ACTION_SCREEN_ON) {
-                // After a reboot inside the OFF window EMUI held every ordinary alarm of Glance
-                // back until someone woke the tablet by hand, ON included, so the morning stayed
-                // dark. An alarm clock is what EMUI and Doze deliver on time.
+            if (canScheduleExact && action != ACTION_SCREEN_OFF) {
+                // With the display off EMUI may hold every ordinary alarm of Glance back until
+                // morning: after a reboot inside the OFF window the screen-on came only when
+                // someone woke the tablet by hand, and on another night the maintenance alarm,
+                // due 15 minutes after the OFF, came at the 06:25 screen-on. An alarm clock is what
+                // EMUI and Doze deliver on time. The OFF is due while the display is still on.
                 alarmManager.setAlarmClock(
                     AlarmManager.AlarmClockInfo(triggerAtMillis, dashboardIntent()),
                     operation
@@ -212,8 +243,15 @@ class ScheduleManager(
         alarmManager.cancel(getPendingIntent(action))
     }
 
-    /** @param triggerAtMillis travels along to measure lateness; extras do not affect matching. */
-    private fun getPendingIntent(action: String, triggerAtMillis: Long? = null): PendingIntent {
+    /**
+     * @param triggerAtMillis travels along to measure lateness; extras do not affect matching.
+     * @param exact false for an alarm Android may defer, which [EXTRA_INEXACT] tells the receiver.
+     */
+    private fun getPendingIntent(
+        action: String,
+        triggerAtMillis: Long? = null,
+        exact: Boolean = true
+    ): PendingIntent {
         val requestCode = when (action) {
             ACTION_SCREEN_ON -> REQUEST_CODE_ON
             ACTION_SCREEN_OFF -> REQUEST_CODE_OFF
@@ -221,6 +259,7 @@ class ScheduleManager(
         }
         val intent = Intent(action).setClass(context, ScheduleReceiver::class.java)
         if (triggerAtMillis != null) intent.putExtra(EXTRA_SCHEDULED_AT, triggerAtMillis)
+        if (!exact) intent.putExtra(EXTRA_INEXACT, true)
         return PendingIntent.getBroadcast(
             context,
             requestCode,
@@ -261,6 +300,7 @@ class ScheduleManager(
         const val ACTION_SCREEN_OFF = "com.glance.action.SCHEDULE_SCREEN_OFF"
         const val ACTION_NIGHTLY_MAINTENANCE = "com.glance.action.NIGHTLY_MAINTENANCE"
         const val EXTRA_SCHEDULED_AT = "com.glance.extra.SCHEDULED_AT"
+        const val EXTRA_INEXACT = "com.glance.extra.INEXACT"
         private const val REQUEST_CODE_ON = 2001
         private const val REQUEST_CODE_OFF = 2002
         private const val REQUEST_CODE_MAINTENANCE = 2003
