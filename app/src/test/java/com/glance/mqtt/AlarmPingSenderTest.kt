@@ -10,6 +10,7 @@ import android.os.SystemClock
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -181,6 +182,53 @@ class AlarmPingSenderTest {
 
         assertTrue(journal.isEmpty())
         sender.stop()
+    }
+
+    @Test
+    fun aTimeChangeMovesTheAlarmClockAgain() {
+        shadowOf(powerManager).setIsInteractive(false)
+        val sender = AlarmPingSender(context, "glance_tablet", alarmClockWhileDisplayOff = { true })
+        sender.start()
+        val before = shadowAlarmManager.scheduledAlarms.single()
+
+        context.sendBroadcast(Intent(Intent.ACTION_TIME_CHANGED))
+        shadowOf(Looper.getMainLooper()).idle()
+
+        val after = shadowAlarmManager.scheduledAlarms.single()
+        assertNotSame(before, after)
+        assertNotNull(after.alarmClockInfo)
+        sender.stop()
+    }
+
+    @Test
+    fun theDisplayTurningOffArmsNothingWhileNoPingIsDue() {
+        val sender = AlarmPingSender(context, "glance_tablet", alarmClockWhileDisplayOff = { true })
+        sender.pingHandler = { null }
+        sender.start()
+        // A ping that sent nothing and left nothing armed, as when the connection is gone.
+        shadowAlarmManager.fireAlarm(shadowAlarmManager.scheduledAlarms.single())
+        shadowOf(Looper.getMainLooper()).idle()
+        shadowAlarmManager.scheduledAlarms.toList().forEach { alarm -> alarm.operation?.let(alarmManager::cancel) }
+
+        shadowOf(powerManager).setIsInteractive(false)
+        context.sendBroadcast(Intent(Intent.ACTION_SCREEN_OFF))
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertTrue(shadowAlarmManager.scheduledAlarms.isEmpty())
+        sender.stop()
+    }
+
+    @Test
+    fun aStoppedSenderIgnoresTheDisplay() {
+        val sender = AlarmPingSender(context, "glance_tablet", alarmClockWhileDisplayOff = { true })
+        sender.start()
+        sender.stop()
+
+        shadowOf(powerManager).setIsInteractive(false)
+        context.sendBroadcast(Intent(Intent.ACTION_SCREEN_OFF))
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertTrue(shadowAlarmManager.scheduledAlarms.isEmpty())
     }
 
     private companion object {

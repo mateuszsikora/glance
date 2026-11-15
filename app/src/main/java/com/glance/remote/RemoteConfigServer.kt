@@ -217,6 +217,8 @@ internal class RemoteConfigHttpHandler(
     private val nightlyRestartAvailable: Boolean = !com.glance.BuildConfig.RESTORE_BUILD,
     /** False in recovery builds, whose older app code always uses an ordinary keep-alive alarm. */
     private val keepAliveOptionAvailable: Boolean = !com.glance.BuildConfig.RESTORE_BUILD,
+    private val keepAliveSettings: com.glance.mqtt.MqttKeepAliveSettings =
+        com.glance.mqtt.MqttKeepAliveSettings(GlanceApp.instance),
     /** A tablet reboot needs Device Owner. */
     private val deviceOwner: () -> Boolean = { com.glance.kiosk.LockTaskHelper.isDeviceOwner(GlanceApp.instance) },
     private val recoveryState: com.glance.update.RestoreState = com.glance.update.RestoreState(com.glance.GlanceApp.instance),
@@ -245,6 +247,7 @@ internal class RemoteConfigHttpHandler(
 
     private val updater = RemoteConfigUpdater(
         config,
+        keepAlive = keepAliveSettings,
         nightlyRestartAvailable = nightlyRestartAvailable,
         tabletRebootAvailable = { runCatching(deviceOwner).getOrDefault(false) },
         keepAliveOptionAvailable = keepAliveOptionAvailable
@@ -1141,9 +1144,9 @@ internal class RemoteConfigHttpHandler(
         ) + "<p class=\"hint\">On battery with the display off, Huawei's EMUI freezes Glance within " +
             "seconds and holds its ordinary alarms back until the display wakes, so the broker drops " +
             "the session and Home Assistant shows the tablet unavailable overnight. Alarm clocks still " +
-            "wake it. With this on, Android reports the keep-alive as the next alarm, and the tablet " +
-            "wakes fully every 15 minutes while the display is off. On by default on Huawei and Honor " +
-            "tablets only.</p>"
+            "wake it. With this on, Android reports the keep-alive as the next alarm, and while the " +
+            "display is off the tablet does not enter deep Doze, so other apps also run without its " +
+            "limits. On by default on Huawei and Honor tablets only.</p>"
     }
 
     private fun checkbox(

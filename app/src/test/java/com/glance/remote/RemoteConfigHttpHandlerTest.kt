@@ -629,22 +629,30 @@ class RemoteConfigHttpHandlerTest {
     }
 
     @Test
-    fun theKeepAliveSwitchShowsTheVendorDefaultAndRoundTrips() {
+    fun theKeepAliveSwitchIsCheckedByDefaultOnHuaweiAndRoundTrips() {
         val keepAlive = MqttKeepAliveSettings(ApplicationProvider.getApplicationContext(), manufacturer = "HUAWEI")
-        val handler = handler()
+        val handler = RemoteConfigHttpHandler(config, { changes++ }, keepAliveSettings = keepAlive)
         val cookie = login(handler)
 
-        // Robolectric is no Huawei, so the stored default there is off.
-        assertTrue(handler.handle(get("/", cookie)).text().contains("name=\"mqttAlarmClockKeepAlive\">"))
-
-        val enabled = validSettings(csrf(handler, cookie)) + mapOf("mqttAlarmClockKeepAlive" to "on")
-        assertEquals(303, handler.handle(post("/save", enabled, cookie)).status)
-        assertTrue(keepAlive.alarmClockWhileDisplayOff)
         assertTrue(handler.handle(get("/", cookie)).text().contains("name=\"mqttAlarmClockKeepAlive\" checked>"))
 
         val disabled = validSettings(csrf(handler, cookie))
         assertEquals(303, handler.handle(post("/save", disabled, cookie)).status)
         assertFalse(keepAlive.alarmClockWhileDisplayOff)
+        assertTrue(handler.handle(get("/", cookie)).text().contains("name=\"mqttAlarmClockKeepAlive\">"))
+
+        val enabled = validSettings(csrf(handler, cookie)) + mapOf("mqttAlarmClockKeepAlive" to "on")
+        assertEquals(303, handler.handle(post("/save", enabled, cookie)).status)
+        assertTrue(keepAlive.alarmClockWhileDisplayOff)
+    }
+
+    @Test
+    fun theKeepAliveSwitchIsUncheckedByDefaultElsewhere() {
+        val keepAlive = MqttKeepAliveSettings(ApplicationProvider.getApplicationContext(), manufacturer = "samsung")
+        val handler = RemoteConfigHttpHandler(config, { changes++ }, keepAliveSettings = keepAlive)
+        val cookie = login(handler)
+
+        assertTrue(handler.handle(get("/", cookie)).text().contains("name=\"mqttAlarmClockKeepAlive\">"))
     }
 
     @Test

@@ -13,9 +13,11 @@ import android.os.Build
  * still wake Glance on time. On a 3 GB Huawei tablet with Android 8 this kept the session up
  * through a whole night on battery, with one ping every 15 minutes, all on time.
  *
- * An alarm clock is not what the API is for: Android reports it as the next alarm, and it brings
- * the device fully out of Doze each time. Other vendors deliver the ordinary alarm through Doze,
- * so the switch defaults on only for Huawei and Honor devices.
+ * An alarm clock is not what the API is for. Android reports it as the next alarm, and it keeps
+ * the device out of deep Doze while the display is off: Doze does not go idle while an alarm that
+ * wakes the device from idle is less than an hour away, so every app runs without its limits. Other
+ * vendors deliver the ordinary alarm through Doze, so the switch defaults on only for Huawei and
+ * Honor devices.
  *
  * Deliberately kept out of [com.glance.config.AppConfig], like
  * [com.glance.diagnostics.DiagnosticSettings]: recovery builds require the configuration readers

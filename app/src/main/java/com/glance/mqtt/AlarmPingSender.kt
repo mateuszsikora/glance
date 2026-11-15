@@ -49,8 +49,16 @@ class AlarmPingSender(
     private var receiver: BroadcastReceiver? = null
     private var displayReceiver: BroadcastReceiver? = null
 
+    /**
+     * Guards [dueAtElapsedMs] and the alarm installed for it. Paho arms and cancels from its own
+     * threads while the display receiver re-arms on the main thread; both install the same
+     * PendingIntent, so without it an ordinary alarm chosen just before the display went off could
+     * replace the alarm clock, or a re-arm could revive an alarm that was just cancelled.
+     */
+    private val lock = Any()
+
     /** Elapsed realtime the armed alarm is due at; 0 while none is armed. */
-    @Volatile private var dueAtElapsedMs = 0L
+    private var dueAtElapsedMs = 0L
 
     /** Test seam for the keep-alive round trip owned by Paho's internals. */
     internal var pingHandler: (IMqttActionListener) -> IMqttToken? = { listener ->
@@ -79,10 +87,11 @@ class AlarmPingSender(
         }
         if (displayReceiver == null) {
             // The alarm armed while the display was on must become an alarm clock when it goes
-            // off, or a hibernating vendor holds it back and no later ping is ever armed.
+            // off, or a hibernating vendor holds it back and no later ping is ever armed. An alarm
+            // clock runs on the wall clock, so a time change moves it to the deadline again.
             val rearmReceiver = object : BroadcastReceiver() {
                 override fun onReceive(context: Context?, intent: Intent?) {
-                    dueAtElapsedMs.takeIf { it > 0L }?.let(::arm)
+                    synchronized(lock) { dueAtElapsedMs.takeIf { it > 0L }?.let(::arm) }
                 }
             }
             context.registerReceiver(
@@ -90,6 +99,7 @@ class AlarmPingSender(
                 IntentFilter().apply {
                     addAction(Intent.ACTION_SCREEN_OFF)
                     addAction(Intent.ACTION_SCREEN_ON)
+                    addAction(Intent.ACTION_TIME_CHANGED)
                 }
             )
             displayReceiver = rearmReceiver
@@ -98,12 +108,14 @@ class AlarmPingSender(
     }
 
     override fun stop() {
-        alarmManager.cancel(pendingIntent())
+        synchronized(lock) {
+            alarmManager.cancel(pendingIntent())
+            dueAtElapsedMs = 0L
+        }
         receiver?.let { runCatching { context.unregisterReceiver(it) } }
         receiver = null
         displayReceiver?.let { runCatching { context.unregisterReceiver(it) } }
         displayReceiver = null
-        dueAtElapsedMs = 0L
     }
 
     override fun schedule(delayInMilliseconds: Long) {
@@ -117,34 +129,36 @@ class AlarmPingSender(
     }
 
     private fun arm(triggerAtMs: Long) {
-        dueAtElapsedMs = triggerAtMs
-        val canScheduleExact = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
-            alarmManager.canScheduleExactAlarms()
+        synchronized(lock) {
+            dueAtElapsedMs = triggerAtMs
+            val canScheduleExact = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+                alarmManager.canScheduleExactAlarms()
 
-        try {
-            if (canScheduleExact && !powerManager.isInteractive && alarmClockWhileDisplayOff()) {
-                // Alarm clocks run on the wall clock; the deadline stays on elapsed realtime.
-                val wallClockMs = System.currentTimeMillis() +
-                    (triggerAtMs - SystemClock.elapsedRealtime()).coerceAtLeast(0L)
-                alarmManager.setAlarmClock(
-                    AlarmManager.AlarmClockInfo(wallClockMs, dashboardIntent()),
-                    pendingIntent()
-                )
-            } else if (canScheduleExact) {
-                alarmManager.setExactAndAllowWhileIdle(
-                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                    triggerAtMs,
-                    pendingIntent()
-                )
-            } else {
-                alarmManager.setAndAllowWhileIdle(
-                    AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                    triggerAtMs,
-                    pendingIntent()
-                )
+            try {
+                if (canScheduleExact && !powerManager.isInteractive && alarmClockWhileDisplayOff()) {
+                    // Alarm clocks run on the wall clock; the deadline stays on elapsed realtime.
+                    val wallClockMs = System.currentTimeMillis() +
+                        (triggerAtMs - SystemClock.elapsedRealtime()).coerceAtLeast(0L)
+                    alarmManager.setAlarmClock(
+                        AlarmManager.AlarmClockInfo(wallClockMs, dashboardIntent()),
+                        pendingIntent()
+                    )
+                } else if (canScheduleExact) {
+                    alarmManager.setExactAndAllowWhileIdle(
+                        AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                        triggerAtMs,
+                        pendingIntent()
+                    )
+                } else {
+                    alarmManager.setAndAllowWhileIdle(
+                        AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                        triggerAtMs,
+                        pendingIntent()
+                    )
+                }
+            } catch (e: SecurityException) {
+                Log.e(TAG, "Unable to schedule the MQTT keep-alive alarm", e)
             }
-        } catch (e: SecurityException) {
-            Log.e(TAG, "Unable to schedule the MQTT keep-alive alarm", e)
         }
     }
 
@@ -184,8 +198,9 @@ class AlarmPingSender(
      * late tells why Home Assistant showed the tablet unavailable.
      */
     private fun journalLateness() {
-        val due = dueAtElapsedMs
-        dueAtElapsedMs = 0L
+        val due = synchronized(lock) {
+            dueAtElapsedMs.also { dueAtElapsedMs = 0L }
+        }
         val keepAlive = keepAliveMs()
         if (due <= 0L || keepAlive <= 0L) return
         val lateMs = SystemClock.elapsedRealtime() - due

@@ -198,8 +198,6 @@ Glance exposes the tablet screen as a brightness-capable MQTT light, plus a batt
 
 MQTT and the daily screen schedule run in the foreground kiosk service, independently from the dashboard Activity. Initial broker failures use exponential backoff, while established sessions use Paho automatic reconnect. Keep-alive pings are driven by wakeup alarms rather than a plain timer, so the broker session survives the tablet suspending with the screen off instead of dropping to the last will and marking the entity unavailable. The keep-alive is 15 minutes because some OEM builds (EMUI) deliver wakeup alarms only in five-minute batches on battery; as a result, the broker publishes the last will up to about 22 minutes after a tablet loses power or network. In the other direction, a half-open connection (for example after a router restart) can take up to about 40 minutes to be noticed and reconnected, and Home Assistant commands do not reach the tablet in the meantime.
 
-On battery with the display off, EMUI goes further: its app hibernation freezes Glance about eight seconds after the screen goes dark, although Glance is the app on screen, and holds back its ordinary alarms until the display wakes or a charger is connected. Neither the foreground services, Device Owner, nor an exemption from battery optimization prevents it, and EMUI's own App launch settings do not list Glance. Without a workaround the broker drops the session and Home Assistant shows the tablet unavailable all night. Alarm clocks still wake Glance on time, so `Send the keep-alive as an alarm clock while the display is off`, in the MQTT section of the remote panel, sets the keep-alive that way for as long as the display stays off. On a 3 GB Huawei tablet with Android 8 that kept the session up through a night on battery, with every ping on time, and the battery fell from 100% to about 85% overnight. Android reports such an alarm as the next alarm, and each one brings the tablet fully out of Doze, so the switch is on by default only on Huawei and Honor tablets. The diagnostic log records each connection and loss, and a keep-alive alarm that arrived late enough for the broker to have closed the session.
-
 1. Configure an MQTT broker and the MQTT integration in Home Assistant.
 2. Create a dedicated, least-privilege broker login for the tablet.
 3. Open Glance settings by tapping the top-right corner five times. A fresh installation asks you to create a PIN. An installation still using the legacy `1234` PIN must replace it on its next settings login.
@@ -221,6 +219,10 @@ glance/<device-id>/availability
 Without Device Owner privileges, OFF uses a reversible soft-off (black overlay and window brightness zero); tapping the black screen or sending ON wakes it. As Device Owner, Glance uses `DevicePolicyManager.lockNow()` for hardware screen-off.
 
 The optional schedule defines a daytime or overnight ON window. A manual MQTT command overrides the current state until the next scheduled transition. On Android 12 and newer, Glance requests exact-alarm access; when approximate alarms are selected, Android may deliver a transition later than its configured minute. Time, time-zone, package-update, and reboot events reschedule these alarms.
+
+### Huawei and Honor tablets with the display off
+
+On battery with the display off, EMUI's app hibernation freezes Glance about eight seconds after the screen goes dark, although Glance is the app on screen, and holds back its ordinary alarms until the display wakes or a charger is connected. Neither the foreground services, Device Owner, nor an exemption from battery optimization prevents it, and EMUI's own App launch settings do not list Glance. Without a workaround the broker drops the session and Home Assistant shows the tablet unavailable all night. Alarm clocks still wake Glance on time, so `Send the keep-alive as an alarm clock while the display is off`, in the MQTT section of the remote panel, sets the keep-alive that way for as long as the display stays off. On a 3 GB Huawei tablet with Android 8 that kept the session up through a night on battery, with every ping on time, and the battery fell from 100% to about 85% overnight. It has two costs. Android reports the keep-alive as the next alarm, and it does not enter deep Doze while the display is off, because an alarm clock is always less than an hour away, so other apps on the tablet run without Doze's limits too. The switch is therefore on by default only on Huawei and Honor tablets. The diagnostic log records each connection and loss, and a keep-alive alarm that arrived late enough for the broker to have closed the session.
 
 ### Memory and scheduled restarts
 
@@ -299,7 +301,8 @@ count as weekly restarts for the memory trend's suggestion.
 
 This nightly alarm and the scheduled screen-on are set as alarm clocks, which Android shows as the
 next alarm. With the display off EMUI 8 can hold back ordinary alarms of Glance until morning (see
-the MQTT keep-alive above); an alarm clock is still delivered on time. A nightly alarm that arrives after the OFF window has ended,
+[Huawei and Honor tablets with the display off](#huawei-and-honor-tablets-with-the-display-off)); an
+alarm clock is still delivered on time. A nightly alarm that arrives after the OFF window has ended,
 or three hours or more after its time, is skipped for the night and recorded in the diagnostic log,
 rather than restarting or rebooting a tablet that is back in use in the morning.
 
