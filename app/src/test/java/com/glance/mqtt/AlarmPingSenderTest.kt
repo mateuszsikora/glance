@@ -191,6 +191,8 @@ class AlarmPingSenderTest {
         sender.start()
         val before = shadowAlarmManager.scheduledAlarms.single()
 
+        // Robolectric cannot move the wall clock apart from elapsed realtime, so this checks only
+        // that the time change installs the alarm clock again.
         context.sendBroadcast(Intent(Intent.ACTION_TIME_CHANGED))
         shadowOf(Looper.getMainLooper()).idle()
 

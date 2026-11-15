@@ -129,13 +129,15 @@ class AlarmPingSender(
     }
 
     private fun arm(triggerAtMs: Long) {
+        // Read before taking the lock: the first read may wait for the preferences file to load.
+        val alarmClockAllowed = alarmClockWhileDisplayOff()
         synchronized(lock) {
             dueAtElapsedMs = triggerAtMs
             val canScheduleExact = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
                 alarmManager.canScheduleExactAlarms()
 
             try {
-                if (canScheduleExact && !powerManager.isInteractive && alarmClockWhileDisplayOff()) {
+                if (canScheduleExact && !powerManager.isInteractive && alarmClockAllowed) {
                     // Alarm clocks run on the wall clock; the deadline stays on elapsed realtime.
                     val wallClockMs = System.currentTimeMillis() +
                         (triggerAtMs - SystemClock.elapsedRealtime()).coerceAtLeast(0L)
