@@ -129,7 +129,8 @@ class AlarmPingSender(
     }
 
     private fun arm(triggerAtMs: Long) {
-        // Read before taking the lock: the first read may wait for the preferences file to load.
+        // Read before taking the lock where possible, since the first read may wait for the
+        // preferences file to load. The display receiver already holds it, on the main thread.
         val alarmClockAllowed = alarmClockWhileDisplayOff()
         synchronized(lock) {
             dueAtElapsedMs = triggerAtMs
