@@ -8,6 +8,7 @@ import android.util.Log
 import com.glance.BuildConfig
 import com.glance.battery.BatteryStatus
 import com.glance.config.AppConfig
+import com.glance.diagnostics.Diagnostics
 import org.eclipse.paho.client.mqttv3.IMqttActionListener
 import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken
 import org.eclipse.paho.client.mqttv3.IMqttToken
@@ -282,6 +283,7 @@ class MqttStateManager(
             connecting = false
             initialReconnectAttempt = 0
             Log.i(TAG, "MQTT connected (reconnect=$reconnect)")
+            Diagnostics.record(if (reconnect) "MQTT reconnected" else "MQTT connected")
             try {
                 callbackClient.subscribe(
                     arrayOf(topics.command, topics.homeAssistantStatus),
@@ -304,6 +306,7 @@ class MqttStateManager(
             connecting = false
             if (running && client === callbackClient) {
                 Log.w(TAG, "MQTT connection lost (${failureKind(cause)})")
+                Diagnostics.record("MQTT connection lost (${failureKind(cause)})")
             }
         }
 

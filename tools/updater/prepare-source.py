@@ -20,6 +20,9 @@ CONTROL_FILES = ["app/src/main/java/com/glance/update", "app/src/main/java/com/g
                  # The remote panel reads and writes the nightly maintenance settings. Recovery builds
                  # (BuildConfig.RESTORE_BUILD) hide them: the restored app code has no nightly restart.
                  "app/src/main/java/com/glance/maintenance",
+                 # The remote panel reads and writes the MQTT keep-alive switch. Recovery builds hide
+                 # it: the restored app code always uses an ordinary keep-alive alarm.
+                 "app/src/main/java/com/glance/mqtt/MqttKeepAliveSettings.kt",
                  "app/src/test/java/com/glance/update"]
 # Keep the archived UI tests: current cross-surface diagnostics tests assume current tablet UI,
 # while recovery intentionally retains the older SettingsActivity. The main checkout tests the

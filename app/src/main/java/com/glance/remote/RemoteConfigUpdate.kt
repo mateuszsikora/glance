@@ -5,6 +5,7 @@ import com.glance.config.AppConfig
 import com.glance.content.ContentProfile
 import com.glance.diagnostics.DiagnosticSettings
 import com.glance.maintenance.MaintenanceSettings
+import com.glance.mqtt.MqttKeepAliveSettings
 import com.glance.settings.ConfigValidator
 import com.glance.update.UpdateSummary
 
@@ -37,6 +38,7 @@ internal data class RemoteConfigSnapshot(
     val mqttPasswordUnreadable: Boolean,
     val mqttDeviceName: String,
     val mqttDiscoveryPrefix: String,
+    val mqttAlarmClockKeepAlive: Boolean,
     val remoteConfigEnabled: Boolean,
     val updateUrl: String,
     val autoUpdateEnabled: Boolean,
@@ -54,9 +56,12 @@ internal class RemoteConfigUpdater(
     private val config: AppConfig,
     private val diagnostics: DiagnosticSettings = DiagnosticSettings(GlanceApp.instance),
     private val maintenance: MaintenanceSettings = MaintenanceSettings(GlanceApp.instance),
+    private val keepAlive: MqttKeepAliveSettings = MqttKeepAliveSettings(GlanceApp.instance),
     private val nightlyRestartAvailable: Boolean = true,
     /** Only a Device Owner can reboot the tablet; asked on every save, since that can change. */
-    private val tabletRebootAvailable: () -> Boolean = { nightlyRestartAvailable }
+    private val tabletRebootAvailable: () -> Boolean = { nightlyRestartAvailable },
+    /** False in recovery builds, whose older app code always uses an ordinary keep-alive alarm. */
+    private val keepAliveOptionAvailable: Boolean = true
 ) {
 
     fun snapshot(): RemoteConfigSnapshot {
@@ -90,6 +95,7 @@ internal class RemoteConfigUpdater(
             mqttPasswordUnreadable = password.decryptionFailed,
             mqttDeviceName = config.mqttDeviceName,
             mqttDiscoveryPrefix = config.mqttDiscoveryPrefix,
+            mqttAlarmClockKeepAlive = keepAlive.alarmClockWhileDisplayOff,
             remoteConfigEnabled = config.remoteConfigEnabled,
             updateUrl = config.updateUrl,
             autoUpdateEnabled = config.autoUpdateEnabled,
@@ -284,6 +290,9 @@ internal class RemoteConfigUpdater(
         if (rebootAvailable) {
             maintenance.tabletRebootEnabled = parameters.hasCheckbox("tabletRebootEnabled")
             if (rebootIntervalDays != null) maintenance.rebootIntervalDays = rebootIntervalDays
+        }
+        if (keepAliveOptionAvailable) {
+            keepAlive.alarmClockWhileDisplayOff = parameters.hasCheckbox("mqttAlarmClockKeepAlive")
         }
         diagnostics.enabled = parameters.hasCheckbox("diagnosticLogEnabled")
 
