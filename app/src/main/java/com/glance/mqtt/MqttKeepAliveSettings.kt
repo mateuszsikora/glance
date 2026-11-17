@@ -17,7 +17,10 @@ import android.os.Build
  * the device out of deep Doze while the display is off: Doze does not go idle while an alarm that
  * wakes the device from idle is less than an hour away, so every app runs without its limits. Other
  * vendors deliver the ordinary alarm through Doze, so the switch defaults on only for Huawei and
- * Honor devices.
+ * Honor devices. On the same tablet each wake-up from deep sleep with the display off on battery
+ * left about 1 MB of unreclaimable kernel memory, about 25 MB a night, which only a reboot
+ * releases; see [com.glance.diagnostics.KernelMemoryTrend]. With this on, the owner should also
+ * schedule tablet reboots.
  *
  * Deliberately kept out of [com.glance.config.AppConfig], like
  * [com.glance.diagnostics.DiagnosticSettings]: recovery builds require the configuration readers

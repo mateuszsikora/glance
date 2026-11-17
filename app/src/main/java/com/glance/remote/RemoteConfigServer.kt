@@ -1146,7 +1146,9 @@ internal class RemoteConfigHttpHandler(
             "the session and Home Assistant shows the tablet unavailable overnight. Alarm clocks still " +
             "wake it. With this on, Android reports the keep-alive as the next alarm, and while the " +
             "display is off the tablet does not enter deep Doze, so other apps also run without its " +
-            "limits. On by default on Huawei and Honor tablets only.</p>"
+            "limits. On a Huawei test tablet each of these wake-ups also left about 1 MB of kernel " +
+            "memory that only a reboot releases, about 25 MB a night, so turn on the scheduled tablet " +
+            "reboot in the Memory section as well. On by default on Huawei and Honor tablets only.</p>"
     }
 
     private fun checkbox(
