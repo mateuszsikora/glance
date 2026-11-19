@@ -2,6 +2,7 @@ package com.glance.mqtt
 
 import android.app.Application
 import androidx.test.core.app.ApplicationProvider
+import com.glance.config.AppConfig
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient
 import org.eclipse.paho.client.mqttv3.internal.ClientComms
 import org.junit.Assert.assertEquals
@@ -43,6 +44,26 @@ class MqttKeepAliveTest {
         val latestPing = keepAlive + MqttStateManager.MAX_ALARM_DELAY_SECONDS +
             AlarmPingSender.PING_SLACK_MS / 1_000.0
         assertTrue(latestPing < keepAlive * 1.5)
+    }
+
+    @Test
+    fun theConnectionNegotiatesTheKeepAliveTheSwitchAsksFor() {
+        val config = AppConfig(context)
+
+        fun keepAlive(manufacturer: String, stored: Boolean? = null): Int {
+            val settings = MqttKeepAliveSettings(context, manufacturer)
+            stored?.let { settings.alarmClockWhileDisplayOff = it }
+            return MqttStateManager(
+                context,
+                config,
+                stateProvider = { MqttReportedState(screenOn = true, brightness = 128) },
+                commandHandler = {},
+                keepAliveSettings = settings
+            ).buildConnectOptions().keepAliveInterval
+        }
+
+        assertEquals(MqttStateManager.ALARM_CLOCK_KEEP_ALIVE_SECONDS, keepAlive("HUAWEI"))
+        assertEquals(MqttStateManager.KEEP_ALIVE_SECONDS, keepAlive("HUAWEI", stored = false))
     }
 
     @Test

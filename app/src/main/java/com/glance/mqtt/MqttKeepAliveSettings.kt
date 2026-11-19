@@ -14,7 +14,8 @@ import android.os.Build
  * through a whole night on battery, with one ping every 15 minutes, all on time.
  *
  * With the switch on, the session's keep-alive is also 30 minutes instead of 15
- * ([MqttStateManager.keepAliveSeconds]), on time without batching.
+ * ([MqttStateManager.keepAliveSeconds]). The alarm clock arrives on time; the five-minute batch
+ * an ordinary alarm can take once the display is on still fits the broker's grace.
  *
  * An alarm clock is not what the API is for. Android reports it as the next alarm, and it keeps
  * the device out of deep Doze while the display is off: Doze does not go idle while an alarm that

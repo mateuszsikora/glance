@@ -72,7 +72,11 @@ class MqttStateManager(
                 return
             }
             cleanupOnly = !config.mqttEnabled
-            val alarmPingSender = AlarmPingSender(context, clientId)
+            val alarmPingSender = AlarmPingSender(
+                context,
+                clientId,
+                alarmClockWhileDisplayOff = { keepAliveSettings.alarmClockWhileDisplayOff }
+            )
             val mqttClient = createClient(serverUri, clientId, alarmPingSender)
             mqttClient.setCallback(createCallback(mqttClient))
             client = mqttClient
@@ -246,7 +250,7 @@ class MqttStateManager(
         Log.i(TAG, "Retrying initial MQTT connection in ${delayMs}ms")
     }
 
-    private fun buildConnectOptions(): MqttConnectOptions {
+    internal fun buildConnectOptions(): MqttConnectOptions {
         val storedPassword = config.readMqttPassword()
         if (storedPassword.decryptionFailed) {
             Log.e(TAG, "Stored MQTT password cannot be decrypted; credentials must be replaced")
@@ -446,8 +450,9 @@ class MqttStateManager(
 
         /**
          * With the keep-alive sent as an alarm clock while the display is off; see
-         * [MqttKeepAliveSettings]. Alarm clocks arrive on time, so no batching delay needs
-         * covering, and the longer period halved the kernel memory the test tablet kept overnight.
+         * [MqttKeepAliveSettings]. Alarm clocks arrive on time; the five-minute batch an ordinary
+         * alarm can take once the display is on still fits the broker's grace. The longer period
+         * halved the kernel memory the test tablet kept overnight.
          */
         internal const val ALARM_CLOCK_KEEP_ALIVE_SECONDS = 1800
 
