@@ -67,7 +67,8 @@ class KioskServiceResumeTest {
 
         startCommand(Intent(app, KioskService::class.java))
 
-        // Why the resume sends the reload instead.
+        // Why the resume sends the reload instead. If a plain start ever re-arms the alarms
+        // itself, that is an improvement: delete this test rather than "fixing" it.
         assertTrue(screenAlarmActions().isEmpty())
     }
 
