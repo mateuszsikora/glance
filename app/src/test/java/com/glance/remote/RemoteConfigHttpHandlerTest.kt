@@ -15,6 +15,7 @@ import com.glance.diagnostics.DiagnosticSettings
 import com.glance.diagnostics.KernelMemoryTrend
 import com.glance.diagnostics.MemoryTrend
 import com.glance.maintenance.MaintenanceSettings
+import com.glance.mqtt.MqttKeepAliveSettings
 import com.glance.settings.DebugInfoProvider
 import com.glance.settings.DebugInfoSnapshot
 import com.glance.settings.SettingsActivity
@@ -625,6 +626,46 @@ class RemoteConfigHttpHandlerTest {
         val disabled = validSettings(csrf(handler, cookie))
         assertEquals(303, handler.handle(post("/save", disabled, cookie)).status)
         assertFalse(diagnostics.enabled)
+    }
+
+    @Test
+    fun theKeepAliveSwitchIsCheckedByDefaultOnHuaweiAndRoundTrips() {
+        val keepAlive = MqttKeepAliveSettings(ApplicationProvider.getApplicationContext(), manufacturer = "HUAWEI")
+        val handler = RemoteConfigHttpHandler(config, { changes++ }, keepAliveSettings = keepAlive)
+        val cookie = login(handler)
+
+        assertTrue(handler.handle(get("/", cookie)).text().contains("name=\"mqttAlarmClockKeepAlive\" checked>"))
+
+        val disabled = validSettings(csrf(handler, cookie))
+        assertEquals(303, handler.handle(post("/save", disabled, cookie)).status)
+        assertFalse(keepAlive.alarmClockWhileDisplayOff)
+        assertTrue(handler.handle(get("/", cookie)).text().contains("name=\"mqttAlarmClockKeepAlive\">"))
+
+        val enabled = validSettings(csrf(handler, cookie)) + mapOf("mqttAlarmClockKeepAlive" to "on")
+        assertEquals(303, handler.handle(post("/save", enabled, cookie)).status)
+        assertTrue(keepAlive.alarmClockWhileDisplayOff)
+    }
+
+    @Test
+    fun theKeepAliveSwitchIsUncheckedByDefaultElsewhere() {
+        val keepAlive = MqttKeepAliveSettings(ApplicationProvider.getApplicationContext(), manufacturer = "samsung")
+        val handler = RemoteConfigHttpHandler(config, { changes++ }, keepAliveSettings = keepAlive)
+        val cookie = login(handler)
+
+        assertTrue(handler.handle(get("/", cookie)).text().contains("name=\"mqttAlarmClockKeepAlive\">"))
+    }
+
+    @Test
+    fun recoveryBuildsHideTheKeepAliveSwitchAndLeaveItAlone() {
+        val keepAlive = MqttKeepAliveSettings(ApplicationProvider.getApplicationContext())
+        keepAlive.alarmClockWhileDisplayOff = true
+        val handler = RemoteConfigHttpHandler(config, { changes++ }, keepAliveOptionAvailable = false)
+        val cookie = login(handler)
+
+        assertFalse(handler.handle(get("/", cookie)).text().contains("mqttAlarmClockKeepAlive"))
+        assertEquals(303, handler.handle(post("/save", validSettings(csrf(handler, cookie)), cookie)).status)
+
+        assertTrue(keepAlive.alarmClockWhileDisplayOff)
     }
 
     @Test

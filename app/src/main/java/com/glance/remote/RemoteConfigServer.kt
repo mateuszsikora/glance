@@ -215,6 +215,10 @@ internal class RemoteConfigHttpHandler(
     private val uptimeMs: () -> Long = android.os.SystemClock::elapsedRealtime,
     /** False in recovery builds, whose older app code has no nightly restart to configure. */
     private val nightlyRestartAvailable: Boolean = !com.glance.BuildConfig.RESTORE_BUILD,
+    /** False in recovery builds, whose older app code always uses an ordinary keep-alive alarm. */
+    private val keepAliveOptionAvailable: Boolean = !com.glance.BuildConfig.RESTORE_BUILD,
+    private val keepAliveSettings: com.glance.mqtt.MqttKeepAliveSettings =
+        com.glance.mqtt.MqttKeepAliveSettings(GlanceApp.instance),
     /** A tablet reboot needs Device Owner. */
     private val deviceOwner: () -> Boolean = { com.glance.kiosk.LockTaskHelper.isDeviceOwner(GlanceApp.instance) },
     private val recoveryState: com.glance.update.RestoreState = com.glance.update.RestoreState(com.glance.GlanceApp.instance),
@@ -243,8 +247,10 @@ internal class RemoteConfigHttpHandler(
 
     private val updater = RemoteConfigUpdater(
         config,
+        keepAlive = keepAliveSettings,
         nightlyRestartAvailable = nightlyRestartAvailable,
-        tabletRebootAvailable = { runCatching(deviceOwner).getOrDefault(false) }
+        tabletRebootAvailable = { runCatching(deviceOwner).getOrDefault(false) },
+        keepAliveOptionAvailable = keepAliveOptionAvailable
     )
     private val secureRandom = SecureRandom()
     private val loginLock = Any()
@@ -808,6 +814,7 @@ internal class RemoteConfigHttpHandler(
                             <div class="field"><label for="mqttDiscoveryPrefix">Discovery prefix</label>
                               <input id="mqttDiscoveryPrefix" name="mqttDiscoveryPrefix" value="${value("mqttDiscoveryPrefix", values.mqttDiscoveryPrefix)}" spellcheck="false"></div>
                           </div>
+                          ${keepAliveOption(checked("mqttAlarmClockKeepAlive", values.mqttAlarmClockKeepAlive))}
                         </div>
                       </section>
 
@@ -1127,6 +1134,23 @@ internal class RemoteConfigHttpHandler(
           <div><h2>$title</h2><p>$description</p></div>
         </div>
     """.trimIndent()
+
+    private fun keepAliveOption(checked: Boolean): String {
+        if (!keepAliveOptionAvailable) return ""
+        return checkbox(
+            "mqttAlarmClockKeepAlive",
+            "Send the keep-alive as an alarm clock while the display is off",
+            checked
+        ) + "<p class=\"hint\">On battery with the display off, Huawei's EMUI freezes Glance within " +
+            "seconds and holds its ordinary alarms back until the display wakes, so the broker drops " +
+            "the session and Home Assistant shows the tablet unavailable overnight. Alarm clocks still " +
+            "wake it. With this on, the keep-alive is an alarm clock while the display is off and " +
+            "30 minutes long, so the broker reports the tablet gone up to about 45 minutes after it " +
+            "drops off. Android reports the keep-alive as the next alarm, the tablet does not enter " +
+            "deep Doze while the display is off, and on a Huawei test tablet the kernel kept 5-11 MB " +
+            "of memory a night that only a reboot releases, so turn on the scheduled tablet reboot in " +
+            "the Memory section as well. On by default on Huawei and Honor tablets only.</p>"
+    }
 
     private fun checkbox(
         name: String,

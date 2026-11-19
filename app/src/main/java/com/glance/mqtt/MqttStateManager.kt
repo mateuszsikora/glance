@@ -8,6 +8,7 @@ import android.util.Log
 import com.glance.BuildConfig
 import com.glance.battery.BatteryStatus
 import com.glance.config.AppConfig
+import com.glance.diagnostics.Diagnostics
 import org.eclipse.paho.client.mqttv3.IMqttActionListener
 import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken
 import org.eclipse.paho.client.mqttv3.IMqttToken
@@ -37,7 +38,8 @@ class MqttStateManager(
     private val context: Context,
     private val config: AppConfig,
     private val stateProvider: () -> MqttReportedState,
-    private val commandHandler: (MqttLightCommand) -> Unit
+    private val commandHandler: (MqttLightCommand) -> Unit,
+    private val keepAliveSettings: MqttKeepAliveSettings = MqttKeepAliveSettings(context)
 ) {
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -70,7 +72,11 @@ class MqttStateManager(
                 return
             }
             cleanupOnly = !config.mqttEnabled
-            val alarmPingSender = AlarmPingSender(context, clientId)
+            val alarmPingSender = AlarmPingSender(
+                context,
+                clientId,
+                alarmClockWhileDisplayOff = { keepAliveSettings.alarmClockWhileDisplayOff }
+            )
             val mqttClient = createClient(serverUri, clientId, alarmPingSender)
             mqttClient.setCallback(createCallback(mqttClient))
             client = mqttClient
@@ -244,7 +250,7 @@ class MqttStateManager(
         Log.i(TAG, "Retrying initial MQTT connection in ${delayMs}ms")
     }
 
-    private fun buildConnectOptions(): MqttConnectOptions {
+    internal fun buildConnectOptions(): MqttConnectOptions {
         val storedPassword = config.readMqttPassword()
         if (storedPassword.decryptionFailed) {
             Log.e(TAG, "Stored MQTT password cannot be decrypted; credentials must be replaced")
@@ -255,7 +261,8 @@ class MqttStateManager(
             isAutomaticReconnect = true
             isCleanSession = true
             connectionTimeout = 10
-            keepAliveInterval = KEEP_ALIVE_SECONDS
+            // Read on every connection: a settings save reconnects, so a changed switch applies.
+            keepAliveInterval = keepAliveSeconds(keepAliveSettings.alarmClockWhileDisplayOff)
             maxInflight = 20
             if (config.mqttUsername.isNotBlank()) {
                 userName = config.mqttUsername
@@ -282,6 +289,7 @@ class MqttStateManager(
             connecting = false
             initialReconnectAttempt = 0
             Log.i(TAG, "MQTT connected (reconnect=$reconnect)")
+            Diagnostics.record(if (reconnect) "MQTT reconnected" else "MQTT connected")
             try {
                 callbackClient.subscribe(
                     arrayOf(topics.command, topics.homeAssistantStatus),
@@ -304,6 +312,7 @@ class MqttStateManager(
             connecting = false
             if (running && client === callbackClient) {
                 Log.w(TAG, "MQTT connection lost (${failureKind(cause)})")
+                Diagnostics.record("MQTT connection lost (${failureKind(cause)})")
             }
         }
 
@@ -438,6 +447,17 @@ class MqttStateManager(
         // session dropped and reconnected every ~92 s all night.
         internal const val KEEP_ALIVE_SECONDS = 900
         internal const val MAX_ALARM_DELAY_SECONDS = 300
+
+        /**
+         * With the keep-alive sent as an alarm clock while the display is off; see
+         * [MqttKeepAliveSettings]. Alarm clocks arrive on time; the five-minute batch an ordinary
+         * alarm can take once the display is on still fits the broker's grace. The longer period
+         * halved the kernel memory the test tablet kept overnight.
+         */
+        internal const val ALARM_CLOCK_KEEP_ALIVE_SECONDS = 1800
+
+        internal fun keepAliveSeconds(alarmClockWhileDisplayOff: Boolean): Int =
+            if (alarmClockWhileDisplayOff) ALARM_CLOCK_KEEP_ALIVE_SECONDS else KEEP_ALIVE_SECONDS
         private const val DISCONNECT_TIMEOUT_MS = 1_000L
         private const val DISCOVERY_CLEANUP_TIMEOUT_MS = 2_000L
     }
