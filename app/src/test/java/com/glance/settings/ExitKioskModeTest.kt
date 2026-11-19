@@ -47,26 +47,37 @@ class ExitKioskModeTest {
      */
     @Test
     fun exitRemovesTheWholeTaskIncludingTheDashboardBelowSettings() {
-        val task = ShadowAppTask.newInstance()
-        shadowOf(context.getSystemService(ActivityManager::class.java))
-            .setAppTasks(listOf(task))
+        // More than one, so that removing only the first task would fail too.
+        val tasks = listOf(ShadowAppTask.newInstance(), ShadowAppTask.newInstance())
+        shadowOf(context.getSystemService(ActivityManager::class.java)).setAppTasks(tasks)
         val controller = Robolectric.buildActivity(SettingsActivity::class.java).setup()
-        val activity = controller.get()
-        confirm { (it.getChildAt(0) as EditText).setText(PIN) }
+        try {
+            val activity = controller.get()
+            confirm { (it.getChildAt(0) as EditText).setText(PIN) }
 
-        activity.findViewById<MaterialButton>(R.id.btnExitKiosk).performClick()
-        confirm()
+            activity.findViewById<MaterialButton>(R.id.btnExitKiosk).performClick()
+            confirm()
 
-        assertTrue(config.isKioskSuspended)
-        assertTrue(shadowOf(task).isFinishedAndRemoved)
-        val started = generateSequence { shadowOf(activity).nextStartedActivity }
-            .firstOrNull { it.action == Settings.ACTION_SETTINGS }
-        assertNotNull("Android Settings was not opened", started)
-        // Otherwise it would join Glance's task and be removed with it.
-        assertEquals(
-            Intent.FLAG_ACTIVITY_NEW_TASK,
-            started!!.flags and Intent.FLAG_ACTIVITY_NEW_TASK
-        )
+            assertTrue("Kiosk mode was not suspended", config.isKioskSuspended)
+            tasks.forEachIndexed { index, task ->
+                assertTrue(
+                    "Glance's task $index survived the exit; the dashboard would stay " +
+                        "suspended (#85)",
+                    shadowOf(task).isFinishedAndRemoved
+                )
+            }
+            val started = generateSequence { shadowOf(activity).nextStartedActivity }
+                .firstOrNull { it.action == Settings.ACTION_SETTINGS }
+            assertNotNull("Android Settings was not opened", started)
+            // Otherwise it would join Glance's task and be removed with it.
+            assertEquals(
+                "Android Settings must open in a task of its own",
+                Intent.FLAG_ACTIVITY_NEW_TASK,
+                started!!.flags and Intent.FLAG_ACTIVITY_NEW_TASK
+            )
+        } finally {
+            controller.pause().stop().destroy()
+        }
     }
 
     @Test
@@ -75,16 +86,20 @@ class ExitKioskModeTest {
         shadowOf(context.getSystemService(ActivityManager::class.java))
             .setAppTasks(listOf(task))
         val controller = Robolectric.buildActivity(SettingsActivity::class.java).setup()
-        confirm { (it.getChildAt(0) as EditText).setText(PIN) }
+        try {
+            confirm { (it.getChildAt(0) as EditText).setText(PIN) }
 
-        controller.get().findViewById<MaterialButton>(R.id.btnExitKiosk).performClick()
-        (ShadowDialog.getLatestDialog() as AlertDialog)
-            .getButton(AlertDialog.BUTTON_NEGATIVE).performClick()
-        shadowOf(Looper.getMainLooper()).idle()
+            controller.get().findViewById<MaterialButton>(R.id.btnExitKiosk).performClick()
+            (ShadowDialog.getLatestDialog() as AlertDialog)
+                .getButton(AlertDialog.BUTTON_NEGATIVE).performClick()
+            shadowOf(Looper.getMainLooper()).idle()
 
-        assertFalse(config.isKioskSuspended)
-        assertFalse(shadowOf(task).isFinishedAndRemoved)
-        assertFalse(controller.get().isFinishing)
+            assertFalse("Cancel suspended kiosk mode", config.isKioskSuspended)
+            assertFalse("Cancel removed Glance's task", shadowOf(task).isFinishedAndRemoved)
+            assertFalse("Cancel closed the settings screen", controller.get().isFinishing)
+        } finally {
+            controller.pause().stop().destroy()
+        }
     }
 
     private fun confirm(fill: (ViewGroup) -> Unit = {}) {
