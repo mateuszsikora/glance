@@ -39,7 +39,11 @@ class MqttStateManager(
     private val config: AppConfig,
     private val stateProvider: () -> MqttReportedState,
     private val commandHandler: (MqttLightCommand) -> Unit,
-    private val keepAliveSettings: MqttKeepAliveSettings = MqttKeepAliveSettings(context)
+    private val keepAliveSettings: MqttKeepAliveSettings = MqttKeepAliveSettings(context),
+    /** Test seam; builds the Paho client from the server URI, client ID and ping sender. */
+    private val clientFactory: (String, String, AlarmPingSender) -> MqttAsyncClient =
+        ::createClient,
+    private val journal: (String) -> Unit = { Diagnostics.record(it) }
 ) {
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -60,6 +64,8 @@ class MqttStateManager(
     /** Whether a session was ever up; from then on Paho owns reconnecting. */
     @Volatile private var connectedOnce = false
     private val initialRetry = Runnable { connectWithInitialRetry() }
+    /** Retry alarms in a row that found an attempt still running; reset once connected. */
+    @Volatile private var alarmsDuringOneAttempt = 0
 
     /**
      * Backs up both reconnect paths, which stop while the processor sleeps or EMUI freezes
@@ -93,13 +99,16 @@ class MqttStateManager(
                 clientId,
                 alarmClockWhileDisplayOff = { keepAliveSettings.alarmClockWhileDisplayOff }
             )
-            val mqttClient = createClient(serverUri, clientId, alarmPingSender)
+            val mqttClient = clientFactory(serverUri, clientId, alarmPingSender)
             mqttClient.setCallback(createCallback(mqttClient))
             client = mqttClient
             pingSender = alarmPingSender
             connectOptions = buildConnectOptions()
             connectedOnce = false
+            alarmsDuringOneAttempt = 0
             running = true
+            // Armed until the first connection, so an attempt that hangs is retried as well.
+            reconnectAlarm.start()
             connectWithInitialRetry()
         } catch (e: Exception) {
             running = false
@@ -264,34 +273,75 @@ class MqttStateManager(
         // One pending retry at most: the retry alarm may have started an attempt meanwhile.
         mainHandler.removeCallbacks(initialRetry)
         mainHandler.postDelayed(initialRetry, delayMs)
-        reconnectAlarm.start()
         Log.i(TAG, "Retrying initial MQTT connection in ${delayMs}ms")
+    }
+
+    /** Called from Paho's thread on a loss, which may race [stop]. */
+    private fun startRetryAlarm() {
+        reconnectAlarm.start()
+        // stop() clears running before it stops the alarm, so this catches a start that came
+        // after it. Left running, the alarm would cancel the next manager's: both share the
+        // client ID, so both install the same PendingIntent.
+        if (!running) reconnectAlarm.stop()
     }
 
     /** Runs on the main thread when the retry alarm fires; the next alarm is already armed. */
     private fun retryFromAlarm() {
         val mqttClient = client
-        if (!running || mqttClient == null) {
+        if (!running || mqttClient == null || mqttClient.isConnected) {
             reconnectAlarm.stop()
             return
         }
-        if (mqttClient.isConnected) {
-            reconnectAlarm.stop()
+        if (startAttempt(mqttClient)) {
+            alarmsDuringOneAttempt = 0
+            Log.i(TAG, "Retrying the MQTT connection on the retry alarm")
+            journal("MQTT retry alarm: reconnecting")
             return
         }
-        Log.i(TAG, "Retrying the MQTT connection on the retry alarm")
-        Diagnostics.record("MQTT retry alarm: reconnecting")
+        alarmsDuringOneAttempt++
+        if (alarmsDuringOneAttempt < STUCK_ATTEMPT_ALARMS) {
+            journal("MQTT retry alarm: attempt in progress")
+            return
+        }
+        // Paho's connect has no deadline for the broker's CONNACK: its connection timeout covers
+        // only the socket, and the keep-alive starts once connected. A broker that accepts TCP
+        // but never answers, as one still starting can, would hold the attempt forever. Dropping
+        // the socket fails the attempt, which also lets Paho's own backoff carry on. It takes up
+        // to about a second, until Paho's receiver wakes from its socket read timeout.
+        alarmsDuringOneAttempt = 0
+        Log.w(TAG, "Abandoning a stuck MQTT connection attempt")
+        journal("MQTT retry alarm: abandoning a stuck connection attempt")
+        try {
+            mqttClient.disconnectForcibly(0L, 0L, false)
+        } catch (e: Exception) {
+            Log.w(TAG, "MQTT attempt could not be abandoned (${failureKind(e)})")
+        }
+        connecting = false
+        if (startAttempt(mqttClient)) journal("MQTT retry alarm: reconnecting")
+    }
+
+    /** Starts a connection attempt now; false when one is already running. */
+    private fun startAttempt(mqttClient: MqttAsyncClient): Boolean {
         if (!connectedOnce) {
+            if (connecting) return false
             mainHandler.removeCallbacks(initialRetry)
             connectWithInitialRetry()
-            return
+            return true
         }
-        try {
+        return try {
             // Attempts at once and restarts Paho's own backoff, whose timer may have stalled.
             mqttClient.reconnect()
+            true
         } catch (e: MqttException) {
-            // Typically an attempt already in progress; the next alarm is armed either way.
-            Log.i(TAG, "MQTT reconnect not started (${failureKind(e)})")
+            when (e.reasonCode.toShort()) {
+                MqttException.REASON_CODE_CONNECT_IN_PROGRESS,
+                MqttException.REASON_CODE_CLIENT_DISCONNECTING -> false
+                else -> {
+                    // Connected meanwhile, or closed by a stop; nothing for the alarm to do.
+                    Log.i(TAG, "MQTT reconnect not started (${failureKind(e)})")
+                    true
+                }
+            }
         }
     }
 
@@ -337,8 +387,9 @@ class MqttStateManager(
             connectedOnce = true
             mainHandler.removeCallbacks(initialRetry)
             reconnectAlarm.stop()
+            alarmsDuringOneAttempt = 0
             Log.i(TAG, "MQTT connected (reconnect=$reconnect)")
-            Diagnostics.record(if (reconnect) "MQTT reconnected" else "MQTT connected")
+            journal(if (reconnect) "MQTT reconnected" else "MQTT connected")
             try {
                 callbackClient.subscribe(
                     arrayOf(topics.command, topics.homeAssistantStatus),
@@ -361,9 +412,9 @@ class MqttStateManager(
             connecting = false
             if (running && client === callbackClient) {
                 Log.w(TAG, "MQTT connection lost (${failureKind(cause)})")
-                Diagnostics.record("MQTT connection lost (${failureKind(cause)})")
+                journal("MQTT connection lost (${failureKind(cause)})")
                 // Paho retries on its own timer; the alarm keeps retrying if that one stalls.
-                reconnectAlarm.start()
+                startRetryAlarm()
             }
         }
 
@@ -510,6 +561,11 @@ class MqttStateManager(
         internal fun keepAliveSeconds(alarmClockWhileDisplayOff: Boolean): Int =
             if (alarmClockWhileDisplayOff) ALARM_CLOCK_KEEP_ALIVE_SECONDS else KEEP_ALIVE_SECONDS
         private const val DISCONNECT_TIMEOUT_MS = 1_000L
+        /**
+         * Two alarms in a row are at least two minutes apart, far longer than an attempt that is
+         * getting anywhere takes.
+         */
+        internal const val STUCK_ATTEMPT_ALARMS = 2
         private const val DISCOVERY_CLEANUP_TIMEOUT_MS = 2_000L
     }
 }

@@ -74,7 +74,9 @@ class AlarmPingSender(
         // or idle throttling turns into another full delay. The slack makes it land after the due
         // time. Elapsed realtime keeps the deadline on the same clock as Paho's keep-alive
         // bookkeeping, immune to wall-clock changes.
-        alarm.arm(SystemClock.elapsedRealtime() + delayInMilliseconds.coerceAtLeast(0L) + PING_SLACK_MS)
+        alarm.arm(
+            SystemClock.elapsedRealtime() + delayInMilliseconds.coerceAtLeast(0L) + PING_SLACK_MS
+        )
     }
 
     private fun sendPing() {

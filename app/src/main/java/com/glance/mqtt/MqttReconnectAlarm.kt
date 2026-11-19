@@ -46,14 +46,14 @@ class MqttReconnectAlarm(
         .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKE_LOCK_TAG)
         .apply { setReferenceCounted(false) }
 
-    /** Guards [active] and [attempt]; Paho's threads start the alarm, the main thread stops it. */
+    /** Guards [active] and [attempt]; both Paho's threads and the main thread start and stop it. */
     private val lock = Any()
     private var active = false
     private var attempt = 0
 
-    val isActive: Boolean get() = synchronized(lock) { active }
+    internal val isActive: Boolean get() = synchronized(lock) { active }
 
-    /** Arms the first retry, unless the alarm is already running; the backoff carries on then. */
+    /** Arms the first retry, unless the alarm is already running; its backoff carries on then. */
     fun start() {
         synchronized(lock) {
             if (active) return
