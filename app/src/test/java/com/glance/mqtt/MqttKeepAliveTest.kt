@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.test.core.app.ApplicationProvider
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient
 import org.eclipse.paho.client.mqttv3.internal.ClientComms
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -28,6 +29,20 @@ class MqttKeepAliveTest {
         assertTrue(latestPing < keepAlive * 1.5)
         // Paho drops the connection itself when nothing was sent for 2x the keep-alive.
         assertTrue(latestPing < keepAlive * 2.0)
+    }
+
+    @Test
+    fun theAlarmClockKeepAliveIsLongerAndStillInsideTheBrokersGrace() {
+        assertEquals(MqttStateManager.KEEP_ALIVE_SECONDS, MqttStateManager.keepAliveSeconds(false))
+        val keepAlive = MqttStateManager.keepAliveSeconds(true)
+        assertEquals(MqttStateManager.ALARM_CLOCK_KEEP_ALIVE_SECONDS, keepAlive)
+        assertTrue(keepAlive > MqttStateManager.KEEP_ALIVE_SECONDS)
+
+        // An alarm clock is not batched, but the display may turn on and leave an ordinary alarm,
+        // which EMUI can batch; that ping must still beat the broker's 1.5x cutoff.
+        val latestPing = keepAlive + MqttStateManager.MAX_ALARM_DELAY_SECONDS +
+            AlarmPingSender.PING_SLACK_MS / 1_000.0
+        assertTrue(latestPing < keepAlive * 1.5)
     }
 
     @Test

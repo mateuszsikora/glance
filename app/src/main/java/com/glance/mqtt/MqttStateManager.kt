@@ -38,7 +38,8 @@ class MqttStateManager(
     private val context: Context,
     private val config: AppConfig,
     private val stateProvider: () -> MqttReportedState,
-    private val commandHandler: (MqttLightCommand) -> Unit
+    private val commandHandler: (MqttLightCommand) -> Unit,
+    private val keepAliveSettings: MqttKeepAliveSettings = MqttKeepAliveSettings(context)
 ) {
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -256,7 +257,8 @@ class MqttStateManager(
             isAutomaticReconnect = true
             isCleanSession = true
             connectionTimeout = 10
-            keepAliveInterval = KEEP_ALIVE_SECONDS
+            // Read on every connection: a settings save reconnects, so a changed switch applies.
+            keepAliveInterval = keepAliveSeconds(keepAliveSettings.alarmClockWhileDisplayOff)
             maxInflight = 20
             if (config.mqttUsername.isNotBlank()) {
                 userName = config.mqttUsername
@@ -441,6 +443,16 @@ class MqttStateManager(
         // session dropped and reconnected every ~92 s all night.
         internal const val KEEP_ALIVE_SECONDS = 900
         internal const val MAX_ALARM_DELAY_SECONDS = 300
+
+        /**
+         * With the keep-alive sent as an alarm clock while the display is off; see
+         * [MqttKeepAliveSettings]. Alarm clocks arrive on time, so no batching delay needs
+         * covering, and the longer period halved the kernel memory the test tablet kept overnight.
+         */
+        internal const val ALARM_CLOCK_KEEP_ALIVE_SECONDS = 1800
+
+        internal fun keepAliveSeconds(alarmClockWhileDisplayOff: Boolean): Int =
+            if (alarmClockWhileDisplayOff) ALARM_CLOCK_KEEP_ALIVE_SECONDS else KEEP_ALIVE_SECONDS
         private const val DISCONNECT_TIMEOUT_MS = 1_000L
         private const val DISCOVERY_CLEANUP_TIMEOUT_MS = 2_000L
     }

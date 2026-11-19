@@ -1144,11 +1144,12 @@ internal class RemoteConfigHttpHandler(
         ) + "<p class=\"hint\">On battery with the display off, Huawei's EMUI freezes Glance within " +
             "seconds and holds its ordinary alarms back until the display wakes, so the broker drops " +
             "the session and Home Assistant shows the tablet unavailable overnight. Alarm clocks still " +
-            "wake it. With this on, Android reports the keep-alive as the next alarm, and while the " +
-            "display is off the tablet does not enter deep Doze, so other apps also run without its " +
-            "limits. On a Huawei test tablet each of these wake-ups also left about 1 MB of kernel " +
-            "memory that only a reboot releases, about 25 MB a night, so turn on the scheduled tablet " +
-            "reboot in the Memory section as well. On by default on Huawei and Honor tablets only.</p>"
+            "wake it. With this on, the keep-alive is an alarm clock while the display is off and " +
+            "30 minutes long, so the broker reports the tablet gone up to about 45 minutes after it " +
+            "drops off. Android reports the keep-alive as the next alarm, the tablet does not enter " +
+            "deep Doze while the display is off, and on a Huawei test tablet the kernel kept 5-11 MB " +
+            "of memory a night that only a reboot releases, so turn on the scheduled tablet reboot in " +
+            "the Memory section as well. On by default on Huawei and Honor tablets only.</p>"
     }
 
     private fun checkbox(

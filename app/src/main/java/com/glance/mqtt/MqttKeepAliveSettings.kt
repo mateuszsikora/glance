@@ -13,14 +13,17 @@ import android.os.Build
  * still wake Glance on time. On a 3 GB Huawei tablet with Android 8 this kept the session up
  * through a whole night on battery, with one ping every 15 minutes, all on time.
  *
+ * With the switch on, the session's keep-alive is also 30 minutes instead of 15
+ * ([MqttStateManager.keepAliveSeconds]), on time without batching.
+ *
  * An alarm clock is not what the API is for. Android reports it as the next alarm, and it keeps
  * the device out of deep Doze while the display is off: Doze does not go idle while an alarm that
  * wakes the device from idle is less than an hour away, so every app runs without its limits. Other
  * vendors deliver the ordinary alarm through Doze, so the switch defaults on only for Huawei and
- * Honor devices. On the same tablet each wake-up from deep sleep with the display off on battery
- * left about 1 MB of unreclaimable kernel memory, about 25 MB a night, which only a reboot
- * releases; see [com.glance.diagnostics.KernelMemoryTrend]. With this on, the owner should also
- * schedule tablet reboots.
+ * Honor devices. On the test tablet the kernel's unreclaimable memory also grew on the nights the
+ * keep-alive woke Glance, while the processor stayed awake: 23-28 MB a night with 15 minutes, 5-11
+ * MB with 30. Only a reboot releases it ([com.glance.diagnostics.KernelMemoryTrend]), so the owner
+ * should also schedule tablet reboots.
  *
  * Deliberately kept out of [com.glance.config.AppConfig], like
  * [com.glance.diagnostics.DiagnosticSettings]: recovery builds require the configuration readers
