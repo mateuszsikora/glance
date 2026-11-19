@@ -64,7 +64,12 @@ class MqttStateManager(
     /** Whether a session was ever up; from then on Paho owns reconnecting. */
     @Volatile private var connectedOnce = false
     private val initialRetry = Runnable { connectWithInitialRetry() }
-    /** Retry alarms in a row that found an attempt still running; reset once connected. */
+    /**
+     * Retry alarms in a row that found an attempt still running; reset when an attempt ends.
+     * After the first connection Paho's own attempts end unseen, so two of them, each caught
+     * running by an alarm, can pass for one stuck attempt; with Paho's timer up to 128 s apart
+     * and an attempt failing within its 10 s timeout that is rare, and it costs one attempt.
+     */
     @Volatile private var alarmsDuringOneAttempt = 0
 
     /**
@@ -239,10 +244,12 @@ class MqttStateManager(
         publishBatteryState()
     }
 
-    private fun connectWithInitialRetry() {
-        if (!running || connecting || client?.isConnected == true) return
-        val mqttClient = client ?: return
-        val options = connectOptions ?: return
+    /** Starts the initial connect; false while an attempt is already running. */
+    private fun connectWithInitialRetry(): Boolean {
+        if (!running || client?.isConnected == true) return true
+        if (connecting) return false
+        val mqttClient = client ?: return true
+        val options = connectOptions ?: return true
 
         connecting = true
         try {
@@ -254,6 +261,8 @@ class MqttStateManager(
 
                 override fun onFailure(asyncActionToken: IMqttToken?, exception: Throwable?) {
                     connecting = false
+                    // The attempt ended, so the next alarm that finds one running found another.
+                    alarmsDuringOneAttempt = 0
                     Log.w(TAG, "Initial MQTT connection failed (${failureKind(exception)})")
                     scheduleInitialReconnect()
                 }
@@ -263,7 +272,11 @@ class MqttStateManager(
             connecting = false
             Log.w(TAG, "MQTT connect attempt failed synchronously (${failureKind(e)})")
             scheduleInitialReconnect()
+            // Paho has an attempt of its own running, which the retry alarm must count as one.
+            return !(e is MqttException &&
+                e.reasonCode == MqttException.REASON_CODE_CONNECT_IN_PROGRESS.toInt())
         }
+        return true
     }
 
     private fun scheduleInitialReconnect() {
@@ -325,8 +338,7 @@ class MqttStateManager(
         if (!connectedOnce) {
             if (connecting) return false
             mainHandler.removeCallbacks(initialRetry)
-            connectWithInitialRetry()
-            return true
+            return connectWithInitialRetry()
         }
         return try {
             // Attempts at once and restarts Paho's own backoff, whose timer may have stalled.
@@ -355,6 +367,10 @@ class MqttStateManager(
             // retry loop above covers failures before the first successful connection. Both run
             // only while the processor is awake; the retry alarm backs them up.
             isAutomaticReconnect = true
+            // Without a version Paho follows a failed 3.1.1 attempt with a 3.1 one of its own,
+            // unseen by the listener above; the retry alarm could then never tell an attempt
+            // still running from a new one. Mosquitto and other current brokers speak 3.1.1.
+            mqttVersion = MqttConnectOptions.MQTT_VERSION_3_1_1
             isCleanSession = true
             connectionTimeout = 10
             // Read on every connection: a settings save reconnects, so a changed switch applies.

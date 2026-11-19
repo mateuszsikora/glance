@@ -76,14 +76,14 @@ class MqttStateManagerRetryTest {
 
     @Test
     fun aFailedFirstAttemptIsRetriedOnTheAlarm() {
-        fake.connects.last().onFailure(null, MqttException(MqttException.REASON_CODE_SERVER_CONNECT_ERROR.toInt()))
+        fake.connectFails()
 
         fireRetryAlarm()
 
         assertEquals(2, fake.connects.size)
         assertEquals(listOf("MQTT retry alarm: reconnecting"), journal)
         // The alarm replaced the pending Handler retry instead of running beside it.
-        fake.connects.last().onFailure(null, MqttException(MqttException.REASON_CODE_SERVER_CONNECT_ERROR.toInt()))
+        fake.connectFails()
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1_500))
         assertEquals(2, fake.connects.size)
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1_000))
@@ -144,12 +144,53 @@ class MqttStateManagerRetryTest {
     @Test
     fun anAttemptThatRunsOnlyOnceAtAnAlarmIsLeftAlone() {
         fireRetryAlarm()
-        fake.connects.last().onFailure(null, MqttException(MqttException.REASON_CODE_SERVER_CONNECT_ERROR.toInt()))
+        fake.connectFails()
         fireRetryAlarm()
         // A new attempt, so the count of alarms that found one running starts again.
         fireRetryAlarm()
 
         assertEquals(0, fake.forcedDisconnects)
+    }
+
+    @Test
+    fun alarmsThatFindDifferentAttemptsRunningAbandonNone() {
+        fireRetryAlarm()
+        // That attempt fails, and the Handler starts the next one before the following alarm.
+        fake.connectFails()
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(1))
+        assertEquals(2, fake.connects.size)
+
+        fireRetryAlarm()
+
+        assertEquals(0, fake.forcedDisconnects)
+        assertEquals(
+            listOf("MQTT retry alarm: attempt in progress", "MQTT retry alarm: attempt in progress"),
+            journal
+        )
+    }
+
+    @Test
+    fun anAttemptPahoRunsOfItsOwnCountsAsRunning() {
+        fake.connectFails()
+        fake.connectFailure = MqttException(MqttException.REASON_CODE_CONNECT_IN_PROGRESS.toInt())
+
+        fireRetryAlarm()
+        fireRetryAlarm()
+
+        assertEquals(1, fake.forcedDisconnects)
+        assertEquals(
+            listOf(
+                "MQTT retry alarm: attempt in progress",
+                "MQTT retry alarm: abandoning a stuck connection attempt",
+                "MQTT retry alarm: reconnecting"
+            ),
+            journal
+        )
+    }
+
+    @Test
+    fun theConnectionAsksForMqtt311SoPahoAddsNoAttemptOfItsOwn() {
+        assertEquals(MqttConnectOptions.MQTT_VERSION_3_1_1, manager.buildConnectOptions().mqttVersion)
     }
 
     @Test
@@ -177,16 +218,25 @@ class MqttStateManagerRetryTest {
     ) : MqttAsyncClient(serverUri, clientId, MemoryPersistence(), pingSender, null, ElapsedRealtimeTimer) {
 
         val connects = mutableListOf<IMqttActionListener>()
+        /** The initial attempt Paho would still be running; its listener is told once it ends. */
+        private var inFlight: IMqttActionListener? = null
+        /** Thrown by connect(), as when Paho runs an attempt the manager did not start. */
+        var connectFailure: MqttException? = null
         var reconnects = 0
         var forcedDisconnects = 0
         var reconnectFailure: MqttException? = null
         private var connected = false
         private var callback: MqttCallbackExtended? = null
 
+        fun connectFails() {
+            inFlight?.also { inFlight = null }
+                ?.onFailure(null, MqttException(MqttException.REASON_CODE_SERVER_CONNECT_ERROR.toInt()))
+        }
+
         fun connectionSucceeds(reconnect: Boolean) {
             connected = true
             reconnectFailure = null
-            if (!reconnect) connects.last().onSuccess(null)
+            if (!reconnect) inFlight?.also { inFlight = null }?.onSuccess(null)
             callback?.connectComplete(reconnect, "tcp://broker.example.invalid:1883")
             shadowOf(Looper.getMainLooper()).idle()
         }
@@ -205,7 +255,9 @@ class MqttStateManagerRetryTest {
             userContext: Any?,
             callback: IMqttActionListener
         ): IMqttToken? {
+            connectFailure?.let { throw it }
             connects += callback
+            inFlight = callback
             return null
         }
 
@@ -221,6 +273,10 @@ class MqttStateManagerRetryTest {
         ) {
             forcedDisconnects++
             reconnectFailure = null
+            connectFailure = null
+            // Paho fails the pending connect on the calling thread, its callback thread stopped.
+            inFlight?.also { inFlight = null }
+                ?.onFailure(null, MqttException(MqttException.REASON_CODE_CLIENT_DISCONNECTING.toInt()))
         }
 
         override fun isConnected(): Boolean = connected
