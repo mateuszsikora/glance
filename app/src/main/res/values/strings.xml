@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">HA Kiosk</string>
+    <string name="app_name">Glance</string>
     <string name="kiosk_notification_channel">Kiosk Service</string>
     <string name="watchdog_notification_channel">Watchdog Service</string>
     <string name="notification_kiosk_running">Kiosk mode active</string>
