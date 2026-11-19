@@ -156,6 +156,24 @@ class MqttReconnectAlarmTest {
     }
 
     @Test
+    fun aStoppedAlarmStoppedAgainLeavesTheNextManagersAlarmAlone() {
+        val stale = MqttReconnectAlarm(context, "glance_tablet", { false }) {}
+        stale.start()
+        stale.stop()
+        val next = MqttReconnectAlarm(context, "glance_tablet", { false }) {}
+        next.start()
+
+        // A late connectComplete of the stopped manager: the same client ID means the same
+        // PendingIntent, so a cancel here would take the next manager's alarm with it.
+        stale.stop()
+
+        assertEquals(1, shadowAlarmManager.scheduledAlarms.size)
+        assertTrue(next.isActive)
+        next.stop()
+        assertTrue(shadowAlarmManager.scheduledAlarms.isEmpty())
+    }
+
+    @Test
     fun theRetryAndTheKeepAliveAreSeparateAlarms() {
         val ping = AlarmPingSender(context, "glance_tablet", alarmClockWhileDisplayOff = { false })
         val alarm = MqttReconnectAlarm(context, "glance_tablet", { false }) {}

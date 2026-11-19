@@ -64,12 +64,20 @@ class MqttReconnectAlarm(
         }
     }
 
-    /** Cancels the retries, as when the session is up again or MQTT stops. */
+    /**
+     * Cancels the retries, as when the session is up again or MQTT stops.
+     *
+     * Does nothing to the alarm while none is running. A stopped manager's alarm stays stopped,
+     * but a late Paho callback of that manager may still stop it after the next manager armed
+     * its own; both share the client ID, so cancelling would cancel the next manager's alarm.
+     */
     fun stop() {
         synchronized(lock) {
-            active = false
-            attempt = 0
-            alarm.release()
+            if (active) {
+                active = false
+                attempt = 0
+                alarm.release()
+            }
         }
         if (wakeLock.isHeld) runCatching { wakeLock.release() }
     }
