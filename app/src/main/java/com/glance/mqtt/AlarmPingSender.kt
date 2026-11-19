@@ -1,17 +1,9 @@
 package com.glance.mqtt
 
-import android.app.AlarmManager
-import android.app.PendingIntent
-import android.content.BroadcastReceiver
 import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
-import android.os.Build
 import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
-import androidx.core.content.ContextCompat
-import com.glance.MainActivity
 import com.glance.diagnostics.Diagnostics
 import org.eclipse.paho.client.mqttv3.IMqttActionListener
 import org.eclipse.paho.client.mqttv3.IMqttToken
@@ -19,7 +11,7 @@ import org.eclipse.paho.client.mqttv3.MqttPingSender
 import org.eclipse.paho.client.mqttv3.internal.ClientComms
 
 /**
- * Keep-alive scheduler backed by [AlarmManager].
+ * Keep-alive scheduler backed by [android.app.AlarmManager].
  *
  * Paho's default sender drives keep-alive pings from a [java.util.Timer], which stops running once
  * the tablet suspends with the screen off. The broker then misses the keep-alive, publishes the
@@ -27,38 +19,32 @@ import org.eclipse.paho.client.mqttv3.internal.ClientComms
  * device. Wakeup alarms fire through suspend, so the session survives dark hours.
  *
  * Where vendor app hibernation holds those alarms back while the display is off, the keep-alive is
- * an alarm clock instead for as long as the display stays off; see [MqttKeepAliveSettings].
+ * an alarm clock instead for as long as the display stays off; see [MqttKeepAliveSettings] and
+ * [DisplayAwareAlarm].
  */
 class AlarmPingSender(
     appContext: Context,
     clientKey: String,
-    private val alarmClockWhileDisplayOff: () -> Boolean =
+    alarmClockWhileDisplayOff: () -> Boolean =
         MqttKeepAliveSettings(appContext).let { settings -> { settings.alarmClockWhileDisplayOff } },
     private val journal: (String) -> Unit = { Diagnostics.record(it) }
 ) : MqttPingSender {
 
-    // The receiver outlives individual service callbacks, so it is bound to the application.
     private val context = appContext.applicationContext
-    private val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
     private val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
     private val clientId = MqttContract.sanitizeId(clientKey)
 
     internal val action = "$ACTION_PREFIX.$clientId"
 
+    private val alarm = DisplayAwareAlarm(
+        context,
+        action,
+        clientId.hashCode(),
+        alarmClockWhileDisplayOff,
+        onFire = ::sendPing
+    )
+
     private var comms: ClientComms? = null
-    private var receiver: BroadcastReceiver? = null
-    private var displayReceiver: BroadcastReceiver? = null
-
-    /**
-     * Guards [dueAtElapsedMs] and the alarm installed for it. Paho arms and cancels from its own
-     * threads while the display receiver re-arms on the main thread; both install the same
-     * PendingIntent, so without it an ordinary alarm chosen just before the display went off could
-     * replace the alarm clock, or a re-arm could revive an alarm that was just cancelled.
-     */
-    private val lock = Any()
-
-    /** Elapsed realtime the armed alarm is due at; 0 while none is armed. */
-    private var dueAtElapsedMs = 0L
 
     /** Test seam for the keep-alive round trip owned by Paho's internals. */
     internal var pingHandler: (IMqttActionListener) -> IMqttToken? = { listener ->
@@ -73,49 +59,12 @@ class AlarmPingSender(
     }
 
     override fun start() {
-        if (receiver == null) {
-            val pingReceiver = object : BroadcastReceiver() {
-                override fun onReceive(context: Context?, intent: Intent?) = sendPing()
-            }
-            ContextCompat.registerReceiver(
-                context,
-                pingReceiver,
-                IntentFilter(action),
-                ContextCompat.RECEIVER_NOT_EXPORTED
-            )
-            receiver = pingReceiver
-        }
-        if (displayReceiver == null) {
-            // The alarm armed while the display was on must become an alarm clock when it goes
-            // off, or a hibernating vendor holds it back and no later ping is ever armed. An alarm
-            // clock runs on the wall clock, so a time change moves it to the deadline again.
-            val rearmReceiver = object : BroadcastReceiver() {
-                override fun onReceive(context: Context?, intent: Intent?) {
-                    synchronized(lock) { dueAtElapsedMs.takeIf { it > 0L }?.let(::arm) }
-                }
-            }
-            context.registerReceiver(
-                rearmReceiver,
-                IntentFilter().apply {
-                    addAction(Intent.ACTION_SCREEN_OFF)
-                    addAction(Intent.ACTION_SCREEN_ON)
-                    addAction(Intent.ACTION_TIME_CHANGED)
-                }
-            )
-            displayReceiver = rearmReceiver
-        }
+        alarm.register()
         schedule(comms?.keepAlive ?: DEFAULT_KEEP_ALIVE_MS)
     }
 
     override fun stop() {
-        synchronized(lock) {
-            alarmManager.cancel(pendingIntent())
-            dueAtElapsedMs = 0L
-        }
-        receiver?.let { runCatching { context.unregisterReceiver(it) } }
-        receiver = null
-        displayReceiver?.let { runCatching { context.unregisterReceiver(it) } }
-        displayReceiver = null
+        alarm.release()
     }
 
     override fun schedule(delayInMilliseconds: Long) {
@@ -125,44 +74,7 @@ class AlarmPingSender(
         // or idle throttling turns into another full delay. The slack makes it land after the due
         // time. Elapsed realtime keeps the deadline on the same clock as Paho's keep-alive
         // bookkeeping, immune to wall-clock changes.
-        arm(SystemClock.elapsedRealtime() + delayInMilliseconds.coerceAtLeast(0L) + PING_SLACK_MS)
-    }
-
-    private fun arm(triggerAtMs: Long) {
-        // Read before taking the lock where possible, since the first read may wait for the
-        // preferences file to load. The display receiver already holds it, on the main thread.
-        val alarmClockAllowed = alarmClockWhileDisplayOff()
-        synchronized(lock) {
-            dueAtElapsedMs = triggerAtMs
-            val canScheduleExact = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
-                alarmManager.canScheduleExactAlarms()
-
-            try {
-                if (canScheduleExact && !powerManager.isInteractive && alarmClockAllowed) {
-                    // Alarm clocks run on the wall clock; the deadline stays on elapsed realtime.
-                    val wallClockMs = System.currentTimeMillis() +
-                        (triggerAtMs - SystemClock.elapsedRealtime()).coerceAtLeast(0L)
-                    alarmManager.setAlarmClock(
-                        AlarmManager.AlarmClockInfo(wallClockMs, dashboardIntent()),
-                        pendingIntent()
-                    )
-                } else if (canScheduleExact) {
-                    alarmManager.setExactAndAllowWhileIdle(
-                        AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                        triggerAtMs,
-                        pendingIntent()
-                    )
-                } else {
-                    alarmManager.setAndAllowWhileIdle(
-                        AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                        triggerAtMs,
-                        pendingIntent()
-                    )
-                }
-            } catch (e: SecurityException) {
-                Log.e(TAG, "Unable to schedule the MQTT keep-alive alarm", e)
-            }
-        }
+        alarm.arm(SystemClock.elapsedRealtime() + delayInMilliseconds.coerceAtLeast(0L) + PING_SLACK_MS)
     }
 
     private fun sendPing() {
@@ -201,9 +113,7 @@ class AlarmPingSender(
      * late tells why Home Assistant showed the tablet unavailable.
      */
     private fun journalLateness() {
-        val due = synchronized(lock) {
-            dueAtElapsedMs.also { dueAtElapsedMs = 0L }
-        }
+        val due = alarm.takeDue()
         val keepAlive = keepAliveMs()
         if (due <= 0L || keepAlive <= 0L) return
         val lateMs = SystemClock.elapsedRealtime() - due
@@ -212,27 +122,9 @@ class AlarmPingSender(
         }
     }
 
-    private fun dashboardIntent(): PendingIntent = PendingIntent.getActivity(
-        context,
-        REQUEST_CODE_SHOW_DASHBOARD,
-        Intent(context, MainActivity::class.java),
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-    )
-
-    private fun pendingIntent(): PendingIntent {
-        return PendingIntent.getBroadcast(
-            context,
-            clientId.hashCode(),
-            Intent(action).setPackage(context.packageName),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-    }
-
     companion object {
         private const val TAG = "AlarmPingSender"
         private const val ACTION_PREFIX = "com.glance.action.MQTT_PING"
-        /** Shown when someone opens Glance's next alarm; distinct from the schedule's. */
-        private const val REQUEST_CODE_SHOW_DASHBOARD = 2005
         private const val WAKE_LOCK_TAG = "glance:mqtt_keep_alive"
         private const val PING_TIMEOUT_MS = 10_000L
         private const val DEFAULT_KEEP_ALIVE_MS = 60_000L
