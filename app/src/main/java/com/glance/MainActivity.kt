@@ -238,8 +238,9 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
-        // onCreate has already cleared it, so this is a dashboard that outlived "Exit Kiosk
-        // Mode" and has been brought back to the front: as deliberate a return as a launch.
+        // onCreate clears isKioskSuspended, so if it is still set here, this dashboard outlived
+        // "Exit Kiosk Mode" (or an exit that failed halfway) and has been brought back to the
+        // front: as deliberate a return as a launch.
         if (GlanceApp.instance.appConfig.isKioskSuspended) resumeKioskMode()
         // A stopped Activity lays nothing out, so the gate waits for this.
         if (coldStart != null) scheduleColdStartCheck(0L, measureMemory = true)
