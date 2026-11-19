@@ -1,5 +1,6 @@
 package com.glance.settings
 
+import android.app.ActivityManager
 import android.app.AlarmManager
 import android.app.TimePickerDialog
 import android.content.Intent
@@ -767,8 +768,17 @@ class SettingsActivity : AppCompatActivity() {
                     stopService(Intent(this, WatchdogService::class.java))
                     stopService(Intent(this, KioskService::class.java))
                     Toast.makeText(this, "Kiosk mode exited", Toast.LENGTH_SHORT).show()
-                    startActivity(Intent(AndroidSettings.ACTION_SETTINGS))
-                    finishAndRemoveTask()
+                    // A task of its own, so removing Glance's task below cannot take it along.
+                    startActivity(
+                        Intent(AndroidSettings.ACTION_SETTINGS)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                    // finishAndRemoveTask() would end only this Activity, which is not the root
+                    // of the task. The dashboard would stay alive behind it, and returning to it
+                    // would skip MainActivity.onCreate, the path that resumes kiosk mode.
+                    getSystemService(ActivityManager::class.java).appTasks.forEach {
+                        it.finishAndRemoveTask()
+                    }
                 } catch (e: Exception) {
                     Toast.makeText(this, "Failed: ${e.message}", Toast.LENGTH_LONG).show()
                 }

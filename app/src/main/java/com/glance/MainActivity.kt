@@ -238,6 +238,9 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        // onCreate has already cleared it, so this is a dashboard that outlived "Exit Kiosk
+        // Mode" and has been brought back to the front: as deliberate a return as a launch.
+        if (GlanceApp.instance.appConfig.isKioskSuspended) resumeKioskMode()
         // A stopped Activity lays nothing out, so the gate waits for this.
         if (coldStart != null) scheduleColdStartCheck(0L, measureMemory = true)
         if (::brightnessController.isInitialized) {
@@ -277,6 +280,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     // --- Kiosk / LockTask mode ---
+
+    private fun resumeKioskMode() {
+        Log.i(TAG, "Dashboard returned to the front while kiosk is suspended; resuming kiosk mode")
+        Diagnostics.record("Kiosk mode resumed by returning to the dashboard")
+        GlanceApp.instance.appConfig.isKioskSuspended = false
+        setupKioskMode()
+        // The services re-arm the screen schedule alarms that "Exit Kiosk Mode" cancelled.
+        startServices()
+    }
 
     private fun setupKioskMode() {
         if (LockTaskHelper.isDeviceOwner(this)) {
