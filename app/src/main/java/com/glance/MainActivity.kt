@@ -287,8 +287,11 @@ class MainActivity : AppCompatActivity() {
         Diagnostics.record("Kiosk mode resumed by returning to the dashboard")
         GlanceApp.instance.appConfig.isKioskSuspended = false
         setupKioskMode()
-        // The services re-arm the screen schedule alarms that "Exit Kiosk Mode" cancelled.
-        startServices()
+        // "Exit Kiosk Mode" cancels the screen schedule alarms before it stops the services, so
+        // an exit that failed in between leaves KioskService running without them. A plain start
+        // would find it initialized and change nothing; the reload re-arms them. A stopped
+        // service ignores the reload and re-arms them while it initializes.
+        startServices(kioskAction = KioskService.ACTION_RELOAD_CONFIG)
     }
 
     private fun setupKioskMode() {
@@ -773,13 +776,13 @@ class MainActivity : AppCompatActivity() {
 
     // --- Services ---
 
-    private fun startServices() {
+    /** @param kioskAction sent to KioskService only; WatchdogService always gets a plain start. */
+    private fun startServices(kioskAction: String? = null) {
         val token = coldStart?.work?.token ?: 0L
         listOf(KioskService::class.java, WatchdogService::class.java).forEach { service ->
-            ServiceStarter.startFromForeground(
-                this,
-                Intent(this, service).putExtra(LaunchWork.EXTRA_LAUNCH_TOKEN, token)
-            )
+            val intent = Intent(this, service).putExtra(LaunchWork.EXTRA_LAUNCH_TOKEN, token)
+            if (service == KioskService::class.java) intent.action = kioskAction
+            ServiceStarter.startFromForeground(this, intent)
         }
     }
 
