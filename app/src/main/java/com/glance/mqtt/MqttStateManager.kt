@@ -64,6 +64,8 @@ class MqttStateManager(
     /** Whether a session was ever up; from then on Paho owns reconnecting. */
     @Volatile private var connectedOnce = false
     private val initialRetry = Runnable { connectWithInitialRetry() }
+    /** Orders [stop] clearing [running] with the loss path starting the retry alarm. */
+    private val retryAlarmLock = Any()
     /**
      * Retry alarms in a row that found an attempt still running; reset when an attempt ends.
      * After the first connection Paho's own attempts end unseen, so two of them, each caught
@@ -122,7 +124,7 @@ class MqttStateManager(
     }
 
     fun stop() {
-        running = false
+        synchronized(retryAlarmLock) { running = false }
         connecting = false
         mainHandler.removeCallbacksAndMessages(null)
 
@@ -291,11 +293,13 @@ class MqttStateManager(
 
     /** Called from Paho's thread on a loss, which may race [stop]. */
     private fun startRetryAlarm() {
-        reconnectAlarm.start()
-        // stop() clears running before it stops the alarm, so this catches a start that came
-        // after it. Left running, the alarm would cancel the next manager's: both share the
-        // client ID, so both install the same PendingIntent.
-        if (!running) reconnectAlarm.stop()
+        // Under the lock stop() clears running with, so no alarm starts once stop() has begun;
+        // one started before is cancelled by stop() itself. An alarm started after it would
+        // outlive this manager and cancel the next one's: both share the client ID, so both
+        // install the same PendingIntent.
+        synchronized(retryAlarmLock) {
+            if (running) reconnectAlarm.start()
+        }
     }
 
     /** Runs on the main thread when the retry alarm fires; the next alarm is already armed. */
