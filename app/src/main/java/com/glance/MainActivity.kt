@@ -238,6 +238,10 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        // onCreate clears isKioskSuspended, so if it is still set here, this dashboard outlived
+        // "Exit Kiosk Mode" (or an exit that failed halfway) and has been brought back to the
+        // front: as deliberate a return as a launch.
+        if (GlanceApp.instance.appConfig.isKioskSuspended) resumeKioskMode()
         // A stopped Activity lays nothing out, so the gate waits for this.
         if (coldStart != null) scheduleColdStartCheck(0L, measureMemory = true)
         if (::brightnessController.isInitialized) {
@@ -277,6 +281,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     // --- Kiosk / LockTask mode ---
+
+    private fun resumeKioskMode() {
+        Log.i(TAG, "Dashboard returned to the front while kiosk is suspended; resuming kiosk mode")
+        Diagnostics.record("Kiosk mode resumed by returning to the dashboard")
+        GlanceApp.instance.appConfig.isKioskSuspended = false
+        setupKioskMode()
+        // "Exit Kiosk Mode" cancels the screen schedule alarms before it stops the services, so
+        // an exit that failed in between leaves KioskService running without them. A plain start
+        // would find it initialized and change nothing; the reload re-arms them. A stopped
+        // service ignores the reload and re-arms them while it initializes.
+        startServices(kioskAction = KioskService.ACTION_RELOAD_CONFIG)
+    }
 
     private fun setupKioskMode() {
         if (LockTaskHelper.isDeviceOwner(this)) {
@@ -760,13 +776,13 @@ class MainActivity : AppCompatActivity() {
 
     // --- Services ---
 
-    private fun startServices() {
+    /** @param kioskAction sent to KioskService only; WatchdogService always gets a plain start. */
+    private fun startServices(kioskAction: String? = null) {
         val token = coldStart?.work?.token ?: 0L
         listOf(KioskService::class.java, WatchdogService::class.java).forEach { service ->
-            ServiceStarter.startFromForeground(
-                this,
-                Intent(this, service).putExtra(LaunchWork.EXTRA_LAUNCH_TOKEN, token)
-            )
+            val intent = Intent(this, service).putExtra(LaunchWork.EXTRA_LAUNCH_TOKEN, token)
+            if (service == KioskService::class.java) intent.action = kioskAction
+            ServiceStarter.startFromForeground(this, intent)
         }
     }
 

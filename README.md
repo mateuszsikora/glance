@@ -143,7 +143,7 @@ LockTask kiosk mode and hardware screen-off require Glance to be Device Owner. T
 adb shell dpm set-device-owner com.glance/.AdminReceiver
 ```
 
-`Exit Kiosk Mode` in the protected settings screen suspends automatic relaunch, cancels screen alarms, clears temporary kiosk policies, and stops the foreground services. Launch Glance again, or select it as the Home app, to resume kiosk mode deliberately.
+`Exit Kiosk Mode` in the protected settings screen suspends automatic relaunch, cancels screen alarms, clears temporary kiosk policies, and stops the foreground services. It also closes the dashboard, so any way back into Glance resumes kiosk mode: launch Glance again, or select it as the Home app.
 
 ### Forks and application identity
 
