@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Security fixes are made on the `master` branch and included in the next release. Before the first release, only `master` is supported. Afterwards, support covers `master` and the latest release; older APKs should be upgraded before reporting an issue that may already be fixed.
+Security fixes are made on the `main` branch and included in the next release. Support covers `main` and the latest release; older APKs should be upgraded before reporting an issue that may already be fixed.
 
 ## Reporting a vulnerability
 

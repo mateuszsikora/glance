@@ -9,7 +9,7 @@ on:
         type: string
   pull_request:
   push:
-    branches: [master]
+    branches: [main]
     tags: ["v*"]
 
 permissions:
