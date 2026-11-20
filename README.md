@@ -1,12 +1,12 @@
 # Glance
 
-[![Android CI](https://github.com/mateuszsikora/glance/actions/workflows/android.yml/badge.svg?branch=master)](https://github.com/mateuszsikora/glance/actions/workflows/android.yml)
+[![Android CI](https://github.com/mateuszsikora/glance/actions/workflows/android.yml/badge.svg?branch=main)](https://github.com/mateuszsikora/glance/actions/workflows/android.yml)
 
 Give an old Android tablet a second life as a dedicated Home Assistant or web dashboard.
 
 Glance is a lightweight, self-hosted Android kiosk for an always-on, wall-mounted display. It supports multiple dashboard views, browser-based configuration from another device, Device Owner kiosk mode, automatic brightness, scheduled screen control, a watchdog, and Home Assistant MQTT discovery.
 
-The project targets Android 14 (API 34) and supports Android 8.0 (API 26) and newer. Development and security fixes track the latest `master` branch and the most recent release.
+The project targets Android 14 (API 34) and supports Android 8.0 (API 26) and newer. Development and security fixes track the latest `main` branch and the most recent release.
 
 > [!WARNING]
 > Device Owner provisioning can require a factory reset. Android only accepts an update to an installed Device Owner when the APK is signed with the same certificate. Back up your signing key before provisioning and read the signing section below.
